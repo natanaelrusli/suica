@@ -8,6 +8,10 @@ describe("clean", () => {
     expect(clean("a\nb\u0007c")).toBe("a b c");
   });
 
+  it("removes invisible formatting characters used to spoof names (bidi overrides, zero-width)", () => {
+    expect(clean("a‮b​c")).toBe("a b c");
+  });
+
   it("removes leading dashes so the text can never be read as a command-line flag", () => {
     expect(clean("--open evil")).toBe("open evil");
   });

@@ -81,9 +81,29 @@ describe("activity on the Owner's MRs (flow D)", () => {
     expect(detectEvents(current, tracked("APPROVED"), options)).toEqual([]);
   });
 
-  it("does not emit for a Reviewer who was just added", () => {
-    const current = snapshot({ authored: [base({ reviewers: [reviewer("carol", "APPROVED")] })] });
+  it("does not emit for a Reviewer who was just added and has not reviewed yet", () => {
+    const current = snapshot({
+      authored: [
+        base({ reviewers: [reviewer("bob", "UNREVIEWED"), reviewer("carol", "UNREVIEWED")] }),
+      ],
+    });
     expect(detectEvents(current, tracked(), options)).toEqual([]);
+  });
+
+  it("emits for a Reviewer who was added and reviewed between two polls", () => {
+    const current = snapshot({
+      authored: [
+        base({ reviewers: [reviewer("bob", "UNREVIEWED"), reviewer("carol", "APPROVED")] }),
+      ],
+    });
+    expect(detectEvents(current, tracked(), options)).toEqual([
+      {
+        kind: "reviewer-state",
+        mr: current.authored[0],
+        reviewer: person("carol"),
+        to: "APPROVED",
+      },
+    ]);
   });
 
   it("emits for new comments from other people", () => {

@@ -69,8 +69,11 @@ function authoredEvents(
     if (mr.draft || !previous.trackedAuthored.has(mr.key)) continue;
     for (const reviewer of mr.reviewers) {
       if (reviewer.username === snapshot.me.username) continue;
-      const before = previous.reviewerStates.get(reviewerKey(mr.key, reviewer.username));
-      if (before !== undefined && before !== reviewer.state && reviewer.state !== UNREVIEWED) {
+      // A Reviewer added since the last poll starts out UNREVIEWED, so a review given between two
+      // polls still shows up as a change.
+      const before =
+        previous.reviewerStates.get(reviewerKey(mr.key, reviewer.username)) ?? UNREVIEWED;
+      if (before !== reviewer.state && reviewer.state !== UNREVIEWED) {
         events.push({
           kind: "reviewer-state",
           mr,

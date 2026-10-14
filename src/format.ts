@@ -19,10 +19,13 @@ const STATE_PHRASES: Readonly<Record<string, string>> = {
   REVIEWED: "memberi review",
 };
 
-/** Single line, no control characters, never starting with `-`, at most `maxLength` code points. */
+/**
+ * Single line, no control or invisible formatting characters (bidi overrides, zero-width), never
+ * starting with `-`, at most `maxLength` code points.
+ */
 export function clean(text: string, maxLength = 120): string {
   const flat = text
-    .replace(/\p{Cc}+/gu, " ")
+    .replace(/[\p{Cc}\p{Cf}]+/gu, " ")
     .replace(/\s+/g, " ")
     .trim()
     .replace(/^-+\s*/, "");

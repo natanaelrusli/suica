@@ -51,7 +51,7 @@ scripts/install-launchagent.sh     # renders the LaunchAgent for this checkout a
 scripts/uninstall-launchagent.sh
 ```
 
-Logs are JSON lines captured by launchd in `~/Library/Logs/mr-review-assistant/` (`stdout.log`, `stderr.log`). The agent does no rotation; at the default log level it writes only on start, stop, pauses and errors. Set `MRA_LOG_LEVEL=debug` to see every poll. The plist bakes in the absolute path of the `node` found when you ran the installer: re-run it after switching Node versions or moving the repository.
+Logs are JSON lines captured by launchd in `~/Library/Logs/mr-review-assistant/` (`stdout.log`, `stderr.log`). The agent does no rotation; at the default log level it writes only on start, stop and errors (an error is logged once per failure streak). Set `MRA_LOG_LEVEL=debug` to see every poll. launchd restarts the agent only when it exits with an error, at most once a minute, and the installer refuses to run without a config file. The plist bakes in the absolute path of the `node` found when you ran the installer: re-run it after switching Node versions or moving the repository.
 
 ## Development
 
@@ -63,7 +63,11 @@ Source of truth for each behaviour is a test in `test/`. `src/events.ts`, `src/f
 
 ## Known limits
 
-- Polling stops while the Mac is fully asleep; the next poll after wake catches up from stored state and collapses a burst into one summary.
+- Polling stops while the Mac is fully asleep; the next poll after wake (within about 15 seconds) catches up from stored state and collapses a burst into one summary.
+- Do not run `scripts/mra once` while the background agent is running: the two processes are not coordinated and can alert on the same event twice.
+- If a notification fails halfway, the ones already shown are not repeated and the rest are dropped (an error is logged and reported once).
+- If the state database cannot be written, alerts can repeat until it recovers; you are told once.
+- "GitLab unreachable" is only reported after two failed polls in a row, because the network is often not up yet right after a wake.
 - When an MR is merged or closed there is no final alert (only open MRs are watched).
 - A comment that arrives in the same poll in which an MR is first tracked, or in which a draft becomes ready, is recorded silently.
 - More than 100 open MRs on either list fails the poll with a notification (pagination is not implemented).

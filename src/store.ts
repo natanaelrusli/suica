@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { Snapshot } from "./domain.ts";
@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS seen_note (note_id TEXT PRIMARY KEY);
 const META_BASELINE = "baseline_done";
 const META_PAUSED = "paused";
 const DIRECTORY_MODE = 0o700;
+const FILE_MODE = 0o600;
 const BUSY_TIMEOUT_MS = 5000;
 
 type Row = Record<string, unknown>;
@@ -52,12 +53,22 @@ function initSchema(db: DatabaseSync): void {
   }
 }
 
+/** The database holds employee IDs: keep the folder and every SQLite file private to the owner. */
+function restrictPermissions(path: string): void {
+  if (path === ":memory:") return;
+  chmodSync(dirname(path), DIRECTORY_MODE);
+  for (const file of [path, `${path}-wal`, `${path}-shm`]) {
+    if (existsSync(file)) chmodSync(file, FILE_MODE);
+  }
+}
+
 export function openStore(path: string): Store {
   if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true, mode: DIRECTORY_MODE });
   const db = new DatabaseSync(path);
   try {
     db.exec(`PRAGMA journal_mode = WAL; PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS};`);
     initSchema(db);
+    restrictPermissions(path);
   } catch (error) {
     db.close();
     throw error;
@@ -134,6 +145,8 @@ export function openStore(path: string): Store {
         db.exec("ROLLBACK");
         throw error;
       }
+      // The -wal and -shm files only exist once something has been written.
+      restrictPermissions(path);
     },
 
     isPaused: () => metaValue(META_PAUSED) === "1",

@@ -148,7 +148,7 @@ export function parseSnapshot(raw: unknown): Snapshot {
 
 const UNREACHABLE_PATTERN =
   /timed out|timeout|no such host|connection refused|dial tcp|network is unreachable|could not resolve/;
-const AUTH_PATTERN = /401|unauthorized|not logged in|authenticat/;
+const AUTH_PATTERN = /\b401\b|unauthorized|not logged in|authenticat/;
 
 export function classifyFailure(failure: ExecFailure): GitlabFailureKind {
   if (failure.code === "ENOENT") return "glab-missing";

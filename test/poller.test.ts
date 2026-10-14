@@ -8,6 +8,7 @@ import type { Notifier } from "../src/notifier.ts";
 import { pollOnce } from "../src/poller.ts";
 import type { PollDeps } from "../src/poller.ts";
 import { openStore } from "../src/store.ts";
+import type { Store } from "../src/store.ts";
 import { ME, mr, note, person, reviewer, snapshot } from "./builders.ts";
 
 const config: PollDeps["config"] = {
@@ -16,16 +17,24 @@ const config: PollDeps["config"] = {
 };
 
 function harness() {
-  const store = openStore(":memory:");
+  const realStore = openStore(":memory:");
   const sent: Notification[] = [];
   const logs: string[] = [];
-  let failing = false;
+  let failAfter = Number.POSITIVE_INFINITY;
+  let commitError: Error | undefined;
   let current: Snapshot = snapshot();
   let fetchError: Error | undefined;
   let fetchCount = 0;
+  const store: Store = {
+    ...realStore,
+    commit: (next) => {
+      if (commitError !== undefined) throw commitError;
+      realStore.commit(next);
+    },
+  };
   const notifier: Notifier = {
     notify: (notification) => {
-      if (failing) return Promise.reject(new Error("boom"));
+      if (sent.length >= failAfter) return Promise.reject(new Error("boom"));
       sent.push(notification);
       return Promise.resolve();
     },
@@ -42,7 +51,7 @@ function harness() {
     config,
   };
   return {
-    store,
+    store: realStore,
     sent,
     logs,
     poll: () => pollOnce(deps),
@@ -54,7 +63,14 @@ function harness() {
       fetchError = error;
     },
     setNotifierFailing: (value: boolean) => {
-      failing = value;
+      failAfter = value ? 0 : Number.POSITIVE_INFINITY;
+    },
+    /** Delivers this many notifications, then fails every further one. */
+    setNotifierFailAfter: (count: number) => {
+      failAfter = count;
+    },
+    setCommitError: (error: Error | undefined) => {
+      commitError = error;
     },
   };
 }
@@ -135,6 +151,30 @@ describe("pollOnce", () => {
     expect(h.sent).toHaveLength(1);
   });
 
+  it("a partial delivery is committed so delivered alerts are never repeated", async () => {
+    const h = harness();
+    await h.poll();
+    h.setSnapshot(snapshot({ reviewRequested: [waiting(1), waiting(2)] }));
+    h.setNotifierFailAfter(1);
+    expect(await h.poll()).toBe("failed");
+    expect(h.sent).toHaveLength(1);
+    h.setNotifierFailAfter(Number.POSITIVE_INFINITY);
+    expect(await h.poll()).toBe("ok");
+    expect(h.sent).toHaveLength(1);
+  });
+
+  it("a failing state commit is reported to the Owner once instead of repeating alerts silently", async () => {
+    const h = harness();
+    await h.poll();
+    h.setSnapshot(snapshot({ reviewRequested: [waiting(1)] }));
+    h.setCommitError(new Error("database is locked"));
+    expect(await h.poll()).toBe("failed");
+    expect(await h.poll()).toBe("failed");
+    const stateAlerts = h.sent.filter((n) => n.title === "Penyimpanan state bermasalah");
+    expect(stateAlerts).toHaveLength(1);
+    expect(h.logs.join("\n")).not.toContain("database is locked");
+  });
+
   it("tells the Owner about a GitLab failure once, and again only after recovery", async () => {
     const h = harness();
     h.setFetchError(new FetchFailure("gitlab-auth", "no current user"));
@@ -147,6 +187,18 @@ describe("pollOnce", () => {
     h.setFetchError(new FetchFailure("gitlab-auth", "no current user"));
     await h.poll();
     expect(h.sent).toHaveLength(2);
+  });
+
+  it("waits for a second consecutive failure before reporting 'unreachable' (network after wake)", async () => {
+    const h = harness();
+    h.setFetchError(new FetchFailure("gitlab-unreachable", "glab failed with code 1"));
+    await h.poll();
+    expect(h.sent).toHaveLength(0);
+    await h.poll();
+    expect(h.sent).toHaveLength(1);
+    expect(h.sent[0]?.title).toBe("GitLab tidak terjangkau");
+    await h.poll();
+    expect(h.sent).toHaveLength(1);
   });
 
   it("does not touch GitLab while paused", async () => {
