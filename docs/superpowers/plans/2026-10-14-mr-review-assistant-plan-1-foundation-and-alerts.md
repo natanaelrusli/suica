@@ -14,7 +14,7 @@
 
 - Node `>=24`; scripts run with `node src/<file>.ts`. Because Node strips types without compiling: relative imports end in `.ts`, and only erasable TypeScript syntax is allowed (no `enum`, no class parameter properties, no `namespace`). `tsconfig` sets `erasableSyntaxOnly`.
 - Madhani TypeScript standard: `tsconfig.base.json` copied verbatim from the plugin reference (`strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `verbatimModuleSyntax`); typescript-eslint `recommendedTypeChecked` + prettier; named exports only (default exports only in `*.config.*`); no `as any`, `as unknown as`, `!`, `@ts-ignore`; external input parsed with zod; no `console.log`; `import type` for type-only imports.
-- Dependencies are pinned to exact versions looked up on 2026-10-14: `yaml 2.9.1`, `zod 3.25.76`, `vitest 3.2.7`, `typescript 5.9.3`, `@types/node 24.19.2`, `eslint 9.39.5`, `@eslint/js 9.39.5`, `typescript-eslint 8.71.2`, `eslint-config-prettier 10.1.8`, `prettier 3.9.10`. None appears in `npm-banned-versions.tsv` (checked 2026-10-14). Install with `npm install --ignore-scripts` the first time, scan the lockfile with the banned-version scanner, then use `npm ci` from then on.
+- Dependencies are pinned to exact versions looked up on 2026-10-14: `yaml 2.9.1`, `zod 3.25.76`, `vitest 5.0.4` (3.2.7 was dropped: `npm audit` reported a critical tinypool issue fixed only in vitest 5), `typescript 5.9.3`, `@types/node 24.19.2`, `eslint 9.39.5`, `@eslint/js 9.39.5`, `typescript-eslint 8.71.2`, `eslint-config-prettier 10.1.8`, `prettier 3.9.10`. None appears in `npm-banned-versions.tsv` (checked 2026-10-14). Install with `npm install --ignore-scripts` the first time, scan the lockfile with the banned-version scanner, then use `npm ci` from then on.
 - GitLab is read-only in this plan: the only call is `glab api graphql` with a `query`, never a mutation and never a REST write.
 - Every external process call has a timeout (`Exec` takes `timeoutMs`; `glab` 60 s default, notifier 10 s, `ioreg` 5 s).
 - Logs: JSON lines on stdout with `timestamp` (ISO 8601 UTC), `level`, `message`, `service_name`, `environment`; extra context only inside `attributes`, `snake_case`; `message` is English, constant and has no interpolated data; no employee IDs (GitLab usernames), no display names, no MR titles, no comment text, no process arguments. An MR may be referred to by its key (`<project path>!<iid>`) only.
@@ -115,7 +115,7 @@ Copy `CONTEXT.md` and the `docs/superpowers/` folder (spec and this plan) from t
     "prettier": "3.9.10",
     "typescript": "5.9.3",
     "typescript-eslint": "8.71.2",
-    "vitest": "3.2.7"
+    "vitest": "5.0.4"
   }
 }
 ```
