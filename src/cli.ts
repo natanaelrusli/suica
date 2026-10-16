@@ -1,9 +1,8 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { buildStatus, readServiceStatus, restartService } from "./agent-status.ts";
-import type { StatusInput } from "./agent-status.ts";
+import { buildStatus, loadStatusInput, readServiceStatus, restartService } from "./agent-status.ts";
 import { actionJson, buildAgentState } from "./agent-state.ts";
-import { ConfigError, defaultConfigPath, defaultStatePath, loadConfig } from "./config.ts";
+import { defaultConfigPath, loadConfig } from "./config.ts";
 import { defaultExec } from "./exec.ts";
 import { createRuntime } from "./runtime.ts";
 import type { Runtime } from "./runtime.ts";
@@ -138,20 +137,7 @@ async function run(runtime: Runtime, command: string, argv: readonly string[]): 
 async function statusJson(): Promise<number> {
   const configPath = defaultConfigPath();
   const service = await readServiceStatus(defaultExec, process.getuid?.() ?? 0);
-  let loaded: StatusInput["loaded"];
-  try {
-    const config = loadConfig(configPath);
-    const store = openStore(config.statePath ?? defaultStatePath());
-    try {
-      const polls = store.loadHistory(0).polls;
-      loaded = { config, paused: store.isPaused(), lastPoll: polls[polls.length - 1] ?? null };
-    } finally {
-      store.close();
-    }
-  } catch (error) {
-    if (!(error instanceof ConfigError)) throw error;
-    loaded = { error: error.message };
-  }
+  const loaded = loadStatusInput(configPath, { loadConfig, openStore });
   const logsPath = join(homedir(), "Library", "Logs", "suica");
   const document = buildStatus({ service, configPath, logsPath, loaded });
   process.stdout.write(`${JSON.stringify(document)}\n`);

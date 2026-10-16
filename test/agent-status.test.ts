@@ -5,12 +5,14 @@ import { describe, expect, it } from "vitest";
 import {
   AGENT_LABEL,
   buildStatus,
+  loadStatusInput,
   parseLaunchctlPrint,
   readServiceStatus,
   restartService,
 } from "../src/agent-status.ts";
-import { parseConfig } from "../src/config.ts";
+import { ConfigError, parseConfig } from "../src/config.ts";
 import type { Exec, ExecOptions } from "../src/exec.ts";
+import type { StatusStore } from "../src/agent-status.ts";
 
 interface Call {
   readonly file: string;
@@ -136,5 +138,117 @@ describe("buildStatus", () => {
         templates: join(homedir(), ".config", "suica", "templates"),
       },
     });
+  });
+});
+
+describe("store failures", () => {
+  const service = { loaded: true, running: true, pid: 4242 };
+  const config = parseConfig(
+    "gitlab:\n  hostname: h\npolling:\n  activeSeconds: 60\nstatePath: /x/state.db\nteams:\n  enabled: true\n",
+  );
+
+  it("builds a status from the loaded config with a store error", () => {
+    expect(
+      buildStatus({
+        service,
+        configPath: "/c/config.yaml",
+        logsPath: "/l",
+        loaded: { config, storeError: "cannot read the state database (Error)" },
+      }),
+    ).toEqual({
+      version: 1,
+      agent: { label: AGENT_LABEL, ...service },
+      configError: "cannot read the state database (Error)",
+      paused: null,
+      teamsEnabled: true,
+      lastPoll: null,
+      polling: { activeSeconds: 60, idleSeconds: 300 },
+      paths: {
+        config: "/c/config.yaml",
+        state: "/x/state.db",
+        logs: "/l",
+        templates: join(homedir(), ".config", "suica", "templates"),
+      },
+    });
+  });
+
+  const CONFIG_TEXT = "gitlab:\n  hostname: h\nstatePath: /x/state.db\n";
+  const secret = "SECRET /private/path";
+
+  function fakeStore(overrides: Partial<StatusStore>): {
+    store: StatusStore;
+    closed: () => boolean;
+  } {
+    let closed = false;
+    const store: StatusStore = {
+      loadHistory: () => ({
+        polls: [
+          { at: 1, status: "ok", failure: null, durationMs: 5 },
+          { at: 2, status: "failed", failure: "x", durationMs: 6 },
+        ],
+        events: [],
+      }),
+      isPaused: () => true,
+      close: () => {
+        closed = true;
+      },
+      ...overrides,
+    };
+    return { store, closed: () => closed };
+  }
+
+  it("reads the last poll and the pause flag, and closes the store", () => {
+    const { store, closed } = fakeStore({});
+    const opened: string[] = [];
+    const loaded = loadStatusInput("/c", {
+      loadConfig: () => parseConfig(CONFIG_TEXT),
+      openStore: (path) => {
+        opened.push(path);
+        return store;
+      },
+    });
+    expect(opened).toEqual(["/x/state.db"]);
+    expect(loaded).toMatchObject({
+      paused: true,
+      lastPoll: { at: 2, status: "failed", failure: "x", durationMs: 6 },
+    });
+    expect(closed()).toBe(true);
+  });
+
+  it("reports only the error class when the store cannot be opened", () => {
+    const loaded = loadStatusInput("/c", {
+      loadConfig: () => parseConfig(CONFIG_TEXT),
+      openStore: () => {
+        throw new RangeError(secret);
+      },
+    });
+    expect(loaded).toMatchObject({ storeError: "cannot read the state database (RangeError)" });
+    expect(JSON.stringify(loaded)).not.toContain("SECRET");
+  });
+
+  it("reports only the error class when reading the history fails, and still closes", () => {
+    const { store, closed } = fakeStore({
+      loadHistory: () => {
+        throw new TypeError(secret);
+      },
+    });
+    const loaded = loadStatusInput("/c", {
+      loadConfig: () => parseConfig(CONFIG_TEXT),
+      openStore: () => store,
+    });
+    expect(loaded).toMatchObject({ storeError: "cannot read the state database (TypeError)" });
+    expect(closed()).toBe(true);
+  });
+
+  it("reports a config error as the error message", () => {
+    const loaded = loadStatusInput("/c", {
+      loadConfig: () => {
+        throw new ConfigError("invalid config: boom");
+      },
+      openStore: () => {
+        throw new Error("must not open");
+      },
+    });
+    expect(loaded).toEqual({ error: "invalid config: boom" });
   });
 });
