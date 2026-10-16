@@ -1,13 +1,19 @@
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { buildStatus, readServiceStatus, restartService } from "./agent-status.ts";
+import type { StatusInput } from "./agent-status.ts";
 import { actionJson, buildAgentState } from "./agent-state.ts";
-import { defaultConfigPath } from "./config.ts";
+import { ConfigError, defaultConfigPath, defaultStatePath, loadConfig } from "./config.ts";
+import { defaultExec } from "./exec.ts";
 import { createRuntime } from "./runtime.ts";
 import type { Runtime } from "./runtime.ts";
 import { buildStats, localDayKey } from "./stats.ts";
+import { openStore } from "./store.ts";
 import { formatOutbox } from "./teams/format-outbox.ts";
 import { OUTBOX_STATUSES } from "./teams/types.ts";
 
 const USAGE =
-  "usage: suica <once|status|state|stats|pause|resume|pending [--all]|send <id> [--json]|skip <id> [--json]|retry <id> [--json]|selftest>\n";
+  "usage: suica <once|status|state|stats|pause|resume|pending [--all]|send <id> [--json]|skip <id> [--json]|retry <id> [--json]|selftest|agent restart --json>\n";
 const TEAMS_DISABLED = "teams is disabled: set teams.enabled to true in the config\n";
 const SHOWN_WITH_ALL = 50;
 
@@ -128,12 +134,48 @@ async function run(runtime: Runtime, command: string, argv: readonly string[]): 
   }
 }
 
+/** `suica status --json`: works with a broken config, so it never creates the runtime. */
+async function statusJson(): Promise<number> {
+  const configPath = defaultConfigPath();
+  const service = await readServiceStatus(defaultExec, process.getuid?.() ?? 0);
+  let loaded: StatusInput["loaded"];
+  try {
+    const config = loadConfig(configPath);
+    const store = openStore(config.statePath ?? defaultStatePath());
+    try {
+      const polls = store.loadHistory(0).polls;
+      loaded = { config, paused: store.isPaused(), lastPoll: polls[polls.length - 1] ?? null };
+    } finally {
+      store.close();
+    }
+  } catch (error) {
+    if (!(error instanceof ConfigError)) throw error;
+    loaded = { error: error.message };
+  }
+  const logsPath = join(homedir(), "Library", "Logs", "suica");
+  const document = buildStatus({ service, configPath, logsPath, loaded });
+  process.stdout.write(`${JSON.stringify(document)}\n`);
+  return 0;
+}
+
+async function restartAgent(): Promise<number> {
+  const result = await restartService(defaultExec, process.getuid?.() ?? 0);
+  process.stdout.write(`${actionJson(result)}\n`);
+  return result === "restarted" ? 0 : 1;
+}
+
 async function main(argv: readonly string[]): Promise<number> {
   const command = argv[0];
+  if (command === "agent") {
+    if (argv[1] === "restart" && argv.includes("--json")) return restartAgent();
+    process.stderr.write(USAGE);
+    return 2;
+  }
   if (command === undefined || (!SIMPLE.has(command) && !WITH_ID.has(command))) {
     process.stderr.write(USAGE);
     return 2;
   }
+  if (command === "status" && argv.includes("--json")) return statusJson();
   const runtime = createRuntime(defaultConfigPath());
   try {
     return await run(runtime, command, argv);

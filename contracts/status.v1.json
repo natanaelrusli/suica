@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "agent": { "label": "com.madhani.suica.agent", "loaded": true, "running": true, "pid": 4242 },
+  "configError": null,
+  "paused": false,
+  "teamsEnabled": true,
+  "lastPoll": { "at": 1792148400000, "status": "ok", "failure": null, "durationMs": 1500 },
+  "polling": { "activeSeconds": 120, "idleSeconds": 300 },
+  "paths": {
+    "config": "/Users/o/.config/suica/config.yaml",
+    "state": "/Users/o/Library/Application Support/suica/state.db",
+    "logs": "/Users/o/Library/Logs/suica",
+    "templates": "/Users/o/.config/suica/templates"
+  }
+}
