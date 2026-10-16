@@ -115,7 +115,7 @@ public final class MenuModel {
         await refresh()
     }
 
-    private static func message(for error: AgentError) -> String {
+    static func message(for error: AgentError) -> String {
         switch error {
         case .timedOut: Copy.agentTimedOut
         case .unsupportedVersion: Copy.agentOutdated

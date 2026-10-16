@@ -32,6 +32,49 @@ public enum Copy {
     public static let agentTimedOut = "The agent took too long to answer."
     public static let agentOutdated = "The agent speaks a newer protocol. Rebuild the app."
 
+    // MARK: Window
+
+    public static let openWindow = "Open Suica…"
+    public static let overview = "Overview"
+    public static let messages = "Messages"
+    public static let statistics = "Statistics"
+    public static let configuration = "Configuration"
+    public static let agentRunning = "Agent running"
+    public static let agentStopped = "Agent installed but not running"
+    public static let agentNotInstalled = "Agent not installed. Run scripts/install-launchagent.sh."
+    public static func lastPoll(_ relative: String, ok: Bool) -> String {
+        "Last poll \(relative): \(ok ? "ok" : "failed")"
+    }
+    public static let noPollYet = "No poll recorded yet."
+    public static let restartAgent = "Restart agent"
+    public static let restartFailed = "Restarting the agent failed."
+    public static let restartToApply = "Saved. Restart the agent to apply the changes."
+    public static let save = "Save"
+    public static let discard = "Discard changes"
+    public static let reload = "Reload"
+    public static let resetToDefault = "Use default"
+    public static let configConflict =
+        "The config file changed on disk. Reload to see it; your edits are kept until then."
+    public static let configBadRequest = "This version of the app doesn't match the agent. Rebuild the app."
+    public static let configSaveFailed = "Saving failed. The config file was not changed."
+    public static let openConfig = "Open config in editor"
+    public static let openTemplates = "Open templates folder"
+    public static let revealInFinder = "Show in Finder"
+
+    // MARK: Statistics
+
+    public static let polls24h = "Polls, last 24 hours"
+    public static let reviewRequests = "Review requests"
+    public static let activity = "Activity on your MRs"
+    public static let nudgesSent = "Nudges sent"
+    public static let noticesSent = "Review notices sent"
+    public static let ownerTurnaround = "Your time to review"
+    public static let reviewerTurnaround = "Reviewers' time after a nudge"
+    public static let noData = "Not enough data yet"
+    public static func minutes(_ m: Int) -> String {
+        m < 60 ? "\(m) min" : "\(m / 60) h \(m % 60) min"
+    }
+
     public static func kindLabel(_ kind: String) -> String {
         switch kind {
         case "nudge": "Nudge"
@@ -54,6 +97,8 @@ public enum Copy {
         case "not-found": "Message not found."
         case "skipped": "Message skipped."
         case "retried": "Message queued again."
+        case "restarted": "Agent restarted."
+        case "not-installed": agentNotInstalled
         case "nothing": "Nothing to do."
         default: "Done."
         }
