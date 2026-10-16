@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import { isMap, parse, parseDocument } from "yaml";
+import { isCollection, isMap, parse, parseDocument } from "yaml";
 import type { Document } from "yaml";
 import { z } from "zod";
 import { validateConfig } from "./config.ts";
@@ -147,6 +147,20 @@ const fail = (
 
 const sha256Of = (data: string | Buffer): string => createHash("sha256").update(data).digest("hex");
 
+const samePath = (left: readonly string[], right: readonly string[]): boolean =>
+  left.length === right.length && left.every((segment, index) => segment === right[index]);
+
+/** Removes the key at `path`; nothing to do when a section above it is missing, throws when one is not a collection. */
+function removeKey(doc: Document, path: readonly string[]): void {
+  for (let length = 1; length < path.length; length++) {
+    const node = doc.getIn(path.slice(0, length), true);
+    if (node === undefined) return;
+    if (!isCollection(node)) throw new Error("not a collection");
+  }
+  doc.deleteIn(path);
+  pruneEmptyParents(doc, path);
+}
+
 /** Removes each mapping along `path` that has just become empty, innermost first. */
 function pruneEmptyParents(doc: Document, path: readonly string[]): void {
   for (let length = path.length - 1; length >= 1; length--) {
@@ -159,9 +173,8 @@ function pruneEmptyParents(doc: Document, path: readonly string[]): void {
 
 /** Checks, edits and writes the config file. Throws a path-free Error only when the write fails. */
 export function applyConfigEdits(path: string, request: SaveRequest): SaveResultJson {
-  const known = new Set(CONFIG_FIELDS.map((field) => field.path.join("\u0000")));
   for (const { path: editPath } of request.edits) {
-    if (!known.has(editPath.join("\u0000"))) {
+    if (!CONFIG_FIELDS.some((field) => samePath(field.path, editPath))) {
       return fail("bad-request", { path: editPath.join("."), message: "unknown field" });
     }
   }
@@ -190,8 +203,7 @@ export function applyConfigEdits(path: string, request: SaveRequest): SaveResult
   for (const { path: editPath, value } of request.edits) {
     try {
       if (value === null) {
-        doc.deleteIn(editPath);
-        pruneEmptyParents(doc, editPath);
+        removeKey(doc, editPath);
       } else {
         doc.setIn(editPath, value);
       }
@@ -203,7 +215,15 @@ export function applyConfigEdits(path: string, request: SaveRequest): SaveResult
     }
   }
 
-  const validated = validateConfig(doc.toJS());
+  // Validate what the agent will read back: the written text, parsed as loadConfig does.
+  const text = doc.toString({ lineWidth: 0 });
+  let reparsed: unknown;
+  try {
+    reparsed = parse(text);
+  } catch {
+    return fail("invalid", { path: "(root)", message: "the edited config is not valid YAML" });
+  }
+  const validated = validateConfig(reparsed);
   if (!validated.ok) return fail("invalid", ...validated.issues);
   if (validated.config.teams.enabled) {
     try {
@@ -215,7 +235,6 @@ export function applyConfigEdits(path: string, request: SaveRequest): SaveResult
     }
   }
 
-  const text = doc.toString({ lineWidth: 0 });
   writeAtomically(path, text);
   return { status: "saved", issues: [], sha256: sha256Of(text) };
 }
@@ -234,7 +253,11 @@ function writeAtomically(path: string, text: string): void {
     writeFileSync(temp, text, { mode: 0o600, flag: "wx" });
     renameSync(temp, target);
   } catch {
-    rmSync(temp, { force: true });
+    try {
+      rmSync(temp, { force: true });
+    } catch {
+      // the fixed message below is what surfaces, never a path
+    }
     throw new Error("cannot write the config file");
   }
 }

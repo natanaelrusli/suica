@@ -257,6 +257,61 @@ describe("applyConfigEdits", () => {
     expect(readFileSync(path, "utf8")).toContain(`glabPath: ${long}\n`);
   });
 
+  it("refuses a save that the agent would reject when it reads the written text back", () => {
+    const original = `${MINIMAL}polling:\n  activeSeconds: !!str 30\n`;
+    writeFileSync(path, original);
+    const result = applyConfigEdits(path, {
+      baseSha256: sha(original),
+      edits: [edit("polling.activeSeconds", 60)],
+    });
+    expect(result.status).toBe("invalid");
+    expect(result.issues.map((issue) => issue.path)).toContain("polling.activeSeconds");
+    expect(result.sha256).toBeNull();
+    expect(readFileSync(path, "utf8")).toBe(original);
+    expect(readdirSync(dir)).toEqual(["config.yaml"]);
+  });
+
+  it("treats removing a key whose section is missing as nothing to do", () => {
+    writeFileSync(path, MINIMAL);
+    const result = applyConfigEdits(path, {
+      baseSha256: sha(MINIMAL),
+      edits: [edit("polling.activeSeconds", null), edit("teams.workingHours.days", null)],
+    });
+    expect(result.status).toBe("saved");
+    expect(parse(readFileSync(path, "utf8"))).toEqual({ gitlab: { hostname: "h" } });
+  });
+
+  it("treats removing a key from an empty file as nothing to do, then requires a valid config", () => {
+    writeFileSync(path, "");
+    const result = applyConfigEdits(path, {
+      baseSha256: sha(""),
+      edits: [edit("gitlab.hostname", "h"), edit("polling.activeSeconds", null)],
+    });
+    expect(result.status).toBe("saved");
+    expect(parse(readFileSync(path, "utf8"))).toEqual({ gitlab: { hostname: "h" } });
+  });
+
+  it("still refuses removing a key below a section that is a scalar", () => {
+    const odd = "gitlab:\n  hostname: h\npolling: 5\n";
+    writeFileSync(path, odd);
+    const result = applyConfigEdits(path, {
+      baseSha256: sha(odd),
+      edits: [edit("polling.activeSeconds", null)],
+    });
+    expect(result.status).toBe("invalid");
+    expect(readFileSync(path, "utf8")).toBe(odd);
+  });
+
+  it("does not let a NUL inside a segment pass the field check", () => {
+    writeFileSync(path, MINIMAL);
+    const result = applyConfigEdits(path, {
+      baseSha256: sha(MINIMAL),
+      edits: [{ path: ["polling\u0000activeSeconds"], value: 1 }],
+    });
+    expect(result.status).toBe("bad-request");
+    expect(readFileSync(path, "utf8")).toBe(MINIMAL);
+  });
+
   it("refuses to overwrite a config file it cannot read", () => {
     mkdirSync(path);
     const result = applyConfigEdits(path, {
@@ -401,5 +456,29 @@ describe("parseSaveRequest", () => {
       '{"baseSha256":null,"edits":[{"path":["a"],"value":1,"extra":1}]}',
     ];
     for (const text of bad) expect(parseSaveRequest(text), text).toBeUndefined();
+  });
+});
+
+describe("applyConfigEdits top-level keys", () => {
+  it("removes statePath, and treats removing it from a file without it as nothing to do", () => {
+    const dir2 = mkdtempSync(join(tmpdir(), "suica-config-edit-"));
+    try {
+      const file = join(dir2, "config.yaml");
+      const original = `${MINIMAL}statePath: /x/state.db\n`;
+      writeFileSync(file, original);
+      const first = applyConfigEdits(file, {
+        baseSha256: sha(original),
+        edits: [edit("statePath", null)],
+      });
+      expect(first.status).toBe("saved");
+      const second = applyConfigEdits(file, {
+        baseSha256: first.sha256,
+        edits: [edit("statePath", null)],
+      });
+      expect(second.status).toBe("saved");
+      expect(parse(readFileSync(file, "utf8"))).toEqual({ gitlab: { hostname: "h" } });
+    } finally {
+      rmSync(dir2, { recursive: true, force: true });
+    }
   });
 });
