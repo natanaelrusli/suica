@@ -236,3 +236,20 @@ func makeState(attention: [OutboxItem] = [], paused: Bool = false) -> AgentState
     try await Task.sleep(for: .milliseconds(60))
     #expect(await client.stateCalls == calls)
 }
+
+@MainActor @Test func sendTakesTheItemItIsGivenEvenIfTheConfirmationWasAlreadyCleared() async {
+    let client = FakeClient(states: [.success(makeState())])
+    let model = MenuModel(client: client)
+    model.requestSend(item(4, "pending"))
+    model.cancelConfirmation()
+    await model.send(item(4, "pending"))
+    #expect(await client.sendCalls == [4])
+    #expect(model.banner == Copy.flash(for: "sent"))
+}
+
+@MainActor @Test func sendRefusesAnItemThatCannotBeSent() async {
+    let client = FakeClient(states: [.success(makeState())])
+    let model = MenuModel(client: client)
+    await model.send(item(4, "sent"))
+    #expect(await client.sendCalls.isEmpty)
+}

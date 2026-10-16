@@ -73,6 +73,7 @@ scripts/mra send <id>         # send a pending message
 scripts/mra skip <id>         # drop a message
 scripts/mra retry <id>        # look the person up again after fixing teams.people
 scripts/mra selftest          # send one test line to your own Teams notes chat
+scripts/mra state             # the agent's state as one JSON document (used by the menu bar app)
 ```
 
 Statuses in `mra pending`: `pending` waits for you; `unresolved` needs a `teams.people` line (then `mra retry`), or Teams returned an error for that person's lookup; `failed` is final; `sending` may have been delivered, so check Teams before deciding.
@@ -80,6 +81,17 @@ Statuses in `mra pending`: `pending` waits for you; `unresolved` needs a `teams.
 Templates are files in the templates folder: `nudge.txt`, `reminder.txt`, `notice.approved.txt`, `notice.changes.txt`, `notice.comments.txt`. Placeholders: `{{mr.title}}`, `{{mr.url}}`, `{{mr.iid}}`, `{{mr.project}}`, `{{person.name}}`, `{{owner.name}}`. An unknown placeholder stops startup instead of sending a broken message.
 
 People are found through `teams.people`, then a cache, then an exact display-name match in Teams; anything uncertain is left for you.
+
+## Menu bar app
+
+A native macOS menu bar app shows what the agent last recorded and lets you handle held Teams messages without typing `mra` commands. The icon shows how many messages need you; click it to see the status, the messages that need you (with **Send…**, **Skip** and **Retry**; Send asks you to confirm the text first), recent messages, and **Pause polling** / **Resume polling**, **Refresh** and **Quit**. The app is in English; the Teams messages it sends are not. It runs the `mra` CLI for everything (`mra state`, `mra send <id> --json`, …), so it follows the same rules as the CLI: at most once, working hours, obsolete messages skipped.
+
+```bash
+scripts/install-macos-app.sh      # builds, installs to ~/Applications and starts it
+scripts/uninstall-macos-app.sh
+```
+
+Add it under System Settings → General → Login Items to start it at login. The app's own tests: `cd macos/MRAMenuBar && swift test`. It needs Swift (Xcode or the Command Line Tools) and Node.
 
 ## Run in the background
 
@@ -113,3 +125,6 @@ Source of truth for each behaviour is a test in `test/`. `src/events.ts`, `src/f
 - An MR is announced to its Author only once per round of your review.
 - Teams planning starts from the moment Teams is enabled, and again after every period in which it was switched off; older history is never announced.
 - The Agent Review flow is not implemented yet.
+- The menu bar app shows what the agent last recorded and refreshes every 30 seconds; the background agent (or `scripts/mra once`) has to have polled for its list to be current.
+- The install script bakes the absolute `node` and repository paths into the app: after moving the repository or switching Node versions, run `scripts/install-macos-app.sh` again.
+- The app and the CLI speak a versioned JSON format (`contracts/agent-state.v1.json`); an app built for a different version shows "The agent speaks a newer protocol. Rebuild the app."

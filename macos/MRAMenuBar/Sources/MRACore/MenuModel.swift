@@ -57,6 +57,12 @@ public final class MenuModel {
     public func confirmSend() async {
         guard let item = confirmation else { return }
         confirmation = nil
+        await send(item)
+    }
+
+    /// Takes the item itself: the confirmation dialog can clear `confirmation` while it closes.
+    public func send(_ item: OutboxItem) async {
+        guard item.actions.contains(.send) else { return }
         await perform(id: item.id) { (client) async throws(AgentError) -> ActionResult in
             try await client.send(id: item.id)
         }

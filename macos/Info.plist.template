@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleName</key><string>MR Review Assistant</string>
+  <key>CFBundleDisplayName</key><string>MR Review Assistant</string>
+  <key>CFBundleIdentifier</key><string>com.madhani.mr-review-assistant.menubar</string>
+  <key>CFBundleExecutable</key><string>MRAMenuBar</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleVersion</key><string>1</string>
+  <key>CFBundleShortVersionString</key><string>1.0</string>
+  <key>LSMinimumSystemVersion</key><string>14.0</string>
+  <key>LSUIElement</key><true/>
+  <key>MRANodePath</key><string>__NODE__</string>
+  <key>MRARepoPath</key><string>__REPO__</string>
+  <key>MRASearchPath</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+</dict>
+</plist>
