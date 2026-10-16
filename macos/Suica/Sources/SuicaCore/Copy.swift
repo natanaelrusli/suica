@@ -62,6 +62,51 @@ public enum Copy {
     public static let openTemplates = "Open templates folder"
     public static let revealInFinder = "Show in Finder"
 
+    public static let storage = "Storage"
+    public static let addItem = "Add"
+    public static let removeItem = "Remove"
+    public static let username = "Username"
+    public static let email = "Email"
+    public static let invalidNumber = "Enter a whole number."
+    public static let invalidClock = "Use the 24-hour format HH:MM, for example 09:30."
+    public static let unsetInFile = "Not set in the file."
+    public static let readOnlyField = "This setting can't be edited here."
+    public static let configMissing = "No config file yet. Saving creates it."
+    public static let configIssuesHeading = "The config on disk has problems"
+    public static let pollingOn = "Polling is on"
+    public static let teamsOn = "Teams is on"
+    public static let teamsOff = "Teams is off"
+    public static func needsAttention(_ count: Int) -> String { "\(count) need your attention" }
+    public static func pid(_ pid: Int) -> String { "pid \(pid)" }
+    public static func pollIntervals(active: Int, idle: Int) -> String {
+        "Every \(active) s while MRs are active, \(idle) s when idle"
+    }
+    public static let configPath = "Config file"
+    public static let statePath = "State folder"
+    public static let logsPath = "Logs folder"
+    public static let templatesPath = "Templates folder"
+    public static func pollsOkFailed(ok: Int, failed: Int) -> String { "\(ok) ok / \(failed) failed" }
+    public static func p90(_ text: String) -> String { "90th percentile \(text)" }
+    public static let last14Days = "Last 14 days"
+    public static let chartTitle = "Daily counts, last 14 days"
+    public static let chartDay = "Day"
+    public static let chartCount = "Count"
+    public static let chartSeries = "Series"
+    public static let loading = "Loading…"
+    public static func groupHeading(_ key: String) -> String {
+        switch key {
+        case "gitlab": "GitLab"
+        case "polling": "Polling"
+        case "notifications": "Notifications"
+        case "teams": "Teams"
+        default: key.prefix(1).uppercased() + key.dropFirst()
+        }
+    }
+    public static let weekdayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    public static let weekdayNamesLong = [
+        "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday",
+    ]
+
     // MARK: Statistics
 
     public static let polls24h = "Polls, last 24 hours"

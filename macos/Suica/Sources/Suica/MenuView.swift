@@ -4,6 +4,7 @@ import SwiftUI
 
 struct MenuView: View {
     let model: MenuModel
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -62,25 +63,17 @@ struct MenuView: View {
     }
 
     private func row(_ item: OutboxItem) -> some View {
-        ItemRow(
-            item: item,
-            busy: model.busyIds.contains(item.id),
-            confirming: model.confirmation?.id == item.id,
-            onAction: { action in
-                switch action {
-                case .send: model.requestSend(item)
-                case .skip: Task { await model.skip(item) }
-                case .retry: Task { await model.retry(item) }
-                }
-            },
-            onConfirm: { Task { await model.confirmSend() } },
-            onCancel: { model.cancelConfirmation() })
+        OutboxItemRow(model: model, item: item)
     }
 
     private var footer: some View {
         HStack {
             Button(model.isPaused ? Copy.resume : Copy.pause) { Task { await model.togglePause() } }
             Button(Copy.refresh) { Task { await model.refresh() } }
+            Button(Copy.openWindow) {
+                openWindow(id: "main")
+                NSApp.activate()
+            }
             Spacer()
             Button(Copy.quit) { NSApplication.shared.terminate(nil) }
         }

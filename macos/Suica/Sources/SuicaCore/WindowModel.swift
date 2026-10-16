@@ -51,11 +51,15 @@ public final class WindowModel {
         }
     }
 
-    public func restartAgent() async {
-        guard !restarting else { return }
+    /// True only when the agent reported that it restarted.
+    @discardableResult
+    public func restartAgent() async -> Bool {
+        guard !restarting else { return false }
         restarting = true
+        var restarted = false
         do {
             let code = try await client.restartAgent().code
+            restarted = code == "restarted"
             // `flash(for:)` says a send failed; here it was the restart.
             banner = code == "failed" ? Copy.restartFailed : Copy.flash(for: code)
         } catch {
@@ -63,5 +67,6 @@ public final class WindowModel {
         }
         restarting = false
         await refresh()
+        return restarted
     }
 }

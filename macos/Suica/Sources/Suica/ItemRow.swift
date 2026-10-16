@@ -68,3 +68,26 @@ struct ItemRow: View {
         }
     }
 }
+
+/// One outbox row wired to the model: the popover and the window share this, and the model, so
+/// an action started in one place blocks the other.
+struct OutboxItemRow: View {
+    let model: MenuModel
+    let item: OutboxItem
+
+    var body: some View {
+        ItemRow(
+            item: item,
+            busy: model.busyIds.contains(item.id),
+            confirming: model.confirmation?.id == item.id,
+            onAction: { action in
+                switch action {
+                case .send: model.requestSend(item)
+                case .skip: Task { await model.skip(item) }
+                case .retry: Task { await model.retry(item) }
+                }
+            },
+            onConfirm: { Task { await model.confirmSend() } },
+            onCancel: { model.cancelConfirmation() })
+    }
+}
