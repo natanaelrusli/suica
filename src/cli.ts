@@ -1,3 +1,4 @@
+import { actionJson, buildAgentState } from "./agent-state.ts";
 import { defaultConfigPath } from "./config.ts";
 import { createRuntime } from "./runtime.ts";
 import type { Runtime } from "./runtime.ts";
@@ -5,11 +6,11 @@ import { formatOutbox } from "./teams/format-outbox.ts";
 import { OUTBOX_STATUSES } from "./teams/types.ts";
 
 const USAGE =
-  "usage: mra <once|status|pause|resume|pending [--all]|send <id>|skip <id>|retry <id>|selftest>\n";
+  "usage: mra <once|status|state|pause|resume|pending [--all]|send <id> [--json]|skip <id> [--json]|retry <id> [--json]|selftest>\n";
 const TEAMS_DISABLED = "teams is disabled: set teams.enabled to true in the config\n";
 const SHOWN_WITH_ALL = 50;
 
-const SIMPLE = new Set(["once", "status", "pause", "resume", "selftest", "pending"]);
+const SIMPLE = new Set(["once", "status", "state", "pause", "resume", "selftest", "pending"]);
 const WITH_ID = new Set(["send", "skip", "retry"]);
 
 function parseId(value: string | undefined): number | undefined {
@@ -40,6 +41,18 @@ async function run(runtime: Runtime, command: string, argv: readonly string[]): 
         lines.push(`teams outbox: ${counts.join(", ")}`);
       }
       process.stdout.write(`${lines.join("\n")}\n`);
+      return 0;
+    }
+    case "state": {
+      const state = runtime.store.load();
+      const document = buildAgentState({
+        paused: runtime.store.isPaused(),
+        baselineDone: state.baselineDone,
+        trackedAuthored: state.trackedAuthored.size,
+        reviewRequested: state.myReviewStates.size,
+        rows: teams?.list(true),
+      });
+      process.stdout.write(`${JSON.stringify(document)}\n`);
       return 0;
     }
     case "pause":
@@ -73,13 +86,21 @@ async function run(runtime: Runtime, command: string, argv: readonly string[]): 
         process.stderr.write(USAGE);
         return 2;
       }
+      const json = argv.includes("--json");
       if (command === "send") {
         const outcome = await teams.sendPending(id);
-        process.stdout.write(`send #${id}: ${outcome.status}\n`);
+        process.stdout.write(
+          json ? `${actionJson(outcome.status)}\n` : `send #${id}: ${outcome.status}\n`,
+        );
         return outcome.status === "sent" ? 0 : 1;
       }
       const done = command === "skip" ? teams.skip(id) : teams.retry(id);
-      process.stdout.write(`${command} #${id}: ${done ? "done" : "nothing to do"}\n`);
+      if (json) {
+        const code = done ? (command === "skip" ? "skipped" : "retried") : "nothing";
+        process.stdout.write(`${actionJson(code)}\n`);
+      } else {
+        process.stdout.write(`${command} #${id}: ${done ? "done" : "nothing to do"}\n`);
+      }
       return done ? 0 : 1;
     }
   }
