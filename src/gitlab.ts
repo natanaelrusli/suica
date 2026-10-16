@@ -34,10 +34,7 @@ query MrReviewAssistantSnapshot {
     }
     authoredMergeRequests(state: opened, first: ${PAGE_SIZE}) {
       pageInfo { hasNextPage }
-      nodes {
-        ...MrFields
-        notes(last: ${NOTES_WINDOW}) { nodes { id system author { username name } } }
-      }
+      nodes { ...MrFields }
     }
   }
 }
@@ -49,6 +46,7 @@ fragment MrFields on MergeRequest {
   project { fullPath }
   author { username name }
   reviewers { nodes { username name mergeRequestInteraction { reviewState } } }
+  notes(last: ${NOTES_WINDOW}) { nodes { id system author { username name } } }
 }
 `;
 
