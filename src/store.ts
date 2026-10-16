@@ -250,10 +250,21 @@ export function openStore(path: string): Store {
 
     loadTeams() {
       const nudges = new Map<string, NudgeRecord>();
-      for (const row of rows("SELECT key, sent_count, last_sent_at FROM nudge_state")) {
-        nudges.set(text(row, "key"), {
+      const undelivered = new Set<string>();
+      // The time of the latest message is when it was delivered, not when it was queued: a
+      // reminder is due a day after the Reviewer could first have read the nudge.
+      for (const row of rows(
+        `SELECT n.key, n.sent_count, n.last_sent_at, o.status AS status, o.updated_at AS delivered_at
+         FROM nudge_state n
+         LEFT JOIN outbox o ON o.dedupe_key = 'nudge:' || n.key || ':' || n.sent_count`,
+      )) {
+        const key = text(row, "key");
+        const status = row["status"];
+        const delivered = status === "sent" || status === "dry-run";
+        if (!delivered) undelivered.add(key);
+        nudges.set(key, {
           sentCount: integer(row, "sent_count"),
-          lastSentAt: integer(row, "last_sent_at"),
+          lastSentAt: delivered ? integer(row, "delivered_at") : integer(row, "last_sent_at"),
         });
       }
       const rounds = new Map<string, Round>();
@@ -266,7 +277,7 @@ export function openStore(path: string): Store {
           noticedNotes: integer(row, "noticed_notes"),
         });
       }
-      return { baselineDone: metaValue(META_TEAMS_BASELINE) === "1", nudges, rounds };
+      return { baselineDone: metaValue(META_TEAMS_BASELINE) === "1", nudges, rounds, undelivered };
     },
 
     applyTeamsPlan(plan, now) {

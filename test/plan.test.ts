@@ -16,7 +16,13 @@ const config: PlanConfig = {
 };
 
 function teamsState(overrides: Partial<TeamsState> = {}): TeamsState {
-  return { baselineDone: true, nudges: new Map(), rounds: new Map(), ...overrides };
+  return {
+    baselineDone: true,
+    nudges: new Map(),
+    rounds: new Map(),
+    undelivered: new Set(),
+    ...overrides,
+  };
 }
 
 function plan(input: {
@@ -141,6 +147,15 @@ describe("reviewer nudges (flow B)", () => {
       plan({ snapshot: current, previous: known("UNREVIEWED"), state: sentAt(48 * HOUR, 2) })
         .intents,
     ).toEqual([]);
+  });
+
+  it("does not remind while the nudge itself has not been delivered", () => {
+    const current = snapshot({ authored: [own()] });
+    const state = teamsState({
+      nudges: new Map([[BOB, { sentCount: 1, lastSentAt: NOW - 30 * HOUR }]]),
+      undelivered: new Set([BOB]),
+    });
+    expect(plan({ snapshot: current, previous: known("UNREVIEWED"), state }).intents).toEqual([]);
   });
 
   it("does not remind a Reviewer who reviewed in the meantime", () => {

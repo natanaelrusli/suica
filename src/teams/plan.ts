@@ -63,6 +63,7 @@ export function planTeams(input: PlanInput): TeamsPlan {
       const reminderDue =
         record !== undefined &&
         sent === 1 &&
+        !state.undelivered.has(key) &&
         previous.reviewerStates.get(key) === UNREVIEWED &&
         now - record.lastSentAt >= config.reminderAfterMs;
       if (!asking && !reminderDue) continue;

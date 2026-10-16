@@ -76,8 +76,13 @@ export interface Round {
 export interface TeamsState {
   /** False until the first plan has been applied: history is recorded, never announced. */
   readonly baselineDone: boolean;
-  /** Key is `reviewerKey(mrKey, username)`. */
+  /**
+   * Key is `reviewerKey(mrKey, username)`. `lastSentAt` is the time the latest message was
+   * delivered; for a message that was only queued it is the queue time.
+   */
   readonly nudges: ReadonlyMap<string, NudgeRecord>;
+  /** Reviewer keys whose latest message has not been delivered (queued, skipped, failed, …). */
+  readonly undelivered: ReadonlySet<string>;
   /** Key is the MR key. */
   readonly rounds: ReadonlyMap<string, Round>;
 }

@@ -48,6 +48,7 @@ describe("schema v2", () => {
       baselineDone: false,
       nudges: new Map(),
       rounds: new Map(),
+      undelivered: new Set(),
     });
     store.close();
 
@@ -98,6 +99,7 @@ describe("applyTeamsPlan", () => {
       baselineDone: true,
       nudges: new Map([["g/p!5|bob", { sentCount: 1, lastSentAt: NOW }]]),
       rounds: new Map([["g/p!7", round]]),
+      undelivered: new Set(["g/p!5|bob"]),
     });
   });
 
@@ -181,6 +183,43 @@ describe("outbox transitions", () => {
     expect(ids[0]).toBeLessThan(ids[1] ?? 0);
     expect(store.listOutbox(["sent", "failed"])).toEqual([]);
     expect(store.getOutbox(9999)).toBeUndefined();
+  });
+});
+
+describe("nudge delivery in the ledger", () => {
+  const nudgeUpdates = [{ key: "g/p!5|bob", record: { sentCount: 1, lastSentAt: NOW } }];
+
+  it("reports a nudge as undelivered until its outbox row is sent", () => {
+    const store = openStore(":memory:");
+    store.applyTeamsPlan(
+      teamsPlan({ intents: [intent(1)], nudgeUpdates, keepNudges: ["g/p!5|bob"] }),
+      NOW,
+    );
+    const id = store.listOutbox(["queued"])[0]?.id ?? 0;
+    for (const status of [
+      "queued",
+      "pending",
+      "sending",
+      "skipped",
+      "failed",
+      "unresolved",
+    ] as const) {
+      store.transitionOutbox(id, store.getOutbox(id)?.status ?? "queued", status, {}, NOW);
+      expect([...store.loadTeams().undelivered]).toEqual(["g/p!5|bob"]);
+    }
+  });
+
+  it("uses the delivery time, not the queue time, as the time the nudge was sent", () => {
+    const store = openStore(":memory:");
+    store.applyTeamsPlan(
+      teamsPlan({ intents: [intent(1)], nudgeUpdates, keepNudges: ["g/p!5|bob"] }),
+      NOW,
+    );
+    const id = store.listOutbox(["queued"])[0]?.id ?? 0;
+    store.transitionOutbox(id, "queued", "sent", {}, NOW + 3 * DAY);
+    const state = store.loadTeams();
+    expect(state.undelivered.size).toBe(0);
+    expect(state.nudges.get("g/p!5|bob")).toEqual({ sentCount: 1, lastSentAt: NOW + 3 * DAY });
   });
 });
 
