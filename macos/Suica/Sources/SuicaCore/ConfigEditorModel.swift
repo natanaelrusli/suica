@@ -47,6 +47,11 @@ public final class ConfigEditorModel {
         invalidInputKeys.remove(Self.key(field))
     }
 
+    /// The boxes are gone (the section or the window closed), so what they reported is too.
+    public func clearInputInvalid() {
+        invalidInputKeys = []
+    }
+
     /// The view reports, on every change of a box, whether its text is a value.
     public func setInputInvalid(_ field: ConfigField, _ invalid: Bool) {
         if invalid {

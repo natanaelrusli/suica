@@ -24,6 +24,8 @@ struct ConfigurationView: View {
         }
         .toolbar { toolbar }
         .task { await editor.load() }
+        // The boxes that reported invalid text are destroyed with this view.
+        .onDisappear { editor.clearInputInvalid() }
     }
 
     private func form(_ document: ConfigDocument) -> some View {

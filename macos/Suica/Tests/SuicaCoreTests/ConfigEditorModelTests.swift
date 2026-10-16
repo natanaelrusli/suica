@@ -339,3 +339,16 @@ func makeConfig(sha: String? = "abc", fields: [ConfigField]? = nil, issues: [Con
     await model.load()
     #expect(model.invalidInputKeys.isEmpty)
 }
+
+@MainActor @Test func clearInputInvalidReEnablesSavingAndKeepsTheDrafts() async {
+    let model = await loadedEditor()
+    let fields = makeConfig().fields
+    model.set(fields[0], .int(45))
+    model.setInputInvalid(fields[0], true)
+    model.setInputInvalid(fields[1], true)
+    #expect(!model.canSave)
+    model.clearInputInvalid()
+    #expect(model.invalidInputKeys.isEmpty)
+    #expect(model.drafts["polling.activeSeconds"] == .int(45))
+    #expect(model.canSave)
+}

@@ -212,6 +212,8 @@ private struct IntInput: View {
                 editor.setInputInvalid(field, editor.value(of: field) != .null)
             }
         }
+        // The box was just built from the model, so its text is a value.
+        .onAppear { editor.setInputInvalid(field, false) }
         .onChange(of: editor.value(of: field)) { _, value in
             if case .int(let number) = value {
                 if Int(text) != number { text = String(number) }
@@ -269,6 +271,7 @@ private struct ClockInput: View {
                 editor.setInputInvalid(field, !(new.isEmpty && editor.value(of: field) == .null))
             }
         }
+        .onAppear { editor.setInputInvalid(field, false) }
         .onChange(of: editor.value(of: field)) { _, value in
             let shown = Self.render(value)
             if shown != text { text = shown }
