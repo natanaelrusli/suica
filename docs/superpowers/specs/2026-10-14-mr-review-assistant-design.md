@@ -57,7 +57,7 @@ A personal background agent on the Owner's Mac that watches GitLab merge request
 ## Delivery in three plans
 
 1. **Plan 1 — foundation, flows A and D, macOS notifications.** Read-only; no Teams, no language model. Working software on its own.
-2. **Plan 2 — Teams (flows B and C).** Teams MCP client, templates, identity mapping, send modes, approval CLI.
+2. **Plan 2 — Teams (flows B and C), implemented.** Teams MCP client, templates, identity mapping, send modes, approval CLI.
 3. **Plan 3 — Agent Review.** Written after Plans 1 and 2 exist, because it consumes their event types, store and send-mode config.
 
 ## Deliberate gaps (not forgotten)
