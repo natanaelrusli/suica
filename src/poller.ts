@@ -3,8 +3,13 @@ import type { Snapshot } from "./domain.ts";
 import { countPendingReviews, detectEvents } from "./events.ts";
 import type { PreviousState } from "./events.ts";
 import { execFailure } from "./exec.ts";
-import { NOTIFY_AFTER, STATE_FAILURE_NOTIFICATION, failureNotification } from "./failures.ts";
-import type { FailureKind, FailureTracker } from "./failures.ts";
+import {
+  NOTIFY_AFTER,
+  STATE_FAILURE_NOTIFICATION,
+  failureNotification,
+  teamsFailureNotification,
+} from "./failures.ts";
+import type { FailureKind, FailureTracker, TeamsFailureReportKind } from "./failures.ts";
 import type { Notification } from "./format.ts";
 import { baselineNotifications, buildNotifications } from "./format.ts";
 import { FetchFailure } from "./gitlab.ts";
@@ -12,6 +17,15 @@ import type { GitlabFailureKind } from "./gitlab.ts";
 import type { Logger } from "./log.ts";
 import type { Notifier } from "./notifier.ts";
 import type { Store } from "./store.ts";
+import type { TeamsFailureKind } from "./teams/api.ts";
+
+/** What the poll cycle needs from the Teams feature; absent when `teams.enabled` is false. */
+export interface TeamsHooks {
+  /** Queues messages for this snapshot. `previous` is the state from before the poll. May throw. */
+  plan(snapshot: Snapshot, previous: PreviousState): void;
+  /** Sends or holds queued messages. Never throws; reports what went wrong. */
+  dispatch(snapshot: Snapshot): Promise<{ readonly failure: TeamsFailureKind | undefined }>;
+}
 
 export interface PollDeps {
   readonly fetchSnapshot: () => Promise<Snapshot>;
@@ -20,6 +34,7 @@ export interface PollDeps {
   readonly failures: FailureTracker;
   readonly log: Logger;
   readonly config: Pick<Config, "gitlab" | "notifications">;
+  readonly teams?: TeamsHooks;
 }
 
 export type PollStatus = "ok" | "paused" | "failed";
@@ -30,6 +45,7 @@ const GITLAB_FAILURE_KINDS: readonly GitlabFailureKind[] = [
   "gitlab-unreachable",
   "gitlab-error",
 ];
+const TEAMS_FAILURE_KINDS: readonly TeamsFailureReportKind[] = ["teams-unavailable", "teams-error"];
 
 /** Tells the Owner exactly once per failure streak, when the streak reaches the kind's threshold. */
 async function reportFailure(
@@ -39,8 +55,7 @@ async function reportFailure(
   attributes: Readonly<Record<string, string | number>>,
 ): Promise<void> {
   const streak = deps.failures.fail(kind);
-  const threshold = NOTIFY_AFTER[kind];
-  if (streak !== threshold) {
+  if (streak !== NOTIFY_AFTER[kind]) {
     deps.log.debug("poll failure not reported", { kind, streak });
     return;
   }
@@ -69,11 +84,35 @@ async function reportStateFailure(deps: PollDeps, error: unknown): Promise<void>
   });
 }
 
+/** Runs after the state commit; a Teams problem never changes the poll status. */
+async function runTeams(
+  deps: PollDeps,
+  snapshot: Snapshot,
+  previous: PreviousState,
+): Promise<void> {
+  const { teams } = deps;
+  if (teams === undefined) return;
+  try {
+    teams.plan(snapshot, previous);
+  } catch (error) {
+    await reportStateFailure(deps, error);
+    return;
+  }
+  const { failure } = await teams.dispatch(snapshot);
+  if (failure === undefined) {
+    for (const kind of TEAMS_FAILURE_KINDS) deps.failures.recover(kind);
+    return;
+  }
+  const kind: TeamsFailureReportKind =
+    failure === "unavailable" ? "teams-unavailable" : "teams-error";
+  await reportFailure(deps, kind, teamsFailureNotification(kind), {});
+}
+
 /**
- * One poll cycle. Order matters: events are delivered first and state is committed last, so a
+ * One poll cycle. Order matters: events are delivered first and state is committed next, so a
  * failed delivery is retried on the next poll instead of being marked as seen. The exception is a
  * partial delivery: once at least one notification went out, the state is committed anyway so the
- * delivered ones are never sent again on every following poll.
+ * delivered ones are never sent again on every following poll. Teams runs last, after the commit.
  */
 export async function pollOnce(deps: PollDeps): Promise<PollStatus> {
   const { store, notifier, failures, log, config } = deps;
@@ -134,6 +173,7 @@ export async function pollOnce(deps: PollDeps): Promise<PollStatus> {
     return "failed";
   }
   failures.recover("state");
+  await runTeams(deps, snapshot, previous);
   log.debug("poll complete", {
     review_requested: snapshot.reviewRequested.length,
     authored: snapshot.authored.length,
