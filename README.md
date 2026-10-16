@@ -56,6 +56,25 @@ scripts/suica pause     # stop polling (kill switch)
 scripts/suica resume
 ```
 
+The app window (below) runs these commands. They print one JSON document on stdout, can be used from a script, and (except `stats`) work even when the config file is broken:
+
+```bash
+scripts/suica status --json         # agent service, last poll, paused, intervals, paths; a broken config shows up as configError
+scripts/suica stats                 # history statistics: last 14 days per day, turnaround over 30 days
+scripts/suica config show --json    # every config key with the value in the file, the effective value, and the problems found
+scripts/suica config set --json     # applies edits read from stdin (see below)
+scripts/suica agent restart --json  # launchctl kickstart -k of the background agent
+```
+
+`config set --json` reads at most 1 MiB from stdin:
+
+```json
+{ "baseSha256": "<sha256 from config show, or null if the file does not exist>",
+  "edits": [{ "path": ["polling", "activeSeconds"], "value": 90 }] }
+```
+
+A `value` of `null` removes the key, so the agent's default applies. It prints `{"status": …, "issues": [{"path": …, "message": …}], "sha256": …}` and exits 0 only for `saved`. The other statuses write nothing: `invalid` (the edited config would not load, or Teams is on and the templates folder does not load; `issues` names the keys), `conflict` (the file changed since `baseSha256` was read) and `bad-request` (not valid JSON, larger than 1 MiB, or it names a key that does not exist). A save is atomic and the file keeps mode `0600`. `agent restart --json` prints `{"status": …}` with `restarted`, `not-installed` or `failed` and exits 0 only for `restarted`.
+
 ## Teams
 
 Teams is off until `teams.enabled: true`. Messages are chats from you, written from fixed Indonesian templates, sent as plain text and never by a language model.
@@ -109,7 +128,7 @@ If the script says an old process is still running: its process check also match
 
 ## Menu bar app
 
-A native macOS menu bar app shows what the agent last recorded and lets you handle held Teams messages without typing `suica` commands. The icon shows how many messages need you; click it to see the status, the messages that need you (with **Send…**, **Skip** and **Retry**; Send asks you to confirm the text first), recent messages, and **Pause polling** / **Resume polling**, **Refresh** and **Quit**. The app is in English; the Teams messages it sends are not. It runs the `suica` CLI for everything (`suica state`, `suica send <id> --json`, …), so it follows the same rules as the CLI: at most once, working hours, obsolete messages skipped.
+A native macOS menu bar app shows what the agent last recorded and lets you handle held Teams messages without typing `suica` commands. The icon shows how many messages need you; click it to see the status, the messages that need you (with **Send…**, **Skip** and **Retry**; Send asks you to confirm the text first), recent messages, and **Pause polling** / **Resume polling**, **Refresh**, **Open Suica…** (the app window, below) and **Quit**. The app is in English; the Teams messages it sends are not. It runs the `suica` CLI for everything (`suica state`, `suica send <id> --json`, …), so it follows the same rules as the CLI: at most once, working hours, obsolete messages skipped.
 
 ```bash
 scripts/install-macos-app.sh      # builds, installs ~/Applications/Suica.app and starts it
@@ -117,6 +136,19 @@ scripts/uninstall-macos-app.sh
 ```
 
 Add it under System Settings → General → Login Items to start it at login. The app's own tests: `cd macos/Suica && swift test`. It needs Swift (Xcode or the Command Line Tools) and Node.
+
+## App window
+
+**Open Suica…** in the menu bar popover opens a window with four sections. The app is in English. The window shows in the Dock while it is open and the app goes back to menu-bar-only when you close it.
+
+- **Overview**: whether the background agent is running (with its pid), is installed but not running, or is not installed; **Restart agent**; paused or polling with **Pause polling** / **Resume polling**, the poll intervals, the last recorded poll (ok or failed, and the reason) and how many MRs are tracked and waiting; whether Teams is on; the config file, state folder, logs folder and templates folder with a Show in Finder button each. A config error is shown here in red.
+- **Messages**: the same list and actions as the popover (Send…, Skip, Retry). The window and the popover share one model, so a message acted on in one cannot be sent twice from the other.
+- **Statistics**: polls in the last 24 hours (ok and failed), counts over the last 14 days of Review Requests, activity on your MRs (reviewer state changes and comments that passed `ignoreAuthors`), nudges and Review Notices sent, a bar chart per day, and two turnaround times (median and 90th percentile, in whole minutes): from a Review Request to your review, and from a delivered nudge to that Reviewer's review, for reviews in the last 30 days. Review Requests and activity are counted as detected, before they are grouped into a summary notification; Teams messages are counted on the day of their last change. Paused polls are not logged.
+- **Configuration**: a form with every key of the table above, grouped as GitLab, Polling, Notifications, Teams and Storage; **Use default** removes a key from the file. **Save** is disabled while a field holds text that is not a value yet (an empty number box, a half-typed time like `09:3`) and while nothing changed. The agent checks the edit before it writes: unknown or wrong values and, with Teams on, a templates folder that does not load, are refused with a message next to the field and the file is left alone. **Open config in editor** and **Open templates folder** are in the toolbar; templates are not edited in the app. If the file changed on disk while you were editing, Save is refused (`conflict`), your edits are kept and **Reload** shows the new file.
+
+Edits apply only after **Restart agent**, which the window offers right after a save (and which is also on Overview). The agent reads its config once at start.
+
+History starts when this version is installed; nothing from before is reconstructed. Poll log and history are kept for 90 days, like the Teams outbox.
 
 ## Run in the background
 
@@ -151,6 +183,11 @@ Source of truth for each behaviour is a test in `test/`. `src/events.ts`, `src/f
 - Teams planning starts from the moment Teams is enabled, and again after every period in which it was switched off; older history is never announced.
 - The Agent Review flow is not implemented yet.
 - The menu bar app shows what the agent last recorded and refreshes every 30 seconds; the background agent (or `scripts/suica once`) has to have polled for its list to be current.
+- Statistics start when this version is installed: there is no history before the upgrade, and it is kept for 90 days. The turnaround times stay empty until a request and its review are both recorded.
+- The window refreshes every 30 seconds while it is open; the Configuration form is loaded when you open that section or press Reload.
+- Saving the config rewrites the whole file: comments and values are kept, but indentation is normalised and flow lists such as `[a,b]` are respaced.
+- A config file whose section is empty or `null` (for example a bare `teams:` line) cannot be repaired in the window: saving a key inside that section is refused. Fix the file in an editor.
+- **Restart agent** runs `launchctl kickstart -k`, which stops the running agent. A poll in progress is not waited for, so a Teams message being sent at that moment can be cut off; it stays `sending` and may have been delivered, so check Teams before deciding.
 - The install script bakes the absolute `node` and repository paths into the app: after moving the repository or switching Node versions, run `scripts/install-macos-app.sh` again.
-- The app and the CLI speak a versioned JSON format (`contracts/agent-state.v1.json`); an app built for a different version shows "The agent speaks a newer protocol. Rebuild the app."
+- The app and the CLI speak a versioned JSON format (`contracts/agent-state.v1.json`, `contracts/status.v1.json`, `contracts/stats.v1.json`, `contracts/config.v1.json`); an app built for a different version shows "The agent speaks a newer protocol. Rebuild the app."
 - The menu bar app gives a Send 300 seconds to finish (the CLI's own worst case with the default Teams timeouts is 210 s). If you raise `teams.callTimeoutSeconds`, raise `sendTimeout` in `macos/Suica/Sources/SuicaCore/AgentClient.swift` and run the install script again.
