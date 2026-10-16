@@ -1,10 +1,20 @@
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  fsyncSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname } from "node:path";
-import { isCollection, isMap, parse, parseDocument } from "yaml";
+import { YAMLMap, isCollection, isMap, isScalar, isSeq, parse, parseDocument } from "yaml";
 import type { Document } from "yaml";
 import { z } from "zod";
-import { validateConfig } from "./config.ts";
+import { expandHome, validateConfig } from "./config.ts";
 import type { ConfigIssue } from "./config.ts";
 import { CONFIG_FIELDS } from "./config-fields.ts";
 import type { ConfigField } from "./config-fields.ts";
@@ -150,11 +160,17 @@ const sha256Of = (data: string | Buffer): string => createHash("sha256").update(
 const samePath = (left: readonly string[], right: readonly string[]): boolean =>
   left.length === right.length && left.every((segment, index) => segment === right[index]);
 
-/** Removes the key at `path`; nothing to do when a section above it is missing, throws when one is not a collection. */
+/** A section written as a bare `key:` line, which parses as a null scalar. */
+const isNullSection = (node: unknown): boolean => isScalar(node) && node.value === null;
+
+/**
+ * Removes the key at `path`; nothing to do when a section above it is missing or null, throws when
+ * one is not a collection.
+ */
 function removeKey(doc: Document, path: readonly string[]): void {
   for (let length = 1; length < path.length; length++) {
     const node = doc.getIn(path.slice(0, length), true);
-    if (node === undefined) return;
+    if (node === undefined || isNullSection(node)) return;
     if (!isCollection(node)) throw new Error("not a collection");
   }
   doc.deleteIn(path);
@@ -168,6 +184,69 @@ function pruneEmptyParents(doc: Document, path: readonly string[]): void {
     const node = doc.getIn(prefix, true);
     if (!isMap(node) || node.items.length > 0) return;
     doc.deleteIn(prefix);
+  }
+}
+
+const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+/** A scalar node that already holds `value`; a new value never matches a collection node. */
+const holds = (node: unknown, value: unknown): boolean => isScalar(node) && node.value === value;
+
+/** Turns every null section above `path` into an empty mapping, so a key can be set below it. */
+function openSections(doc: Document, path: readonly string[]): void {
+  for (let length = 1; length < path.length; length++) {
+    const prefix = path.slice(0, length);
+    if (isNullSection(doc.getIn(prefix, true))) doc.setIn(prefix, new YAMLMap());
+  }
+}
+
+/**
+ * Edits the sequence in place: an item that stays keeps its node (and so its comments), whatever
+ * its new position; the sequence node keeps its own comments.
+ */
+function editSequence(doc: Document, items: unknown[], values: readonly unknown[]): unknown[] {
+  const unused = [...items];
+  return values.map((value) => {
+    const index = unused.findIndex((node) => holds(node, value));
+    if (index < 0) return doc.createNode(value);
+    return unused.splice(index, 1)[0];
+  });
+}
+
+/** Edits the mapping key by key, so the pairs that stay keep their comments. */
+function editMap(doc: Document, map: YAMLMap, values: Record<string, unknown>): void {
+  const seen = new Set<string>();
+  map.items = map.items.filter((pair) => {
+    // A key written as a number (`123:`) is the string the editor sends.
+    const key = isScalar(pair.key) ? String(pair.key.value) : undefined;
+    if (key === undefined || !Object.hasOwn(values, key) || seen.has(key)) return false;
+    seen.add(key);
+    const value = values[key];
+    if (holds(pair.value, value)) return true;
+    if (isScalar(pair.value) && typeof value === "string") pair.value.value = value;
+    else pair.value = doc.createNode(value);
+    return true;
+  });
+  for (const [key, value] of Object.entries(values)) {
+    if (!seen.has(key)) map.items.push(doc.createPair(key, value));
+  }
+}
+
+/** Sets the key at `path`; a list or a map already in the file is edited, not replaced. */
+function setKey(doc: Document, path: readonly string[], value: unknown): void {
+  openSections(doc, path);
+  const node = doc.getIn(path, true);
+  if (Array.isArray(value) && isSeq(node)) {
+    node.items = editSequence(doc, node.items, value);
+  } else if (isPlainObject(value) && isMap(node)) {
+    editMap(doc, node, value);
+    if (node.items.length === 0) removeKey(doc, path);
+  } else if (isPlainObject(value) && Object.keys(value).length === 0) {
+    // An empty map is the default: nothing to write.
+    removeKey(doc, path);
+  } else {
+    doc.setIn(path, value);
   }
 }
 
@@ -205,7 +284,7 @@ export function applyConfigEdits(path: string, request: SaveRequest): SaveResult
       if (value === null) {
         removeKey(doc, editPath);
       } else {
-        doc.setIn(editPath, value);
+        setKey(doc, editPath, value);
       }
     } catch {
       return fail("invalid", {
@@ -227,7 +306,11 @@ export function applyConfigEdits(path: string, request: SaveRequest): SaveResult
   if (!validated.ok) return fail("invalid", ...validated.issues);
   if (validated.config.teams.enabled) {
     try {
-      loadTemplates(validated.config.teams.templatesPath ?? defaultTemplatesPath());
+      const templatesPath = validated.config.teams.templatesPath;
+      // The agent expands a leading ~ when it loads the config: check the folder it will read.
+      loadTemplates(
+        templatesPath === undefined ? defaultTemplatesPath() : expandHome(templatesPath),
+      );
     } catch (error) {
       const message =
         error instanceof TemplateError ? error.message : "cannot read the templates folder";
@@ -250,7 +333,14 @@ function writeAtomically(path: string, text: string): void {
   try {
     mkdirSync(dirname(target), { recursive: true, mode: 0o700 });
     rmSync(temp, { force: true });
-    writeFileSync(temp, text, { mode: 0o600, flag: "wx" });
+    const fd = openSync(temp, "wx", 0o600);
+    try {
+      writeFileSync(fd, text);
+      // On disk before the rename, so a crash never leaves an empty or partial config behind.
+      fsyncSync(fd);
+    } finally {
+      closeSync(fd);
+    }
     renameSync(temp, target);
   } catch {
     try {

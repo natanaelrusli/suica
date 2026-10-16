@@ -87,7 +87,7 @@ export interface StatusInput {
 }
 
 /** The part of the store the status document reads. */
-export type StatusStore = Pick<Store, "loadHistory" | "isPaused" | "close">;
+export type StatusStore = Pick<Store, "lastPoll" | "isPaused" | "close">;
 
 export interface StatusDeps {
   readonly loadConfig: (path: string) => Config;
@@ -110,8 +110,7 @@ export function loadStatusInput(configPath: string, deps: StatusDeps): StatusInp
   try {
     const store = deps.openStore(config.statePath ?? defaultStatePath());
     try {
-      const polls = store.loadHistory(0).polls;
-      return { config, paused: store.isPaused(), lastPoll: polls[polls.length - 1] ?? null };
+      return { config, paused: store.isPaused(), lastPoll: store.lastPoll() ?? null };
     } finally {
       store.close();
     }

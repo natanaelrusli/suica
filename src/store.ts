@@ -59,6 +59,8 @@ export interface Store {
   recordPoll(entry: PollLogEntry): void;
   /** The poll log and the history events at or after `since`, oldest first. */
   loadHistory(since: number): HistoryRows;
+  /** The latest poll (the last recorded of a tie), undefined when the log is empty. */
+  lastPoll(): PollLogEntry | undefined;
   isPaused(): boolean;
   setPaused(paused: boolean): void;
   loadTeams(): TeamsState;
@@ -244,9 +246,11 @@ function restrictPermissions(path: string): void {
 
 export function openStore(path: string): Store {
   if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true, mode: DIRECTORY_MODE });
-  const db = new DatabaseSync(path);
+  // The timeout is set before the first statement: switching a new file to WAL needs a lock that
+  // another process creating the database at the same moment may hold.
+  const db = new DatabaseSync(path, { timeout: BUSY_TIMEOUT_MS });
   try {
-    db.exec(`PRAGMA journal_mode = WAL; PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS};`);
+    db.exec("PRAGMA journal_mode = WAL;");
     initSchema(db);
     restrictPermissions(path);
   } catch (error) {
@@ -361,6 +365,11 @@ export function openStore(path: string): Store {
           .all(since)
           .map(toHistoryEvent),
       };
+    },
+
+    lastPoll() {
+      const row = db.prepare("SELECT * FROM poll_log ORDER BY at DESC, rowid DESC LIMIT 1").get();
+      return row === undefined ? undefined : toPollLogEntry(row);
     },
 
     loadTeams() {

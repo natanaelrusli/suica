@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -91,5 +92,34 @@ describe("openStore", () => {
     raw.exec("PRAGMA user_version = 99");
     raw.close();
     expect(() => openStore(path)).toThrow(/newer/);
+  });
+});
+
+describe("opening a database another process holds", () => {
+  it("waits for the lock instead of failing at once", async () => {
+    const path = tempDb();
+    // The other process takes the lock on the new file and lets go a moment later.
+    const holder = spawn(
+      process.execPath,
+      [
+        "-e",
+        `const { DatabaseSync } = require("node:sqlite");
+         const db = new DatabaseSync(process.argv[1]);
+         db.exec("BEGIN EXCLUSIVE; CREATE TABLE held (x);");
+         process.stdout.write("held\\n");
+         setTimeout(() => { db.exec("COMMIT"); db.close(); }, 400);`,
+        path,
+      ],
+      { stdio: ["ignore", "pipe", "inherit"] },
+    );
+    const exited = new Promise((resolve) => holder.on("exit", resolve));
+    await new Promise<void>((resolve) => holder.stdout.once("data", () => resolve()));
+    try {
+      const store = openStore(path);
+      expect(store.isPaused()).toBe(false);
+      store.close();
+    } finally {
+      await exited;
+    }
   });
 });

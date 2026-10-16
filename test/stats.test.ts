@@ -175,6 +175,21 @@ describe("buildStats", () => {
     });
   });
 
+  it("keeps a pair that started more than 30 days ago but ended inside the window", () => {
+    const history: HistoryRows = {
+      polls: [],
+      events: [
+        event("review-requested", "g/p!1", NOW - 45 * D),
+        event("owner-reviewed", "g/p!1", NOW - 29 * D),
+      ],
+    };
+    expect(build(history).ownerAfterRequest).toEqual({
+      count: 1,
+      medianMinutes: 16 * 24 * 60,
+      p90Minutes: 16 * 24 * 60,
+    });
+  });
+
   it("pairs a nudge only with the same reviewer on the same MR", () => {
     const history: HistoryRows = {
       polls: [],

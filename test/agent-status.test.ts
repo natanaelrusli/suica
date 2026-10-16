@@ -117,6 +117,20 @@ describe("buildStatus", () => {
     ).toEqual(golden);
   });
 
+  it("shows the path settings with a leading ~ expanded", () => {
+    const config = parseConfig(
+      "gitlab:\n  hostname: h\nteams:\n  templatesPath: ~/t\nstatePath: ~/s/state.db\n",
+    );
+    const status = buildStatus({
+      service,
+      configPath: "/c/config.yaml",
+      logsPath: "/l",
+      loaded: { config, paused: false, lastPoll: null },
+    });
+    expect(status.paths.state).toBe(join(homedir(), "s", "state.db"));
+    expect(status.paths.templates).toBe(join(homedir(), "t"));
+  });
+
   it("builds a status with a config error and default paths", () => {
     const status = buildStatus({
       service: { loaded: false, running: false, pid: null },
@@ -181,13 +195,7 @@ describe("store failures", () => {
   } {
     let closed = false;
     const store: StatusStore = {
-      loadHistory: () => ({
-        polls: [
-          { at: 1, status: "ok", failure: null, durationMs: 5 },
-          { at: 2, status: "failed", failure: "x", durationMs: 6 },
-        ],
-        events: [],
-      }),
+      lastPoll: () => ({ at: 2, status: "failed", failure: "x", durationMs: 6 }),
       isPaused: () => true,
       close: () => {
         closed = true;
@@ -226,9 +234,18 @@ describe("store failures", () => {
     expect(JSON.stringify(loaded)).not.toContain("SECRET");
   });
 
-  it("reports only the error class when reading the history fails, and still closes", () => {
+  it("reports a null last poll when the log is empty", () => {
+    const { store } = fakeStore({ lastPoll: () => undefined });
+    const loaded = loadStatusInput("/c", {
+      loadConfig: () => parseConfig(CONFIG_TEXT),
+      openStore: () => store,
+    });
+    expect(loaded).toMatchObject({ paused: true, lastPoll: null });
+  });
+
+  it("reports only the error class when reading the last poll fails, and still closes", () => {
     const { store, closed } = fakeStore({
-      loadHistory: () => {
+      lastPoll: () => {
         throw new TypeError(secret);
       },
     });

@@ -97,6 +97,32 @@ export function validateConfig(
   };
 }
 
+/** `~` and a leading `~/` mean the home folder; `~user` and a `~` later in the path are kept. */
+export function expandHome(path: string): string {
+  if (path === "~") return homedir();
+  return path.startsWith("~/") ? `${homedir()}${path.slice(1)}` : path;
+}
+
+/**
+ * The agent runs with the repository as its working folder, so an unexpanded `~/x` would be a
+ * folder named `~` there. Expanded once at load time; the editor keeps the text as typed.
+ */
+function expandPaths(config: Config): Config {
+  const { gitlab, teams, statePath } = config;
+  return {
+    ...config,
+    gitlab: { ...gitlab, glabPath: expandHome(gitlab.glabPath) },
+    teams: {
+      ...teams,
+      ...(teams.command === undefined ? {} : { command: expandHome(teams.command) }),
+      ...(teams.templatesPath === undefined
+        ? {}
+        : { templatesPath: expandHome(teams.templatesPath) }),
+    },
+    ...(statePath === undefined ? {} : { statePath: expandHome(statePath) }),
+  };
+}
+
 export function parseConfig(text: string): Config {
   let raw: unknown;
   try {
@@ -109,7 +135,7 @@ export function parseConfig(text: string): Config {
     const problems = result.issues.map((issue) => `${issue.path}: ${issue.message}`);
     throw new ConfigError(`invalid config: ${problems.join("; ")}`);
   }
-  return result.config;
+  return expandPaths(result.config);
 }
 
 export function loadConfig(path: string): Config {

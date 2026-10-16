@@ -1,7 +1,13 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { ConfigError, defaultConfigPath, parseConfig } from "../src/config.ts";
+import {
+  ConfigError,
+  defaultConfigPath,
+  expandHome,
+  parseConfig,
+  validateConfig,
+} from "../src/config.ts";
 
 const MINIMAL = "gitlab:\n  hostname: gitlab.example\n";
 
@@ -108,5 +114,42 @@ describe("defaultConfigPath", () => {
     expect(defaultConfigPath({ MRA_CONFIG: "/old.yaml", SUICA_CONFIG: "/new.yaml" })).toBe(
       "/new.yaml",
     );
+  });
+});
+
+describe("a leading ~ in the path settings", () => {
+  const home = homedir();
+  const PATHS = [
+    "gitlab:",
+    "  hostname: h",
+    "  glabPath: ~/bin/glab",
+    "teams:",
+    "  command: ~/run.sh",
+    "  templatesPath: ~/t",
+    "statePath: ~/x/state.db",
+  ].join("\n");
+
+  it("is expanded to the home folder when the config is loaded", () => {
+    const config = parseConfig(PATHS);
+    expect(config.gitlab.glabPath).toBe(join(home, "bin", "glab"));
+    expect(config.teams.command).toBe(join(home, "run.sh"));
+    expect(config.teams.templatesPath).toBe(join(home, "t"));
+    expect(config.statePath).toBe(join(home, "x", "state.db"));
+  });
+
+  it("expands ~ alone and ~/ only at the start", () => {
+    expect(expandHome("~")).toBe(home);
+    expect(expandHome("~/")).toBe(`${home}/`);
+    expect(expandHome("~/x")).toBe(`${home}/x`);
+    for (const kept of ["a/~/b", "~other/x", "/abs/~", "x~", "glab", ""]) {
+      expect(expandHome(kept)).toBe(kept);
+    }
+    expect(parseConfig(`${MINIMAL}statePath: ~other/s.db\n`).statePath).toBe("~other/s.db");
+    expect(parseConfig(`${MINIMAL}statePath: a/~/s.db\n`).statePath).toBe("a/~/s.db");
+  });
+
+  it("is kept as typed by validateConfig, which the editor uses", () => {
+    const result = validateConfig({ gitlab: { hostname: "h" }, statePath: "~/x/state.db" });
+    expect(result.ok && result.config.statePath).toBe("~/x/state.db");
   });
 });

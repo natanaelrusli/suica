@@ -116,6 +116,27 @@ describe("history", () => {
     expect(history.polls.map((p) => p.at)).toEqual([NOW + 10]);
   });
 
+  it("lastPoll is the latest poll by time, the later one of a tie, and undefined when none", () => {
+    const store = openStore(":memory:");
+    expect(store.lastPoll()).toBeUndefined();
+    store.recordPoll(poll(NOW + 2000, { status: "failed", failure: "network" }));
+    store.recordPoll(poll(NOW));
+    expect(store.lastPoll()).toEqual(poll(NOW + 2000, { status: "failed", failure: "network" }));
+    store.recordPoll(poll(NOW + 2000, { durationMs: 7 }));
+    expect(store.lastPoll()).toEqual(poll(NOW + 2000, { durationMs: 7 }));
+  });
+
+  it("lastPoll rejects a stored row with an unknown status", () => {
+    const path = tempDb();
+    openStore(path).close();
+    const db = new DatabaseSync(path);
+    db.exec("INSERT INTO poll_log VALUES (1, 'bogus', NULL, 5)");
+    db.close();
+    const store = openStore(path);
+    expect(() => store.lastPoll()).toThrow(/unknown status/);
+    store.close();
+  });
+
   it("rejects a stored row with an unknown kind or status", () => {
     const path = tempDb();
     openStore(path).close();

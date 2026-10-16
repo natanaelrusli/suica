@@ -2,7 +2,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { buildStatus, loadStatusInput, readServiceStatus, restartService } from "./agent-status.ts";
 import { actionJson, buildAgentState } from "./agent-state.ts";
-import { defaultConfigPath, loadConfig } from "./config.ts";
+import { defaultConfigPath, defaultStatePath, loadConfig } from "./config.ts";
 import { applyConfigEdits, parseSaveRequest, showConfig } from "./config-edit.ts";
 import type { SaveResultJson } from "./config-edit.ts";
 import { defaultExec } from "./exec.ts";
@@ -72,18 +72,6 @@ async function run(runtime: Runtime, command: string, argv: readonly string[]): 
       process.stdout.write(`${JSON.stringify(document)}\n`);
       return 0;
     }
-    case "stats": {
-      const now = Date.now();
-      const document = buildStats({
-        history: runtime.store.loadHistory(now - 30 * 86_400_000),
-        outbox: teams?.list(true) ?? [],
-        now,
-        days: 14,
-        dayKey: localDayKey,
-      });
-      process.stdout.write(`${JSON.stringify(document)}\n`);
-      return 0;
-    }
     case "pause":
       runtime.store.setPaused(true);
       process.stdout.write("paused\n");
@@ -146,6 +134,32 @@ async function statusJson(): Promise<number> {
   return 0;
 }
 
+/** A turnaround counts when it ended within 30 days, so its start can be up to 60 days back. */
+const STATS_HISTORY_MS = 60 * 86_400_000;
+
+/**
+ * `suica stats`: reads the config and the state database only. It never creates the runtime, which
+ * would load the Teams templates and, while Teams is off, write to the database on every call.
+ */
+function statsJson(): number {
+  const config = loadConfig(defaultConfigPath());
+  const store = openStore(config.statePath ?? defaultStatePath());
+  try {
+    const now = Date.now();
+    const document = buildStats({
+      history: store.loadHistory(now - STATS_HISTORY_MS),
+      outbox: config.teams.enabled ? store.listOutbox(OUTBOX_STATUSES) : [],
+      now,
+      days: 14,
+      dayKey: localDayKey,
+    });
+    process.stdout.write(`${JSON.stringify(document)}\n`);
+    return 0;
+  } finally {
+    store.close();
+  }
+}
+
 async function restartAgent(): Promise<number> {
   const result = await restartService(defaultExec, process.getuid?.() ?? 0);
   process.stdout.write(`${actionJson(result)}\n`);
@@ -205,6 +219,7 @@ async function main(argv: readonly string[]): Promise<number> {
     return 2;
   }
   if (command === "status" && argv.includes("--json")) return statusJson();
+  if (command === "stats") return statsJson();
   const runtime = createRuntime(defaultConfigPath());
   try {
     return await run(runtime, command, argv);
