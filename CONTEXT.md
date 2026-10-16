@@ -1,6 +1,6 @@
-# MR Review Assistant
+# Suica
 
-A personal background agent that watches the owner's GitLab merge requests, tells the owner what needs their attention, and chats other people in Microsoft Teams so reviews keep moving. Working name; the project has no folder yet.
+Suica is a personal background agent that watches the owner's GitLab merge requests, tells the owner what needs their attention, and chats other people in Microsoft Teams so reviews keep moving.
 
 ## Language
 

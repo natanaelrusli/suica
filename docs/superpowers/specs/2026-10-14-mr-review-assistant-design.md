@@ -1,4 +1,4 @@
-# MR Review Assistant — design
+# Suica (formerly MR Review Assistant) — design
 
 Status: agreed with the Owner in a design interview on 2026-10-13/14. Vocabulary is defined in `CONTEXT.md` (Owner, Author, Reviewer, Review Request, Reviewer Nudge, Review Notice, Activity Alert, Agent Review, Pending Message); this document uses those terms and does not redefine them.
 
@@ -19,6 +19,7 @@ A personal background agent on the Owner's Mac that watches GitLab merge request
 ## Decisions
 
 ### Runtime and scope
+- Renamed to Suica on 2026-10-16: paths, CLI, LaunchAgent and app follow `docs/superpowers/plans/2026-10-16-suica-plan-1-rename.md`.
 - Single user (the Owner), on the Owner's Mac, as a launchd LaunchAgent. TypeScript on Node 24, run with Node's native type stripping (no build step).
 - Poll every 120 s while the Mac is active, every 300 s while idle (idle = no keyboard/mouse input for 300 s). Both intervals and the idle threshold are configurable. After a full sleep the next poll catches up from stored state; many events arriving at once collapse into one summary notification.
 - All projects visible to the Owner, no allowlist. Draft MRs are ignored until they are marked ready. Only open MRs are watched.
@@ -30,7 +31,7 @@ A personal background agent on the Owner's Mac that watches GitLab merge request
 
 ### Teams (Plan 2)
 - The agent is an MCP client of the existing Teams MCP (`~/.config/teams-mcp/run.sh`, tools `search_users`, `create_chat`, `send_chat_message`). Messages come from fixed templates, never from a language model.
-- Send mode is configurable per flow: `auto`, `approval` or `dry-run`. Default for Reviewer Nudge and Review Notice is `approval`. Approval is done in a CLI (`mra pending`, `mra send <id>`, `mra skip <id>`).
+- Send mode is configurable per flow: `auto`, `approval` or `dry-run`. Default for Reviewer Nudge and Review Notice is `approval`. Approval is done in a CLI (`suica pending`, `suica send <id>`, `suica skip <id>`).
 - Templates are text files in the config folder, Indonesian by default, with validated placeholders. An unknown placeholder stops startup instead of sending a broken message.
 - Identity: resolve the GitLab display name with `search_users` and cache the result. Exactly one match → use it. Zero or several → send nothing and tell the Owner to add a line to the mapping file.
 - State is written before sending (at most once). A missed nudge is acceptable; a duplicate nudge is not.
@@ -42,11 +43,11 @@ A personal background agent on the Owner's Mac that watches GitLab merge request
 - Invoked as `claude -p` (Claude Code headless) with a read-only tool set (`Read`, `Grep`, `Glob`) on a shallow read-only checkout of the MR's source branch in a temp folder that is deleted afterwards. Output is JSON (file, line, severity, comment) validated against a schema; deterministic code posts it.
 - Triggered for every non-draft Review Request once the head commit has been stable for 5 minutes, up to 800 changed lines (larger MRs are skipped with a notification), never twice for the same head SHA, and again only on a new Review Request.
 - Posted automatically as the Owner. Comments are in English and carry a visible label stating they were written by an agent. Inline where the line is part of the diff, otherwise a general MR note. A summary note is posted even when there are no findings.
-- Guardrails, all configurable: the agent never approves and never requests changes; every comment is sanitised (lines starting with `/` are escaped because GitLab runs quick actions in notes, `@mentions` removed, no outbound links); caps on comments per MR and reviews per day; a kill switch (`mra pause`) and a cost cap; a severity threshold.
+- Guardrails, all configurable: the agent never approves and never requests changes; every comment is sanitised (lines starting with `/` are escaped because GitLab runs quick actions in notes, `@mentions` removed, no outbound links); caps on comments per MR and reviews per day; a kill switch (`suica pause`) and a cost cap; a severity threshold.
 - The send mode switch exists here too (`auto` / `approval` / `dry-run`). The Owner chose `auto`; a dry-run period at first is recommended.
 
 ### State, failures, logging, config
-- SQLite file in `~/Library/Application Support/mr-review-assistant/`. The first run records a baseline silently and shows one summary notification ("N MR waiting for your review"); old history never triggers Nudges, Notices or Alerts.
+- SQLite file in `~/Library/Application Support/suica/`. The first run records a baseline silently and shows one summary notification ("N MR waiting for your review"); old history never triggers Nudges, Notices or Alerts.
 - Each failure kind (glab missing, GitLab auth, GitLab unreachable, GitLab error, notifier) notifies the Owner once and resets on recovery. Network errors back off exponentially up to a cap. Teams sends are never retried automatically.
 - Logs: JSON lines to stdout with `timestamp`, `level`, `message`, `service_name`, `environment`, extra context under `attributes`; English constant messages; no employee IDs, names, comment text or tokens.
 - One YAML config file plus template files. Unknown keys are rejected.

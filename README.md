@@ -1,4 +1,4 @@
-# MR Review Assistant
+# Suica
 
 A personal background agent for macOS that polls GitLab on `repo.madhani.one` and shows a notification when someone requests your review (flow A) and when someone reviews or comments on your own merge requests (flow D). Vocabulary: [CONTEXT.md](CONTEXT.md). Design: [spec](docs/superpowers/specs/2026-10-14-mr-review-assistant-design.md). Plan 1 (alerts) and Plan 2 (Teams chats) are implemented; agent reviews come in Plan 3.
 
@@ -14,11 +14,11 @@ It only reads from GitLab. It never posts, approves or changes anything there. W
 
 ```bash
 npm ci
-mkdir -p ~/.config/mr-review-assistant
-printf 'gitlab:\n  hostname: repo.madhani.one\n' > ~/.config/mr-review-assistant/config.yaml
+mkdir -p ~/.config/suica
+printf 'gitlab:\n  hostname: repo.madhani.one\n' > ~/.config/suica/config.yaml
 ```
 
-Config file: `~/.config/mr-review-assistant/config.yaml` (override the path with `MRA_CONFIG`). Unknown keys are rejected so typos fail loudly.
+Config file: `~/.config/suica/config.yaml` (override the path with `SUICA_CONFIG`). Unknown keys are rejected so typos fail loudly.
 
 | Key                                | Default                          | Meaning                                                          |
 | ---------------------------------- | -------------------------------- | ---------------------------------------------------------------- |
@@ -41,19 +41,19 @@ Config file: `~/.config/mr-review-assistant/config.yaml` (override the path with
 | `teams.reminderAfterHours`         | `24`                             | Reminder if the Reviewer is still `UNREVIEWED` this long after the nudge |
 | `teams.noticeDebounceMinutes`      | `10`                             | Review Notice after this long without further change by you      |
 | `teams.maxMessagesPerReviewer`     | `2`                              | At most this many messages per MR per Reviewer                   |
-| `teams.templatesPath`              | `~/.config/mr-review-assistant/templates` | Folder with template files                              |
+| `teams.templatesPath`              | `~/.config/suica/templates` | Folder with template files                              |
 | `teams.people`                     | `{}`                             | GitLab username → email, for people Teams cannot find by name    |
-| `statePath`                        | `~/Library/Application Support/mr-review-assistant/state.db` | SQLite state file |
+| `statePath`                        | `~/Library/Application Support/suica/state.db` | SQLite state file |
 
 The first poll on a fresh state database records a baseline silently and shows one summary ("N MR menunggu review-mu"). History never alerts.
 
 ## Commands
 
 ```bash
-scripts/mra once      # one poll now
-scripts/mra status    # paused / baseline / tracked counts
-scripts/mra pause     # stop polling (kill switch)
-scripts/mra resume
+scripts/suica once      # one poll now
+scripts/suica status    # paused / baseline / tracked counts
+scripts/suica pause     # stop polling (kill switch)
+scripts/suica resume
 ```
 
 ## Teams
@@ -63,44 +63,66 @@ Teams is off until `teams.enabled: true`. Messages are chats from you, written f
 - **Reviewer Nudge** to a Reviewer who is added to, or re-requested on, one of your non-draft MRs; one reminder if they are still `UNREVIEWED` 24 hours later; never to someone who already reviewed.
 - **Review Notice** to the Author of an MR you reviewed (approved, requested changes or comments only), 10 minutes after you stopped changing your review.
 
-A message that is no longer needed (the Reviewer has reviewed, the MR is gone) is skipped, also while it waits for your approval; `mra send` refuses it with `obsolete`. A reminder is due 24 hours after the nudge was actually delivered, never before.
+A message that is no longer needed (the Reviewer has reviewed, the MR is gone) is skipped, also while it waits for your approval; `suica send` refuses it with `obsolete`. A reminder is due 24 hours after the nudge was actually delivered, never before.
 
 Each flow has a send mode: `approval` (default; the message waits for you), `auto` (sent when due) or `dry-run` (rendered and recorded, never sent). Messages only go out in working hours (Mac local time) and wait in the queue otherwise.
 
 ```bash
-scripts/mra pending [--all]   # list messages that need you (all statuses with --all)
-scripts/mra send <id>         # send a pending message
-scripts/mra skip <id>         # drop a message
-scripts/mra retry <id>        # look the person up again after fixing teams.people
-scripts/mra selftest          # send one test line to your own Teams notes chat
-scripts/mra state             # the agent's state as one JSON document (used by the menu bar app)
+scripts/suica pending [--all]   # list messages that need you (all statuses with --all)
+scripts/suica send <id>         # send a pending message
+scripts/suica skip <id>         # drop a message
+scripts/suica retry <id>        # look the person up again after fixing teams.people
+scripts/suica selftest          # send one test line to your own Teams notes chat
+scripts/suica state             # the agent's state as one JSON document (used by the menu bar app)
 ```
 
-Statuses in `mra pending`: `pending` waits for you; `unresolved` needs a `teams.people` line (then `mra retry`), or Teams returned an error for that person's lookup; `failed` is final; `sending` may have been delivered, so check Teams before deciding.
+Statuses in `suica pending`: `pending` waits for you; `unresolved` needs a `teams.people` line (then `suica retry`), or Teams returned an error for that person's lookup; `failed` is final; `sending` may have been delivered, so check Teams before deciding.
 
 Templates are files in the templates folder: `nudge.txt`, `reminder.txt`, `notice.approved.txt`, `notice.changes.txt`, `notice.comments.txt`. Placeholders: `{{mr.title}}`, `{{mr.url}}`, `{{mr.iid}}`, `{{mr.project}}`, `{{person.name}}`, `{{owner.name}}`. An unknown placeholder stops startup instead of sending a broken message.
 
 People are found through `teams.people`, then a cache, then an exact display-name match in Teams; anything uncertain is left for you.
 
-## Menu bar app
+## Moving from MR Review Assistant
 
-A native macOS menu bar app shows what the agent last recorded and lets you handle held Teams messages without typing `mra` commands. The icon shows how many messages need you; click it to see the status, the messages that need you (with **Send…**, **Skip** and **Retry**; Send asks you to confirm the text first), recent messages, and **Pause polling** / **Resume polling**, **Refresh** and **Quit**. The app is in English; the Teams messages it sends are not. It runs the `mra` CLI for everything (`mra state`, `mra send <id> --json`, …), so it follows the same rules as the CLI: at most once, working hours, obsolete messages skipped.
+Suica used to be called MR Review Assistant. If you ran it under the old name, run these three commands from the checkout, in this order:
 
 ```bash
-scripts/install-macos-app.sh      # builds, installs to ~/Applications and starts it
+scripts/migrate-to-suica.sh
+scripts/install-launchagent.sh
+scripts/install-macos-app.sh
+```
+
+`scripts/migrate-to-suica.sh` is a one-time move and is safe to run twice (a second run prints `already migrated` and changes nothing). It:
+
+- stops the old LaunchAgent (`com.madhani.mr-review-assistant`) and quits the old menu bar app;
+- refuses, before moving anything, if an old agent or app process is still running, or if the old LaunchAgent is still loaded;
+- refuses, naming both paths, if an old folder and its new counterpart both exist (merge them by hand);
+- moves `~/.config/mr-review-assistant` to `~/.config/suica`, `~/Library/Application Support/mr-review-assistant` to `~/Library/Application Support/suica`, and `~/Library/Logs/mr-review-assistant` to `~/Library/Logs/suica`, so the state database moves as it is;
+- removes the old LaunchAgent plist and `~/Applications/MR Review Assistant.app`, so two menu bar icons never run against different paths;
+- warns, without editing the file, for every line of the moved config that still names `mr-review-assistant` (for example an explicit `statePath` or `teams.templatesPath`; change those by hand);
+- warns if `MRA_CONFIG` is set. The agent and CLI no longer read it and refuse to start while it is set without `SUICA_CONFIG`: rename it to `SUICA_CONFIG` in your shell profile.
+
+If the script says an old process is still running: its process check also matches any process whose command line contains `mr-review-assistant` or `MRAMenuBar` (for example an editor or `tail` on the old log files, or a checkout folder still named `mr-review-assistant`). Close it or run the script from a renamed folder, then run the script again.
+
+## Menu bar app
+
+A native macOS menu bar app shows what the agent last recorded and lets you handle held Teams messages without typing `suica` commands. The icon shows how many messages need you; click it to see the status, the messages that need you (with **Send…**, **Skip** and **Retry**; Send asks you to confirm the text first), recent messages, and **Pause polling** / **Resume polling**, **Refresh** and **Quit**. The app is in English; the Teams messages it sends are not. It runs the `suica` CLI for everything (`suica state`, `suica send <id> --json`, …), so it follows the same rules as the CLI: at most once, working hours, obsolete messages skipped.
+
+```bash
+scripts/install-macos-app.sh      # builds, installs ~/Applications/Suica.app and starts it
 scripts/uninstall-macos-app.sh
 ```
 
-Add it under System Settings → General → Login Items to start it at login. The app's own tests: `cd macos/MRAMenuBar && swift test`. It needs Swift (Xcode or the Command Line Tools) and Node.
+Add it under System Settings → General → Login Items to start it at login. The app's own tests: `cd macos/Suica && swift test`. It needs Swift (Xcode or the Command Line Tools) and Node.
 
 ## Run in the background
 
 ```bash
-scripts/install-launchagent.sh     # renders the LaunchAgent for this checkout and starts it
+scripts/install-launchagent.sh     # renders the LaunchAgent (com.madhani.suica.agent) for this checkout and starts it
 scripts/uninstall-launchagent.sh
 ```
 
-Logs are JSON lines captured by launchd in `~/Library/Logs/mr-review-assistant/` (`stdout.log`, `stderr.log`). The agent does no rotation; at the default log level it writes only on start, stop and errors (an error is logged once per failure streak). Set `MRA_LOG_LEVEL=debug` to see every poll. launchd restarts the agent only when it exits with an error, at most once a minute, and the installer refuses to run without a config file. The plist bakes in the absolute path of the `node` found when you ran the installer: re-run it after switching Node versions or moving the repository.
+Logs are JSON lines captured by launchd in `~/Library/Logs/suica/` (`stdout.log`, `stderr.log`). The agent does no rotation; at the default log level it writes only on start, stop and errors (an error is logged once per failure streak). Set `SUICA_LOG_LEVEL=debug` to see every poll. launchd restarts the agent only when it exits with an error, at most once a minute, and the installer refuses to run without a config file. The plist bakes in the absolute path of the `node` found when you ran the installer: re-run it after switching Node versions or moving the repository.
 
 ## Development
 
@@ -113,7 +135,7 @@ Source of truth for each behaviour is a test in `test/`. `src/events.ts`, `src/f
 ## Known limits
 
 - Polling stops while the Mac is fully asleep; the next poll after wake (within about 15 seconds) catches up from stored state and collapses a burst into one summary.
-- Do not run `scripts/mra once` while the background agent is running: the two processes are not coordinated and can alert on the same event twice.
+- Do not run `scripts/suica once` while the background agent is running: the two processes are not coordinated and can alert on the same event twice.
 - If a notification fails halfway, the ones already shown are not repeated and the rest are dropped (an error is logged and reported once).
 - If the state database cannot be written, alerts can repeat until it recovers; you are told once.
 - "GitLab unreachable" is only reported after two failed polls in a row, because the network is often not up yet right after a wake.
@@ -125,7 +147,7 @@ Source of truth for each behaviour is a test in `test/`. `src/events.ts`, `src/f
 - An MR is announced to its Author only once per round of your review.
 - Teams planning starts from the moment Teams is enabled, and again after every period in which it was switched off; older history is never announced.
 - The Agent Review flow is not implemented yet.
-- The menu bar app shows what the agent last recorded and refreshes every 30 seconds; the background agent (or `scripts/mra once`) has to have polled for its list to be current.
+- The menu bar app shows what the agent last recorded and refreshes every 30 seconds; the background agent (or `scripts/suica once`) has to have polled for its list to be current.
 - The install script bakes the absolute `node` and repository paths into the app: after moving the repository or switching Node versions, run `scripts/install-macos-app.sh` again.
 - The app and the CLI speak a versioned JSON format (`contracts/agent-state.v1.json`); an app built for a different version shows "The agent speaks a newer protocol. Rebuild the app."
-- The menu bar app gives a Send 300 seconds to finish (the CLI's own worst case with the default Teams timeouts is 210 s). If you raise `teams.callTimeoutSeconds`, raise `sendTimeout` in `macos/MRAMenuBar/Sources/MRACore/AgentClient.swift` and run the install script again.
+- The menu bar app gives a Send 300 seconds to finish (the CLI's own worst case with the default Teams timeouts is 210 s). If you raise `teams.callTimeoutSeconds`, raise `sendTimeout` in `macos/Suica/Sources/SuicaCore/AgentClient.swift` and run the install script again.
