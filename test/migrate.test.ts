@@ -54,6 +54,12 @@ function sandbox(): Sandbox {
     "pgrep",
     `echo "pgrep $*" >> "$HOME/calls.log"\nif [ "$1" = -x ]; then marker=running-app; else marker=running; fi\nif [ -e "$HOME/$marker" ]; then echo 4242; exit 0; fi\nexit 1`,
   );
+  // lsof reports pid 4242 holding the folder only while $HOME/db-open exists.
+  stub(
+    bin,
+    "lsof",
+    `echo "lsof $*" >> "$HOME/calls.log"\nif [ -e "$HOME/db-open" ]; then echo 4242; exit 0; fi\nexit 1`,
+  );
   const path = (...parts: string[]): string => join(home, ...parts);
   return {
     home,
@@ -137,6 +143,14 @@ describe("migrate-to-suica.sh", () => {
     expect(output).toContain("already migrated");
   });
 
+  // The old agent and app were asked to stop before the script refused.
+  const expectStopped = (box: Sandbox): void => {
+    const calls = readFileSync(box.path("calls.log"), "utf8");
+    expect(calls).toContain(`bootout gui/`);
+    expect(calls).toContain(`${LABEL}.menubar`);
+    expect(calls).toContain("quit");
+  };
+
   const expectNothingMoved = (box: Sandbox): void => {
     for (const old of [CONFIG, STATE, WAL, LOG, PLIST, APP]) {
       expect(existsSync(box.path(old))).toBe(true);
@@ -161,6 +175,7 @@ describe("migrate-to-suica.sh", () => {
     expect(output).toContain("pid 4242");
     expect(output).toContain("an old process is still running");
     expectNothingMoved(box);
+    expectStopped(box);
   }, 15_000);
 
   it("refuses while the old menu bar app is running (exact name) and moves nothing", () => {
@@ -174,6 +189,7 @@ describe("migrate-to-suica.sh", () => {
     expect(output).toContain("an old process is still running (pid 4242)");
     expect(readFileSync(box.path("calls.log"), "utf8")).toContain("pgrep -x MRAMenuBar");
     expectNothingMoved(box);
+    expectStopped(box);
   }, 15_000);
 
   it("refuses while the old LaunchAgent is still loaded and moves nothing", () => {
@@ -188,6 +204,7 @@ describe("migrate-to-suica.sh", () => {
     expect(output).toContain(LABEL);
     expect(readFileSync(box.path("calls.log"), "utf8")).toContain(`print gui/`);
     expectNothingMoved(box);
+    expectStopped(box);
   }, 15_000);
 
   it("refuses when old and new folders both exist and moves nothing", () => {
@@ -207,6 +224,7 @@ describe("migrate-to-suica.sh", () => {
     }
     expect(existsSync(box.path("Library/Application Support/suica"))).toBe(false);
     expect(existsSync(box.path("Library/Logs/suica"))).toBe(false);
+    expectStopped(box);
   });
 
   it("checks every pair before moving: a conflict on only the last pair moves nothing", () => {
@@ -226,6 +244,57 @@ describe("migrate-to-suica.sh", () => {
     }
     expect(existsSync(box.path(".config/suica"))).toBe(false);
     expect(existsSync(box.path("Library/Application Support/suica"))).toBe(false);
+    expectStopped(box);
+  });
+
+  it("refuses while a process has the old state DB open and moves nothing", () => {
+    const box = sandbox();
+    seedOld(box);
+    box.put("db-open", "");
+
+    const { status, output } = box.run();
+
+    expect(status).toBe(1);
+    expect(output).toContain("an old process is still running (pid 4242)");
+    expect(output).toContain("old state folder open");
+    const lsofCalls = readFileSync(box.path("calls.log"), "utf8")
+      .split("\n")
+      .filter((line) => line.startsWith("lsof "));
+    expect(lsofCalls.length).toBeGreaterThan(0);
+    for (const call of lsofCalls) {
+      expect(call).toContain(box.path("Library/Application Support/mr-review-assistant"));
+      expect(call).not.toContain("Application Support/suica");
+    }
+    expectNothingMoved(box);
+    expectStopped(box);
+  }, 15_000);
+
+  it("does not mistake a process holding the new state folder for an old one", () => {
+    const box = sandbox();
+    box.put(NEW_STATE, "db-bytes");
+    box.put("db-open", "");
+
+    const { status, output } = box.run();
+
+    expect(status).toBe(0);
+    expect(output).toContain("already migrated");
+    expect(readFileSync(box.path(NEW_STATE), "utf8")).toBe("db-bytes");
+  });
+
+  it("does not say already migrated when it removed a leftover plist or app bundle", () => {
+    const box = sandbox();
+    box.put(PLIST, "<plist/>");
+    box.put(APP, "<plist/>");
+
+    const { status, output } = box.run();
+
+    expect(status).toBe(0);
+    expect(output).not.toContain("already migrated");
+    expect(output).toContain("nothing to move");
+    expect(output).toContain("removed the old LaunchAgent plist");
+    expect(output).toContain("and the old app bundle");
+    expect(existsSync(box.path(PLIST))).toBe(false);
+    expect(existsSync(box.path("Applications/MR Review Assistant.app"))).toBe(false);
   });
 
   it("warns about explicit old paths in the config and leaves the YAML untouched", () => {
@@ -246,6 +315,10 @@ describe("migrate-to-suica.sh", () => {
     expect(output).toContain("still names mr-review-assistant in: statePath");
     expect(output).toContain("still names mr-review-assistant in: templatesPath");
     expect(readFileSync(box.path(NEW_CONFIG), "utf8")).toBe(yaml);
+    const lines = output.trimEnd().split("\n");
+    expect(lines[lines.length - 1]).toContain("fix the keys above first");
+    expect(lines[lines.length - 1]).toContain("scripts/install-launchagent.sh");
+    expect(lines[lines.length - 1]).toContain("scripts/install-macos-app.sh");
   });
 
   it("warns about a leftover MRA_CONFIG", () => {

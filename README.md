@@ -95,12 +95,15 @@ scripts/install-macos-app.sh
 `scripts/migrate-to-suica.sh` is a one-time move and is safe to run twice (a second run prints `already migrated` and changes nothing). It:
 
 - stops the old LaunchAgent (`com.madhani.mr-review-assistant`) and quits the old menu bar app;
-- refuses, before moving anything, if an old agent or app process is still running, or if the old LaunchAgent is still loaded;
+- refuses, before moving anything, if an old agent or app process is still running, if the old LaunchAgent is still loaded, or if any process (for example an agent started by hand with `npm start`) holds the old state database open;
 - refuses, naming both paths, if an old folder and its new counterpart both exist (merge them by hand);
 - moves `~/.config/mr-review-assistant` to `~/.config/suica`, `~/Library/Application Support/mr-review-assistant` to `~/Library/Application Support/suica`, and `~/Library/Logs/mr-review-assistant` to `~/Library/Logs/suica`, so the state database moves as it is;
 - removes the old LaunchAgent plist and `~/Applications/MR Review Assistant.app`, so two menu bar icons never run against different paths;
 - warns, without editing the file, for every line of the moved config that still names `mr-review-assistant` (for example an explicit `statePath` or `teams.templatesPath`; change those by hand);
+- when it warns about such a line, ends by telling you to fix those keys first and only then run the two install scripts (an explicit old `statePath` would make the new agent recreate the old folder with a fresh database);
 - warns if `MRA_CONFIG` is set. The agent and CLI no longer read it and refuse to start while it is set without `SUICA_CONFIG`: rename it to `SUICA_CONFIG` in your shell profile.
+
+The migration deletes the old app bundle, so replace **MR Review Assistant** with **Suica** under System Settings → General → Login Items; an old Login Item would point at nothing.
 
 If the script says an old process is still running: its process check also matches any process whose command line contains `mr-review-assistant` or `MRAMenuBar` (for example an editor or `tail` on the old log files, or a checkout folder still named `mr-review-assistant`). Close it or run the script from a renamed folder, then run the script again.
 
