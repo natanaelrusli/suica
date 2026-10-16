@@ -1,0 +1,207 @@
+{
+  "version": 1,
+  "path": "/tmp/config.yaml",
+  "exists": true,
+  "sha256": "0",
+  "issues": [],
+  "fields": [
+    {
+      "path": ["gitlab", "hostname"],
+      "type": "string",
+      "label": "GitLab host",
+      "help": "GitLab host passed to glab --hostname",
+      "value": "repo.example",
+      "effective": "repo.example"
+    },
+    {
+      "path": ["gitlab", "glabPath"],
+      "type": "string",
+      "label": "glab executable",
+      "help": "glab executable",
+      "value": null,
+      "effective": "glab"
+    },
+    {
+      "path": ["gitlab", "timeoutSeconds"],
+      "type": "int",
+      "label": "glab timeout (seconds)",
+      "help": "Timeout for one glab call",
+      "value": null,
+      "effective": 60
+    },
+    {
+      "path": ["polling", "activeSeconds"],
+      "type": "int",
+      "label": "Active poll interval (seconds)",
+      "help": "Poll interval while you are at the Mac",
+      "value": null,
+      "effective": 120
+    },
+    {
+      "path": ["polling", "idleSeconds"],
+      "type": "int",
+      "label": "Idle poll interval (seconds)",
+      "help": "Poll interval while idle",
+      "value": null,
+      "effective": 300
+    },
+    {
+      "path": ["polling", "idleAfterSeconds"],
+      "type": "int",
+      "label": "Idle after (seconds)",
+      "help": "No keyboard or mouse input for this long counts as idle",
+      "value": null,
+      "effective": 300
+    },
+    {
+      "path": ["polling", "maxBackoffSeconds"],
+      "type": "int",
+      "label": "Maximum backoff (seconds)",
+      "help": "Cap for the exponential backoff after failed polls",
+      "value": null,
+      "effective": 900
+    },
+    {
+      "path": ["notifications", "summaryThreshold"],
+      "type": "int",
+      "label": "Summary threshold",
+      "help": "More notifications than this in one poll become one summary",
+      "value": null,
+      "effective": 4
+    },
+    {
+      "path": ["notifications", "ignoreAuthors"],
+      "type": "stringList",
+      "label": "Ignored authors",
+      "help": "GitLab usernames whose comments never alert (for example bots)",
+      "value": null,
+      "effective": []
+    },
+    {
+      "path": ["teams", "enabled"],
+      "type": "bool",
+      "label": "Teams enabled",
+      "help": "Switch the Teams flows on",
+      "value": null,
+      "effective": false
+    },
+    {
+      "path": ["teams", "command"],
+      "type": "string",
+      "label": "Teams MCP command",
+      "help": "Command that starts the Teams MCP server",
+      "placeholder": "~/.config/teams-mcp/run.sh",
+      "value": null,
+      "effective": null
+    },
+    {
+      "path": ["teams", "startTimeoutSeconds"],
+      "type": "int",
+      "label": "Teams start timeout (seconds)",
+      "help": "Timeout for the Teams MCP to start",
+      "value": null,
+      "effective": 30
+    },
+    {
+      "path": ["teams", "callTimeoutSeconds"],
+      "type": "int",
+      "label": "Teams call timeout (seconds)",
+      "help": "Timeout for one Teams MCP call",
+      "value": null,
+      "effective": 60
+    },
+    {
+      "path": ["teams", "modes", "nudge"],
+      "type": "enum",
+      "label": "Nudge mode",
+      "help": "How the nudge flow sends: auto, approval or dry-run",
+      "options": ["auto", "approval", "dry-run"],
+      "value": null,
+      "effective": "approval"
+    },
+    {
+      "path": ["teams", "modes", "notice"],
+      "type": "enum",
+      "label": "Notice mode",
+      "help": "How the Review Notice flow sends: auto, approval or dry-run",
+      "options": ["auto", "approval", "dry-run"],
+      "value": null,
+      "effective": "approval"
+    },
+    {
+      "path": ["teams", "workingHours", "start"],
+      "type": "clock",
+      "label": "Working hours start",
+      "help": "Messages only go out inside these hours (Mac local time)",
+      "value": null,
+      "effective": "09:00"
+    },
+    {
+      "path": ["teams", "workingHours", "end"],
+      "type": "clock",
+      "label": "Working hours end",
+      "help": "Messages only go out inside these hours (Mac local time)",
+      "value": null,
+      "effective": "17:00"
+    },
+    {
+      "path": ["teams", "workingHours", "days"],
+      "type": "weekdays",
+      "label": "Working days",
+      "help": "ISO weekdays, Monday is 1 and Sunday is 7",
+      "value": null,
+      "effective": [1, 2, 3, 4, 5]
+    },
+    {
+      "path": ["teams", "reminderAfterHours"],
+      "type": "int",
+      "label": "Reminder after (hours)",
+      "help": "Reminder if the Reviewer is still UNREVIEWED this long after the nudge",
+      "value": null,
+      "effective": 24
+    },
+    {
+      "path": ["teams", "noticeDebounceMinutes"],
+      "type": "int",
+      "label": "Notice debounce (minutes)",
+      "help": "Review Notice after this long without further change by you",
+      "value": null,
+      "effective": 10
+    },
+    {
+      "path": ["teams", "maxMessagesPerReviewer"],
+      "type": "int",
+      "label": "Messages per Reviewer",
+      "help": "At most this many messages per MR per Reviewer",
+      "value": null,
+      "effective": 2
+    },
+    {
+      "path": ["teams", "templatesPath"],
+      "type": "string",
+      "label": "Templates folder",
+      "help": "Folder with template files",
+      "placeholder": "~/.config/suica/templates",
+      "value": null,
+      "effective": null
+    },
+    {
+      "path": ["teams", "people"],
+      "type": "emailMap",
+      "label": "People",
+      "help": "GitLab username to email, for people Teams cannot find by name",
+      "value": null,
+      "effective": {}
+    },
+    {
+      "path": ["statePath"],
+      "type": "string",
+      "label": "State file",
+      "help": "SQLite state file",
+      "placeholder": "~/Library/Application Support/suica/state.db",
+      "restartNote": "A new path starts with an empty history and a fresh baseline.",
+      "value": null,
+      "effective": null
+    }
+  ]
+}

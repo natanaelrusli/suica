@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { buildStatus, loadStatusInput, readServiceStatus, restartService } from "./agent-status.ts";
 import { actionJson, buildAgentState } from "./agent-state.ts";
 import { defaultConfigPath, loadConfig } from "./config.ts";
+import { showConfig } from "./config-edit.ts";
 import { defaultExec } from "./exec.ts";
 import { createRuntime } from "./runtime.ts";
 import type { Runtime } from "./runtime.ts";
@@ -12,7 +13,7 @@ import { formatOutbox } from "./teams/format-outbox.ts";
 import { OUTBOX_STATUSES } from "./teams/types.ts";
 
 const USAGE =
-  "usage: suica <once|status|state|stats|pause|resume|pending [--all]|send <id> [--json]|skip <id> [--json]|retry <id> [--json]|selftest|agent restart --json>\n";
+  "usage: suica <once|status|state|stats|pause|resume|pending [--all]|send <id> [--json]|skip <id> [--json]|retry <id> [--json]|selftest|config show --json|agent restart --json>\n";
 const TEAMS_DISABLED = "teams is disabled: set teams.enabled to true in the config\n";
 const SHOWN_WITH_ALL = 50;
 
@@ -152,6 +153,14 @@ async function restartAgent(): Promise<number> {
 
 async function main(argv: readonly string[]): Promise<number> {
   const command = argv[0];
+  if (command === "config") {
+    if (argv[1] === "show" && argv.includes("--json")) {
+      process.stdout.write(`${JSON.stringify(showConfig(defaultConfigPath()))}\n`);
+      return 0;
+    }
+    process.stderr.write(USAGE);
+    return 2;
+  }
   if (command === "agent") {
     if (argv[1] === "restart" && argv.includes("--json")) return restartAgent();
     process.stderr.write(USAGE);

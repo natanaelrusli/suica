@@ -10,7 +10,7 @@ const positiveInt = z.number().int().positive();
 const sendModeSchema = z.enum(["auto", "approval", "dry-run"]);
 const clockSchema = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "must be HH:MM (24 hours)");
 
-const configSchema = z
+export const configSchema = z
   .object({
     gitlab: z
       .object({
@@ -78,6 +78,25 @@ export class ConfigError extends Error {
   }
 }
 
+export interface ConfigIssue {
+  readonly path: string;
+  readonly message: string;
+}
+
+export function validateConfig(
+  raw: unknown,
+): { ok: true; config: Config } | { ok: false; issues: ConfigIssue[] } {
+  const result = configSchema.safeParse(raw);
+  if (result.success) return { ok: true, config: result.data };
+  return {
+    ok: false,
+    issues: result.error.issues.map((issue) => ({
+      path: issue.path.join(".") || "(root)",
+      message: issue.message,
+    })),
+  };
+}
+
 export function parseConfig(text: string): Config {
   let raw: unknown;
   try {
@@ -85,14 +104,12 @@ export function parseConfig(text: string): Config {
   } catch (error) {
     throw new ConfigError(`config is not valid YAML: ${errorMessage(error)}`);
   }
-  const result = configSchema.safeParse(raw);
-  if (!result.success) {
-    const problems = result.error.issues.map(
-      (issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`,
-    );
+  const result = validateConfig(raw);
+  if (!result.ok) {
+    const problems = result.issues.map((issue) => `${issue.path}: ${issue.message}`);
     throw new ConfigError(`invalid config: ${problems.join("; ")}`);
   }
-  return result.data;
+  return result.config;
 }
 
 export function loadConfig(path: string): Config {
