@@ -13,7 +13,7 @@ afterEach(() => {
   for (const folder of folders.splice(0)) rmSync(folder, { recursive: true, force: true });
 });
 function tempDb(): string {
-  const folder = mkdtempSync(join(tmpdir(), "mra-store2-"));
+  const folder = mkdtempSync(join(tmpdir(), "suica-store2-"));
   folders.push(folder);
   return join(folder, "state.db");
 }

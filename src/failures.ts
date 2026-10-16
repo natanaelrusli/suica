@@ -40,7 +40,7 @@ export const NOTIFY_AFTER: Readonly<Record<FailureKind, number>> = {
 
 export const STATE_FAILURE_NOTIFICATION: Notification = {
   title: "Penyimpanan state bermasalah",
-  body: "MR Review Assistant tidak bisa menyimpan state. Alert bisa terulang; lihat log untuk detailnya.",
+  body: "Suica tidak bisa menyimpan state. Alert bisa terulang; lihat log untuk detailnya.",
 };
 
 export function teamsFailureNotification(kind: TeamsFailureReportKind): Notification {
@@ -75,7 +75,7 @@ export function failureNotification(kind: GitlabFailureKind, hostname: string): 
     case "gitlab-error":
       return {
         title: "GitLab mengembalikan error",
-        body: "Lihat log MR Review Assistant untuk detailnya.",
+        body: "Lihat log Suica untuk detailnya.",
       };
   }
 }

@@ -82,9 +82,7 @@ describe("pollOnce", () => {
     const h = harness();
     h.setSnapshot(snapshot({ reviewRequested: [waiting(1), waiting(2)] }));
     expect(await h.poll()).toBe("ok");
-    expect(h.sent).toEqual([
-      { title: "MR Review Assistant aktif", body: "2 MR menunggu review-mu" },
-    ]);
+    expect(h.sent).toEqual([{ title: "Suica aktif", body: "2 MR menunggu review-mu" }]);
     expect(await h.poll()).toBe("ok");
     expect(h.sent).toHaveLength(1);
   });

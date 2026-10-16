@@ -45,7 +45,7 @@ describe("formatOutbox", () => {
       row({ id: 3, status: "sending", text: null }),
     ]);
     expect(text).toContain(
-      "#1 [unresolved] nudge → Bob · g/p!5 (no-match: add the person to teams.people, then `mra retry 1`)",
+      "#1 [unresolved] nudge → Bob · g/p!5 (no-match: add the person to teams.people, then `suica retry 1`)",
     );
     expect(text).toContain("#2 [failed] nudge → Bob · g/p!5 (error: not retried automatically)");
     expect(text).toContain("#3 [sending] nudge → Bob · g/p!5 (may have been sent: check Teams)");

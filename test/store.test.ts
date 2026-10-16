@@ -9,7 +9,7 @@ import { ME, mr, note, person, reviewer, snapshot } from "./builders.ts";
 
 const folders: string[] = [];
 function tempDb(): string {
-  const folder = mkdtempSync(join(tmpdir(), "mra-store-"));
+  const folder = mkdtempSync(join(tmpdir(), "suica-store-"));
   folders.push(folder);
   return join(folder, "state.db");
 }

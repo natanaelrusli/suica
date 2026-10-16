@@ -24,7 +24,7 @@ export const OUTBOX_STATUSES = [
 ] as const;
 export type OutboxStatus = (typeof OUTBOX_STATUSES)[number];
 
-/** Rows that need the Owner's attention; `mra pending` lists these by default. */
+/** Rows that need the Owner's attention; `suica pending` lists these by default. */
 export const ATTENTION_STATUSES: readonly OutboxStatus[] = [
   "pending",
   "unresolved",

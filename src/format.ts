@@ -111,7 +111,5 @@ export function buildNotifications(
 }
 
 export function baselineNotifications(pending: number): Notification[] {
-  return pending === 0
-    ? []
-    : [{ title: "MR Review Assistant aktif", body: `${pending} MR menunggu review-mu` }];
+  return pending === 0 ? [] : [{ title: "Suica aktif", body: `${pending} MR menunggu review-mu` }];
 }

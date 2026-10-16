@@ -1,7 +1,7 @@
 import { ATTENTION_STATUSES, OUTBOX_STATUSES } from "./teams/types.ts";
 import type { OutboxRow, OutboxStatus } from "./teams/types.ts";
 
-/** The document `mra state` prints. The menu bar app decodes it; see contracts/agent-state.v1.json. */
+/** The document `suica state` prints. The menu bar app decodes it; see contracts/agent-state.v1.json. */
 export interface AgentItemJson {
   readonly id: number;
   readonly kind: string;
@@ -96,7 +96,7 @@ export function buildAgentState(input: AgentStateInput): AgentStateJson {
   };
 }
 
-/** One line of JSON for `mra send|skip|retry <id> --json`. */
+/** One line of JSON for `suica send|skip|retry <id> --json`. */
 export function actionJson(status: string): string {
   return JSON.stringify({ status });
 }

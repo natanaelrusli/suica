@@ -16,7 +16,7 @@ afterEach(() => {
   for (const folder of folders.splice(0)) rmSync(folder, { recursive: true, force: true });
 });
 function tempDir(): string {
-  const folder = mkdtempSync(join(tmpdir(), "mra-tpl-"));
+  const folder = mkdtempSync(join(tmpdir(), "suica-tpl-"));
   folders.push(folder);
   return folder;
 }

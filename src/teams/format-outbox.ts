@@ -3,7 +3,7 @@ import type { OutboxRow } from "./types.ts";
 function hint(row: OutboxRow): string {
   switch (row.status) {
     case "unresolved":
-      return ` (${row.detail}: add the person to teams.people, then \`mra retry ${row.id}\`)`;
+      return ` (${row.detail}: add the person to teams.people, then \`suica retry ${row.id}\`)`;
     case "failed":
       return ` (${row.detail}: not retried automatically)`;
     case "sending":

@@ -14,7 +14,7 @@ const mode = (path: string): number => statSync(path).mode & 0o777;
 
 describe("state file permissions", () => {
   it("restricts a pre-existing directory and every database file to the owner", () => {
-    const root = mkdtempSync(join(tmpdir(), "mra-perm-"));
+    const root = mkdtempSync(join(tmpdir(), "suica-perm-"));
     folders.push(root);
     const directory = join(root, "state");
     mkdirSync(directory, { mode: 0o755 });

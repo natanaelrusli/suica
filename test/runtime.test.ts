@@ -13,7 +13,7 @@ afterEach(() => {
 
 describe("createRuntime with Teams switched off", () => {
   it("resets the Teams baseline so that switching it on later never announces what happened meanwhile", () => {
-    const folder = mkdtempSync(join(tmpdir(), "mra-runtime-"));
+    const folder = mkdtempSync(join(tmpdir(), "suica-runtime-"));
     folders.push(folder);
     const statePath = join(folder, "state.db");
     const seeded = openStore(statePath);

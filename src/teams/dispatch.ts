@@ -72,7 +72,7 @@ function stillNeeded(row: OutboxRow, snapshot: Snapshot): boolean {
   );
 }
 
-/** The same question as `stillNeeded`, answered from the last committed poll (for `mra send`). */
+/** The same question as `stillNeeded`, answered from the last committed poll (for `suica send`). */
 function stillNeededInState(row: OutboxRow, state: PreviousState): boolean {
   if (row.kind === "notice") return state.myReviewStates.has(row.mrKey);
   return (
@@ -215,7 +215,7 @@ export async function dispatchQueued(
   return sendBatch(deps, automatic);
 }
 
-/** `mra send <id>`: sends one row that is waiting for the Owner's approval. */
+/** `suica send <id>`: sends one row that is waiting for the Owner's approval. */
 export async function sendPending(deps: DispatchDeps, id: number): Promise<SendPendingOutcome> {
   const row = deps.store.getOutbox(id);
   if (row === undefined) return { status: "not-found" };
@@ -232,7 +232,7 @@ export async function sendPending(deps: DispatchDeps, id: number): Promise<SendP
   }
 }
 
-/** `mra skip <id>`: true when a pending, unresolved or queued row was skipped. */
+/** `suica skip <id>`: true when a pending, unresolved or queued row was skipped. */
 export function skipOutbox(
   store: Pick<Store, "transitionOutbox">,
   id: number,
@@ -243,7 +243,7 @@ export function skipOutbox(
   );
 }
 
-/** `mra retry <id>`: puts an unresolved row back in the queue after the Owner fixed `teams.people`. */
+/** `suica retry <id>`: puts an unresolved row back in the queue after the Owner fixed `teams.people`. */
 export function retryOutbox(
   store: Pick<Store, "transitionOutbox">,
   id: number,

@@ -66,7 +66,7 @@ export function renderTemplate(
 }
 
 export function defaultTemplatesPath(): string {
-  return join(homedir(), ".config", "mr-review-assistant", "templates");
+  return join(homedir(), ".config", "suica", "templates");
 }
 
 /** A file `<name>.txt` in `directory` replaces the built-in template of the same name. */

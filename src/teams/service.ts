@@ -35,7 +35,7 @@ export interface ServiceDeps {
 const HOUR_MS = 3_600_000;
 const MINUTE_MS = 60_000;
 const SELF_CHAT_ID = "48:notes";
-const SELF_TEST_TEXT = "MR Review Assistant: tes koneksi Teams berhasil.";
+const SELF_TEST_TEXT = "Suica: tes koneksi Teams berhasil.";
 
 export function createTeamsService(deps: ServiceDeps): TeamsService {
   const dispatchDeps: DispatchDeps = {

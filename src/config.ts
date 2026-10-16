@@ -105,12 +105,15 @@ export function loadConfig(path: string): Config {
   return parseConfig(text);
 }
 
-export function defaultConfigPath(): string {
-  return (
-    process.env["MRA_CONFIG"] ?? join(homedir(), ".config", "mr-review-assistant", "config.yaml")
-  );
+export function defaultConfigPath(env: NodeJS.ProcessEnv = process.env): string {
+  const configured = env["SUICA_CONFIG"];
+  if (configured !== undefined) return configured;
+  if (env["MRA_CONFIG"] !== undefined) {
+    throw new ConfigError("MRA_CONFIG is no longer read; rename it to SUICA_CONFIG");
+  }
+  return join(homedir(), ".config", "suica", "config.yaml");
 }
 
 export function defaultStatePath(): string {
-  return join(homedir(), "Library", "Application Support", "mr-review-assistant", "state.db");
+  return join(homedir(), "Library", "Application Support", "suica", "state.db");
 }

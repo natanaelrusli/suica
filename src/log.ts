@@ -16,7 +16,7 @@ export interface LoggerOptions {
   readonly now: () => Date;
 }
 
-const SERVICE_NAME = "mr-review-assistant";
+const SERVICE_NAME = "suica";
 const LEVEL_ORDER: Readonly<Record<LogLevel, number>> = { debug: 0, info: 1, warn: 2, error: 3 };
 
 function writeToStdout(line: string): void {
@@ -24,7 +24,7 @@ function writeToStdout(line: string): void {
 }
 
 function levelFromEnv(): LogLevel {
-  const value = process.env["MRA_LOG_LEVEL"];
+  const value = process.env["SUICA_LOG_LEVEL"];
   return value === "debug" || value === "info" || value === "warn" || value === "error"
     ? value
     : "info";
@@ -33,7 +33,7 @@ function levelFromEnv(): LogLevel {
 export function createLogger(overrides: Partial<LoggerOptions> = {}): Logger {
   const options: LoggerOptions = {
     serviceName: SERVICE_NAME,
-    environment: process.env["MRA_ENV"] ?? "local",
+    environment: process.env["SUICA_ENV"] ?? "local",
     minLevel: levelFromEnv(),
     write: writeToStdout,
     now: () => new Date(),

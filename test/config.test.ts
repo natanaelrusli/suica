@@ -1,5 +1,7 @@
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { ConfigError, parseConfig } from "../src/config.ts";
+import { ConfigError, defaultConfigPath, parseConfig } from "../src/config.ts";
 
 const MINIMAL = "gitlab:\n  hostname: gitlab.example\n";
 
@@ -86,6 +88,25 @@ describe("teams section", () => {
     expect(config.teams.people).toEqual({ "20435": "rayhan@madhani.id" });
     expect(() => parseConfig(`${MINIMAL}teams:\n  people:\n    "20435": not-an-email\n`)).toThrow(
       ConfigError,
+    );
+  });
+});
+
+describe("defaultConfigPath", () => {
+  it("uses SUICA_CONFIG when set", () => {
+    expect(defaultConfigPath({ SUICA_CONFIG: "/x/c.yaml" })).toBe("/x/c.yaml");
+  });
+  it("defaults to ~/.config/suica/config.yaml", () => {
+    expect(defaultConfigPath({})).toBe(join(homedir(), ".config", "suica", "config.yaml"));
+  });
+  it("refuses a leftover MRA_CONFIG", () => {
+    expect(() => defaultConfigPath({ MRA_CONFIG: "/old.yaml" })).toThrow(
+      "MRA_CONFIG is no longer read; rename it to SUICA_CONFIG",
+    );
+  });
+  it("lets SUICA_CONFIG win over a leftover MRA_CONFIG", () => {
+    expect(defaultConfigPath({ MRA_CONFIG: "/old.yaml", SUICA_CONFIG: "/new.yaml" })).toBe(
+      "/new.yaml",
     );
   });
 });

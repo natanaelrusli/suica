@@ -6,7 +6,7 @@ import { formatOutbox } from "./teams/format-outbox.ts";
 import { OUTBOX_STATUSES } from "./teams/types.ts";
 
 const USAGE =
-  "usage: mra <once|status|state|pause|resume|pending [--all]|send <id> [--json]|skip <id> [--json]|retry <id> [--json]|selftest>\n";
+  "usage: suica <once|status|state|pause|resume|pending [--all]|send <id> [--json]|skip <id> [--json]|retry <id> [--json]|selftest>\n";
 const TEAMS_DISABLED = "teams is disabled: set teams.enabled to true in the config\n";
 const SHOWN_WITH_ALL = 50;
 
@@ -125,7 +125,7 @@ main(process.argv.slice(2)).then(
     process.exitCode = code;
   },
   (error: unknown) => {
-    process.stderr.write(`mra: ${error instanceof Error ? error.message : "unknown error"}\n`);
+    process.stderr.write(`suica: ${error instanceof Error ? error.message : "unknown error"}\n`);
     process.exitCode = 1;
   },
 );

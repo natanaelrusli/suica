@@ -7,7 +7,7 @@ function capture(overrides: Parameters<typeof createLogger>[0] = {}): {
 } {
   const lines: string[] = [];
   const log = createLogger({
-    serviceName: "mra",
+    serviceName: "suica",
     environment: "test",
     minLevel: "debug",
     write: (line) => lines.push(line),
@@ -27,7 +27,7 @@ describe("createLogger", () => {
       timestamp: "2026-10-14T01:02:03.000Z",
       level: "info",
       message: "poll complete",
-      service_name: "mra",
+      service_name: "suica",
       environment: "test",
       attributes: { review_requested: 2 },
     });

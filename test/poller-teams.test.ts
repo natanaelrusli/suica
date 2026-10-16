@@ -121,7 +121,7 @@ describe("pollOnce with Teams", () => {
       snapshot({ reviewRequested: [mr(1, { reviewers: [reviewer("me", "UNREVIEWED")] })] }),
     );
     expect(await h.poll()).toBe("ok");
-    expect(h.sent.map((n) => n.title)).toContain("MR Review Assistant aktif");
+    expect(h.sent.map((n) => n.title)).toContain("Suica aktif");
     expect(h.sent.map((n) => n.title)).toContain("Penyimpanan state bermasalah");
     expect(h.events).toEqual(["commit", "plan"]);
   });

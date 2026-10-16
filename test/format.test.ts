@@ -99,7 +99,7 @@ describe("baselineNotifications", () => {
   it("is silent when nothing is waiting and summarises otherwise", () => {
     expect(baselineNotifications(0)).toEqual([]);
     expect(baselineNotifications(3)).toEqual([
-      { title: "MR Review Assistant aktif", body: "3 MR menunggu review-mu" },
+      { title: "Suica aktif", body: "3 MR menunggu review-mu" },
     ]);
   });
 });

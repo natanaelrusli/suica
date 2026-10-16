@@ -32,7 +32,7 @@ export interface McpOptions {
 }
 
 const PROTOCOL_VERSION = "2025-03-26";
-const CLIENT_INFO = { name: "mr-review-assistant", version: "0.1.0" };
+const CLIENT_INFO = { name: "suica", version: "0.1.0" };
 
 const frameSchema = z.object({
   id: z.number().optional(),
