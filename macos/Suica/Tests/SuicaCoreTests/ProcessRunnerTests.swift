@@ -72,3 +72,38 @@ private func shell(_ script: String, timeout: TimeInterval = 10, directory: Stri
     #expect(String(decoding: result.stdout, as: UTF8.self) == "done\n")
     #expect(Date().timeIntervalSince(started) < 5)
 }
+
+@Test func runnerPassesStdinToTheChild() async throws {
+    let result = try await ProcessRunner().run(
+        Invocation(
+            executable: "/bin/cat", arguments: [], environment: [:], workingDirectory: "/tmp", timeout: 10,
+            stdin: Data("hello".utf8)))
+    #expect(result.exitCode == 0)
+    #expect(String(decoding: result.stdout, as: UTF8.self) == "hello")
+}
+
+@Test func runnerWithoutStdinGivesTheChildAnEmptyInput() async throws {
+    let result = try await ProcessRunner().run(
+        Invocation(
+            executable: "/bin/cat", arguments: [], environment: [:], workingDirectory: "/tmp", timeout: 10))
+    #expect(result.exitCode == 0 && result.stdout.isEmpty)
+}
+
+@Test func runnerPassesLargeStdinThroughWithoutDeadlock() async throws {
+    let big = Data(repeating: 0x61, count: 2 * 1024 * 1024)
+    let result = try await ProcessRunner().run(
+        Invocation(
+            executable: "/bin/cat", arguments: [], environment: [:], workingDirectory: "/tmp", timeout: 20,
+            stdin: big))
+    #expect(result.stdout.count == big.count)
+}
+
+@Test func runnerSurvivesAChildThatClosesStdinEarly() async throws {
+    // Larger than the pipe buffer, so the write meets a closed pipe; this must not raise SIGPIPE.
+    let big = Data(repeating: 0x61, count: 3 * 1024 * 1024)
+    let result = try await ProcessRunner().run(
+        Invocation(
+            executable: "/bin/sh", arguments: ["-c", "exit 1"], environment: [:], workingDirectory: "/tmp",
+            timeout: 10, stdin: big))
+    #expect(result.exitCode == 1)
+}

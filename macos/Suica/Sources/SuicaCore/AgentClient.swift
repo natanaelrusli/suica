@@ -6,16 +6,19 @@ public struct Invocation: Equatable, Sendable {
     public let environment: [String: String]
     public let workingDirectory: String
     public let timeout: TimeInterval
+    /// Written to the child's standard input, which is then closed; nil gives it an empty input.
+    public let stdin: Data?
 
     public init(
         executable: String, arguments: [String], environment: [String: String],
-        workingDirectory: String, timeout: TimeInterval
+        workingDirectory: String, timeout: TimeInterval, stdin: Data? = nil
     ) {
         self.executable = executable
         self.arguments = arguments
         self.environment = environment
         self.workingDirectory = workingDirectory
         self.timeout = timeout
+        self.stdin = stdin
     }
 }
 
@@ -98,13 +101,36 @@ public struct ProcessRunner: CommandRunning {
 
     public init() {}
 
+    /// Writes `input` off the calling thread (the child may read slowly) and always closes the pipe.
+    /// A child that exits or closes stdin early is not an error here: its exit code tells the story,
+    /// and the pipe is made not to raise SIGPIPE.
+    private static func feed(_ input: Data, to handle: FileHandle) {
+        let descriptor = handle.fileDescriptor
+        _ = fcntl(descriptor, F_SETNOSIGPIPE, 1)
+        DispatchQueue.global().async {
+            input.withUnsafeBytes { buffer in
+                var offset = 0
+                while offset < buffer.count, let base = buffer.baseAddress {
+                    let written = write(descriptor, base + offset, buffer.count - offset)
+                    if written < 0 {
+                        if errno == EINTR { continue }
+                        break
+                    }
+                    offset += written
+                }
+            }
+            try? handle.close()
+        }
+    }
+
     public func run(_ invocation: Invocation) async throws(AgentError) -> CommandResult {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: invocation.executable)
         process.arguments = invocation.arguments
         process.environment = invocation.environment
         process.currentDirectoryURL = URL(fileURLWithPath: invocation.workingDirectory)
-        process.standardInput = FileHandle.nullDevice
+        let inPipe: Pipe? = invocation.stdin == nil ? nil : Pipe()
+        process.standardInput = inPipe ?? FileHandle.nullDevice
         let outPipe = Pipe()
         let errPipe = Pipe()
         process.standardOutput = outPipe
@@ -125,8 +151,15 @@ public struct ProcessRunner: CommandRunning {
             do {
                 try process.run()
             } catch {
+                try? inPipe?.fileHandleForReading.close()
+                try? inPipe?.fileHandleForWriting.close()
                 continuation.resume(returning: nil)
                 return
+            }
+            if let inPipe, let input = invocation.stdin {
+                // Our copy of the read end must go, or a child that exits never breaks the pipe.
+                try? inPipe.fileHandleForReading.close()
+                Self.feed(input, to: inPipe.fileHandleForWriting)
             }
             DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
                 guard state.process.isRunning else { return }
@@ -216,6 +249,7 @@ private func lastLine(of data: Data) -> Data? {
 
 public struct CLIAgentClient: AgentClient {
     private static let shortTimeout: TimeInterval = 20
+    private static let restartTimeout: TimeInterval = 30
     // The CLI's own worst case with the default config: Teams start (30 s) plus three calls
     // (lookup, open chat, send; 60 s each) is 210 s. Killing it later than that keeps a row from
     // being stranded in `sending`; a larger teams.callTimeoutSeconds needs a larger value here.
@@ -229,14 +263,16 @@ public struct CLIAgentClient: AgentClient {
         self.runner = runner
     }
 
-    private func invocation(_ arguments: [String], timeout: TimeInterval) -> Invocation {
+    private func invocation(
+        _ arguments: [String], timeout: TimeInterval, stdin: Data? = nil
+    ) -> Invocation {
         let home = ProcessInfo.processInfo.environment["HOME"] ?? NSHomeDirectory()
         return Invocation(
             executable: config.nodePath,
             arguments: ["\(config.repoPath)/src/cli.ts"] + arguments,
             environment: ["PATH": config.searchPath, "HOME": home, "SUICA_ENV": "production"],
             workingDirectory: config.repoPath,
-            timeout: timeout)
+            timeout: timeout, stdin: stdin)
     }
 
     public func state() async throws(AgentError) -> AgentState {
@@ -276,5 +312,54 @@ public struct CLIAgentClient: AgentClient {
         let result = try await runner.run(
             invocation([paused ? "pause" : "resume"], timeout: Self.shortTimeout))
         guard result.exitCode == 0 else { throw AgentError.failed(exitCode: result.exitCode) }
+    }
+}
+
+// MARK: - Dashboard client
+
+extension CLIAgentClient: DashboardClient {
+    private func document<T: Decodable>(_ type: T.Type, _ arguments: [String]) async throws(AgentError) -> T {
+        let result = try await runner.run(invocation(arguments, timeout: Self.shortTimeout))
+        guard result.exitCode == 0 else { throw AgentError.failed(exitCode: result.exitCode) }
+        guard let line = lastLine(of: result.stdout) else { throw AgentError.badOutput }
+        return try decodeDocument(type, from: line)
+    }
+
+    public func status() async throws(AgentError) -> StatusDocument {
+        try await document(StatusDocument.self, ["status", "--json"])
+    }
+
+    public func stats() async throws(AgentError) -> StatsDocument {
+        try await document(StatsDocument.self, ["stats"])
+    }
+
+    public func config() async throws(AgentError) -> ConfigDocument {
+        try await document(ConfigDocument.self, ["config", "show", "--json"])
+    }
+
+    public func saveConfig(base: String?, edits: [ConfigEditRequest]) async throws(AgentError)
+        -> SaveResult
+    {
+        let body: Data
+        do {
+            body = try JSONEncoder().encode(SaveRequestBody(baseSha256: base, edits: edits))
+        } catch {
+            throw AgentError.badOutput
+        }
+        let result = try await runner.run(
+            invocation(["config", "set", "--json"], timeout: Self.shortTimeout, stdin: body))
+        // Like `action`: the agent exits 1 for invalid, conflict and bad-request, with the reason in
+        // the JSON. It prints nothing when the write itself failed, which is a plain failure.
+        if let line = lastLine(of: result.stdout),
+            let parsed = try? JSONDecoder().decode(SaveResult.self, from: line)
+        {
+            return parsed
+        }
+        guard result.exitCode == 0 else { throw AgentError.failed(exitCode: result.exitCode) }
+        throw AgentError.badOutput
+    }
+
+    public func restartAgent() async throws(AgentError) -> ActionResult {
+        try await action(["agent", "restart", "--json"], timeout: Self.restartTimeout)
     }
 }
