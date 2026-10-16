@@ -113,6 +113,32 @@ func makeStats(ok: Int = 3) -> StatsDocument {
     #expect(model.errorText == nil)
 }
 
+func makeBrokenConfigStatus() -> StatusDocument {
+    StatusDocument(
+        version: 1, agent: AgentService(label: "x", loaded: true, running: false, pid: nil),
+        configError: "invalid config: polling.activeSeconds: Expected integer", paused: nil,
+        teamsEnabled: nil, lastPoll: nil, polling: nil,
+        paths: StatusPaths(config: "/c", state: "/s", logs: "/l", templates: "/t"))
+}
+
+@MainActor @Test func aStatsFailureWithABrokenConfigIsNotShownAsUnreachable() async {
+    let client = FakeDashboardClient()
+    let model = WindowModel(client: client, menu: MenuModel(client: FakeClient(states: [.success(makeState())])))
+    await model.refresh()
+    #expect(model.stats == makeStats())
+    await client.setStatuses([.success(makeBrokenConfigStatus())])
+    await client.setStats([.failure(.failed(exitCode: 1))])
+    await model.refresh()
+    // The status document says what is wrong; the stats failure follows from it.
+    #expect(model.status == makeBrokenConfigStatus())
+    #expect(model.errorText == nil)
+    #expect(model.stats == makeStats())
+    // A stats failure with a good config still shows.
+    await client.setStatuses([.success(makeStatus())])
+    await model.refresh()
+    #expect(model.errorText == MenuModel.message(for: .failed(exitCode: 1)))
+}
+
 @MainActor @Test func aSlowRefreshThatFinishesLastDoesNotOverwriteANewerOne() async {
     let gate = Gate()
     let client = FakeDashboardClient(statuses: [.success(makeStatus(running: false)), .success(makeStatus())])
@@ -149,7 +175,7 @@ func makeStats(ok: Int = 3) -> StatsDocument {
     await model.restartAgent()
     #expect(await client.restartCalls == 1)
     await gate.open()
-    await first.value
+    _ = await first.value
     #expect(!model.restarting)
     #expect(await client.restartCalls == 1)
 }

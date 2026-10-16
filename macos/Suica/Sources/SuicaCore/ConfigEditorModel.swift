@@ -47,6 +47,26 @@ public final class ConfigEditorModel {
         invalidInputKeys.remove(Self.key(field))
     }
 
+    /// Keys the agent requires: an empty box is written as empty text, and the agent says why it is
+    /// refused. Every other text field is optional, so an empty box removes the key.
+    static let requiredTextKeys: Set<String> = ["gitlab.hostname"]
+
+    /// What a text box writes: its text, or for an optional field left empty, the removal.
+    public func setText(_ field: ConfigField, _ text: String) {
+        let optional = !Self.requiredTextKeys.contains(Self.key(field))
+        set(field, text.isEmpty && optional ? .null : .string(text))
+    }
+
+    /// The agent's message for this field: from the last save, else from the loaded document until
+    /// the field is edited.
+    public func issue(of field: ConfigField) -> String? {
+        let key = Self.key(field)
+        if let issue = fieldIssues[key] { return issue }
+        guard drafts[key] == nil, let document else { return nil }
+        let messages = document.issues.filter { $0.path == key }.map(\.message)
+        return messages.isEmpty ? nil : messages.joined(separator: " ")
+    }
+
     /// The boxes are gone (the section or the window closed), so what they reported is too.
     public func clearInputInvalid() {
         invalidInputKeys = []

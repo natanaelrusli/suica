@@ -2,11 +2,13 @@ import Foundation
 
 // MARK: - JSON values
 
-/// Any JSON value the config file can hold. Numbers are integers: a fraction is `badOutput`.
+/// Any JSON value the config file can hold. A whole number that fits `Int` is `.int`; any other
+/// number (a fraction, or one too large) is `.number`, so one odd value never hides the document.
 public enum JSONValue: Codable, Equatable, Sendable {
     case null
     case bool(Bool)
     case int(Int)
+    case number(Double)
     case string(String)
     case array([JSONValue])
     case object([String: JSONValue])
@@ -19,12 +21,13 @@ public enum JSONValue: Codable, Equatable, Sendable {
             self = .bool(value)
         } else if let value = try? container.decode(Int.self) {
             self = .int(value)
+        } else if let value = try? container.decode(Double.self) {
+            self = .number(value)
         } else if let value = try? container.decode(String.self) {
             self = .string(value)
         } else if let value = try? container.decode([JSONValue].self) {
             self = .array(value)
         } else {
-            // Objects are last so that a number with a fraction reports its own mismatch.
             self = .object(try container.decode([String: JSONValue].self))
         }
     }
@@ -35,6 +38,7 @@ public enum JSONValue: Codable, Equatable, Sendable {
         case .null: try container.encodeNil()
         case .bool(let value): try container.encode(value)
         case .int(let value): try container.encode(value)
+        case .number(let value): try container.encode(value)
         case .string(let value): try container.encode(value)
         case .array(let value): try container.encode(value)
         case .object(let value): try container.encode(value)

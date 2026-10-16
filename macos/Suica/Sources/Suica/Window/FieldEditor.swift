@@ -21,7 +21,7 @@ struct FieldEditor: View {
                 Text(DisplayText.clean(note, max: 400)).font(.caption).foregroundStyle(.orange)
             }
             if isReset { Text(Copy.unsetInFile).font(.caption).foregroundStyle(.secondary) }
-            if let issue = editor.fieldIssues[key] {
+            if let issue = editor.issue(of: field) {
                 Text(DisplayText.clean(issue, max: 400)).font(.caption).foregroundStyle(.red)
             }
             if field.value != .null && !isReset {
@@ -93,7 +93,7 @@ struct FieldEditor: View {
                 if case .string(let text) = editor.value(of: field) { return text }
                 return ""
             },
-            set: { editor.set(field, .string($0)) })
+            set: { editor.setText(field, $0) })
     }
 
     private var currentOption: String? {
@@ -182,9 +182,13 @@ private struct IntInput: View {
         _text = State(initialValue: Self.render(editor.value(of: field)))
     }
 
+    /// A number that is not a whole `Int` (the agent reports it) is shown as written, to be replaced.
     private static func render(_ value: JSONValue) -> String {
-        if case .int(let number) = value { return String(number) }
-        return ""
+        switch value {
+        case .int(let number): return String(number)
+        case .number(let number): return "\(number)"
+        default: return ""
+        }
     }
 
     var body: some View {
@@ -218,7 +222,7 @@ private struct IntInput: View {
             if case .int(let number) = value {
                 if Int(text) != number { text = String(number) }
             } else {
-                text = ""
+                text = Self.render(value)
             }
         }
     }

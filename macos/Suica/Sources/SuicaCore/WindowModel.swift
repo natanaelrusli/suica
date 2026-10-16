@@ -38,7 +38,9 @@ public final class WindowModel {
             let fresh = try await client.stats()
             if mine == latestRefresh { stats = fresh }
         } catch {
-            failure = failure ?? MenuModel.message(for: error)
+            // With a broken config `stats` fails too; the status document already says why, so the
+            // agent is not reported as unreachable. The last good stats stay.
+            if status?.configError == nil { failure = failure ?? MenuModel.message(for: error) }
         }
         guard mine == latestRefresh else { return }
         errorText = failure

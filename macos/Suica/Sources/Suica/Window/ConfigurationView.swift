@@ -125,8 +125,9 @@ struct ConfigurationView: View {
         NSWorkspace.shared.open(URL(fileURLWithPath: path))
     }
 
+    /// Shows the folder in Finder: the path comes from the config, and opening it could launch an app.
     private func openTemplates() {
         guard let path = window.status?.paths.templates else { return }
-        NSWorkspace.shared.open(URL(fileURLWithPath: path))
+        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
     }
 }

@@ -155,9 +155,35 @@ func documentGarbageIsBadOutput(text: String) {
     #expect(try JSONDecoder().decode([JSONValue].self, from: data("[true,1,0]")) == [.bool(true), .int(1), .int(0)])
 }
 
-@Test func aNumberWithAFractionIsBadOutput() {
-    let json = #"{"version":1,"path":"p","exists":true,"sha256":null,"issues":[],"fields":[{"path":["a"],"type":"int","label":"L","help":"H","value":1.5,"effective":null}]}"#
-    #expect(throws: AgentError.badOutput) { try decodeDocument(ConfigDocument.self, from: data(json)) }
+@Test func aConfigWithANumberThatIsNotAnIntStillDecodes() throws {
+    let json = #"{"version":1,"path":"p","exists":true,"sha256":null,"issues":[{"path":"a","message":"Expected integer, received float"}],"fields":[{"path":["a"],"type":"int","label":"L","help":"H","value":1.5,"effective":null}]}"#
+    let config = try decodeDocument(ConfigDocument.self, from: data(json))
+    #expect(config.fields.first?.value == .number(1.5))
+    #expect(config.issues.first?.path == "a")
+}
+
+@Test func numbersThatAreNotIntsDecodeAsNumber() throws {
+    let values = try JSONDecoder().decode(
+        [JSONValue].self, from: data("[1.5, -0.25, 1E-2, 123456789012345678901234, 9223372036854775808]"))
+    #expect(
+        values == [
+            .number(1.5), .number(-0.25), .number(0.01), .number(1.2345678901234569e23),
+            .number(9223372036854775808),
+        ])
+}
+
+@Test func wholeNumbersStayInts() throws {
+    let values = try JSONDecoder().decode([JSONValue].self, from: data("[0, -3, 9223372036854775807, 1e3]"))
+    #expect(values == [.int(0), .int(-3), .int(Int.max), .int(1000)])
+}
+
+@Test func aNumberEncodesAsAPlainJSONNumber() throws {
+    let encoded = try JSONEncoder().encode(JSONValue.array([.number(1.5), .number(1e30), .int(2)]))
+    let text = try #require(String(data: encoded, encoding: .utf8))
+    #expect(text == "[1.5,1e+30,2]")
+    let back = try #require(try JSONSerialization.jsonObject(with: encoded) as? [NSNumber])
+    #expect(back.map(\.doubleValue) == [1.5, 1e30, 2])
+    #expect(try JSONDecoder().decode(JSONValue.self, from: encoded) == .array([.number(1.5), .number(1e30), .int(2)]))
 }
 
 @Test func theSaveRequestEncodesANullBaseAndNullValues() throws {

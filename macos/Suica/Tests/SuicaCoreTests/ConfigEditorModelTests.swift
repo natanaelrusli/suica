@@ -352,3 +352,34 @@ func makeConfig(sha: String? = "abc", fields: [ConfigField]? = nil, issues: [Con
     #expect(model.drafts["polling.activeSeconds"] == .int(45))
     #expect(model.canSave)
 }
+
+@MainActor @Test func clearingAnOptionalTextBoxRemovesTheKey() async {
+    let command = makeField(["teams", "command"], type: .string, value: .string("/run.sh"))
+    let state = makeField(["statePath"], type: .string, value: .string("/s.db"))
+    let host = makeField(["gitlab", "hostname"], type: .string, value: .string("h"), effective: .string("h"))
+    let model = await loadedEditor(FakeDashboardClient(configs: [.success(makeConfig(fields: [command, state, host]))]))
+    model.setText(command, "")
+    model.setText(state, "/other.db")
+    model.setText(host, "")
+    #expect(model.drafts["teams.command"] == .null)
+    #expect(model.drafts["statePath"] == .string("/other.db"))
+    // A required field keeps the empty text: the agent reports the issue next to it.
+    #expect(model.drafts["gitlab.hostname"] == .string(""))
+    model.setText(state, "")
+    #expect(model.drafts["statePath"] == .null)
+}
+
+@MainActor @Test func aFieldShowsTheLoadedIssueUntilItIsEditedAndASaveIssueWins() async {
+    let active = makeField(["polling", "activeSeconds"], value: .number(1.5))
+    let issues = [ConfigIssue(path: "polling.activeSeconds", message: "Expected integer, received float")]
+    let client = FakeDashboardClient(configs: [.success(makeConfig(fields: [active], issues: issues))])
+    let model = await loadedEditor(client)
+    #expect(model.value(of: active) == .number(1.5))
+    #expect(model.issue(of: active) == "Expected integer, received float")
+    model.set(active, .int(2))
+    #expect(model.issue(of: active) == nil)
+    await client.setSave(
+        .success(SaveResult(status: "invalid", issues: [ConfigIssue(path: "polling.activeSeconds", message: "too big")], sha256: nil)))
+    await model.save()
+    #expect(model.issue(of: active) == "too big")
+}
