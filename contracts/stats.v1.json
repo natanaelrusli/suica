@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "generatedAt": 1792152000000,
+  "lastPoll": { "at": 1792148400000, "status": "ok", "failure": null, "durationMs": 1500 },
+  "polls24h": { "ok": 1, "failed": 1 },
+  "polls7d": { "ok": 2, "failed": 1 },
+  "days": [
+    {
+      "day": "2026-10-15",
+      "reviewRequests": 1,
+      "activity": 0,
+      "nudgesSent": 0,
+      "noticesSent": 1,
+      "skipped": 0,
+      "failed": 0
+    },
+    {
+      "day": "2026-10-16",
+      "reviewRequests": 0,
+      "activity": 1,
+      "nudgesSent": 1,
+      "noticesSent": 0,
+      "skipped": 1,
+      "failed": 0
+    }
+  ],
+  "ownerAfterRequest": { "count": 1, "medianMinutes": 90, "p90Minutes": 90 },
+  "reviewerAfterNudge": { "count": 1, "medianMinutes": 120, "p90Minutes": 120 }
+}

@@ -2,15 +2,25 @@ import { actionJson, buildAgentState } from "./agent-state.ts";
 import { defaultConfigPath } from "./config.ts";
 import { createRuntime } from "./runtime.ts";
 import type { Runtime } from "./runtime.ts";
+import { buildStats, localDayKey } from "./stats.ts";
 import { formatOutbox } from "./teams/format-outbox.ts";
 import { OUTBOX_STATUSES } from "./teams/types.ts";
 
 const USAGE =
-  "usage: suica <once|status|state|pause|resume|pending [--all]|send <id> [--json]|skip <id> [--json]|retry <id> [--json]|selftest>\n";
+  "usage: suica <once|status|state|stats|pause|resume|pending [--all]|send <id> [--json]|skip <id> [--json]|retry <id> [--json]|selftest>\n";
 const TEAMS_DISABLED = "teams is disabled: set teams.enabled to true in the config\n";
 const SHOWN_WITH_ALL = 50;
 
-const SIMPLE = new Set(["once", "status", "state", "pause", "resume", "selftest", "pending"]);
+const SIMPLE = new Set([
+  "once",
+  "status",
+  "state",
+  "stats",
+  "pause",
+  "resume",
+  "selftest",
+  "pending",
+]);
 const WITH_ID = new Set(["send", "skip", "retry"]);
 
 function parseId(value: string | undefined): number | undefined {
@@ -51,6 +61,18 @@ async function run(runtime: Runtime, command: string, argv: readonly string[]): 
         trackedAuthored: state.trackedAuthored.size,
         reviewRequested: state.myReviewStates.size,
         rows: teams?.list(true),
+      });
+      process.stdout.write(`${JSON.stringify(document)}\n`);
+      return 0;
+    }
+    case "stats": {
+      const now = Date.now();
+      const document = buildStats({
+        history: runtime.store.loadHistory(now - 30 * 86_400_000),
+        outbox: teams?.list(true) ?? [],
+        now,
+        days: 14,
+        dayKey: localDayKey,
       });
       process.stdout.write(`${JSON.stringify(document)}\n`);
       return 0;
