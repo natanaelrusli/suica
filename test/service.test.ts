@@ -73,7 +73,7 @@ describe("createTeamsService", () => {
   });
 
   it("sends a pending row on request, and skips or retries rows", async () => {
-    const { service, sent } = setup({
+    const { service, store, sent } = setup({
       gateway: {
         session: (use) =>
           use({
@@ -91,6 +91,7 @@ describe("createTeamsService", () => {
     });
     service.plan(snapshot(), previous());
     service.plan(withNewReviewer, previous());
+    store.commit(withNewReviewer); // the poller commits before it plans; `mra send` reads that state
     await service.dispatch(withNewReviewer);
     const id = service.list(false)[0]?.id ?? 0;
     expect(await service.sendPending(id)).toEqual({ status: "sent" });

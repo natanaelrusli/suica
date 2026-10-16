@@ -300,6 +300,7 @@ describe("at most once", () => {
   it("two simultaneous sends of the same pending row result in one message", async () => {
     const h = setup({ mode: "approval" });
     const [id] = enqueue(h.store, 1);
+    h.store.commit(own());
     await dispatchQueued(h.deps, own());
     const outcomes = await Promise.all([
       sendPending(h.deps, id ?? 0),
@@ -320,10 +321,111 @@ describe("at most once", () => {
   });
 });
 
+describe("pending rows are re-checked", () => {
+  it("skips a pending nudge when the Reviewer reviewed after it was queued", async () => {
+    const h = setup({ mode: "approval" });
+    const [id] = enqueue(h.store, 1);
+    await dispatchQueued(h.deps, own());
+    expect(h.store.getOutbox(id ?? 0)).toMatchObject({ status: "pending" });
+    await dispatchQueued(h.deps, own([reviewer("bob", "APPROVED", "Bob")]));
+    expect(h.store.getOutbox(id ?? 0)).toMatchObject({ status: "skipped", detail: "obsolete" });
+  });
+
+  it("refuses to send a pending nudge to a Reviewer who has reviewed since", async () => {
+    const h = setup({ mode: "approval" });
+    const [id] = enqueue(h.store, 1);
+    await dispatchQueued(h.deps, own());
+    h.store.commit(own([reviewer("bob", "APPROVED", "Bob")]));
+    expect(await sendPending(h.deps, id ?? 0)).toEqual({ status: "obsolete" });
+    expect(h.sent).toEqual([]);
+    expect(h.store.getOutbox(id ?? 0)).toMatchObject({ status: "skipped", detail: "obsolete" });
+  });
+
+  it("refuses to send a pending notice once the MR is no longer waiting for the Owner", async () => {
+    const h = setup({ mode: "approval" });
+    h.store.applyTeamsPlan(
+      teamsPlan({
+        intents: [
+          intent(1, {
+            dedupeKey: "notice:g/p!7:APPROVED:0",
+            kind: "notice",
+            variant: "notice.approved",
+            mr: { key: "g/p!7", iid: 7, projectPath: "g/p", title: "T", url: "https://x/7" },
+          }),
+        ],
+      }),
+      NOW,
+    );
+    const id = h.store.listOutbox(["queued"])[0]?.id ?? 0;
+    h.store.commit(
+      snapshot({ reviewRequested: [mr(7, { reviewers: [reviewer("me", "APPROVED")] })] }),
+    );
+    await dispatchQueued(
+      h.deps,
+      snapshot({ reviewRequested: [mr(7, { reviewers: [reviewer("me", "APPROVED")] })] }),
+    );
+    expect(h.store.getOutbox(id)).toMatchObject({ status: "pending" });
+    h.store.commit(snapshot());
+    expect(await sendPending(h.deps, id)).toEqual({ status: "obsolete" });
+    expect(h.sent).toEqual([]);
+  });
+});
+
+describe("lookup errors", () => {
+  const failFor = (name: string) => (query: string) =>
+    query === name
+      ? Promise.reject(new TeamsFailure("error", "invalid filter"))
+      : Promise.resolve([
+          { displayName: "Carol", userPrincipalName: "c@upn.x.id", mail: "carol@x.id", id: "u2" },
+        ]);
+
+  it("marks the row with the broken lookup unresolved and carries on with the rest", async () => {
+    const h = setup({ api: { searchUsers: failFor("Bob") } });
+    h.store.applyTeamsPlan(
+      teamsPlan({
+        intents: [
+          intent(1, { dedupeKey: "k:1" }),
+          intent(2, { dedupeKey: "k:2", recipient: person("carol", "Carol") }),
+        ],
+      }),
+      NOW,
+    );
+    const snap = own([
+      reviewer("bob", "UNREVIEWED", "Bob"),
+      reviewer("carol", "UNREVIEWED", "Carol"),
+    ]);
+    const result = await dispatchQueued(h.deps, snap);
+    expect(result).toEqual({ sent: 1, failure: "error" });
+    expect(h.store.listOutbox(["unresolved"])).toHaveLength(1);
+    expect(h.store.listOutbox(["unresolved"])[0]).toMatchObject({
+      recipient: "bob",
+      detail: "lookup-error",
+    });
+    expect(h.opened).toEqual(["carol@x.id"]);
+  });
+
+  it("stops after three lookup errors in a row so an expired login does not park the whole queue", async () => {
+    const h = setup({
+      api: { searchUsers: () => Promise.reject(new TeamsFailure("error", "401")) },
+    });
+    h.store.applyTeamsPlan(
+      teamsPlan({
+        intents: [1, 2, 3, 4, 5].map((slot) => intent(slot, { dedupeKey: `k:${slot}` })),
+      }),
+      NOW,
+    );
+    const result = await dispatchQueued(h.deps, own());
+    expect(result).toEqual({ sent: 0, failure: "error" });
+    expect(h.store.listOutbox(["unresolved"])).toHaveLength(3);
+    expect(h.store.listOutbox(["queued"])).toHaveLength(2);
+  });
+});
+
 describe("owner actions", () => {
   it("sends a pending row on request and reports unknown ids", async () => {
     const h = setup({ mode: "approval" });
     const [id] = enqueue(h.store, 1);
+    h.store.commit(own());
     await dispatchQueued(h.deps, own());
     expect(await sendPending(h.deps, id ?? 0)).toEqual({ status: "sent" });
     expect(await sendPending(h.deps, 9999)).toEqual({ status: "not-found" });
@@ -333,6 +435,7 @@ describe("owner actions", () => {
   it("keeps a pending row pending when Teams is unreachable", async () => {
     const h = setup({ mode: "approval" });
     const [id] = enqueue(h.store, 1);
+    h.store.commit(own());
     await dispatchQueued(h.deps, own());
     h.deps = {
       ...h.deps,
