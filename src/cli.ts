@@ -3,7 +3,8 @@ import { join } from "node:path";
 import { buildStatus, loadStatusInput, readServiceStatus, restartService } from "./agent-status.ts";
 import { actionJson, buildAgentState } from "./agent-state.ts";
 import { defaultConfigPath, loadConfig } from "./config.ts";
-import { showConfig } from "./config-edit.ts";
+import { applyConfigEdits, parseSaveRequest, showConfig } from "./config-edit.ts";
+import type { SaveResultJson } from "./config-edit.ts";
 import { defaultExec } from "./exec.ts";
 import { createRuntime } from "./runtime.ts";
 import type { Runtime } from "./runtime.ts";
@@ -13,7 +14,7 @@ import { formatOutbox } from "./teams/format-outbox.ts";
 import { OUTBOX_STATUSES } from "./teams/types.ts";
 
 const USAGE =
-  "usage: suica <once|status|state|stats|pause|resume|pending [--all]|send <id> [--json]|skip <id> [--json]|retry <id> [--json]|selftest|config show --json|agent restart --json>\n";
+  "usage: suica <once|status|state|stats|pause|resume|pending [--all]|send <id> [--json]|skip <id> [--json]|retry <id> [--json]|selftest|config show --json|config set --json|agent restart --json>\n";
 const TEAMS_DISABLED = "teams is disabled: set teams.enabled to true in the config\n";
 const SHOWN_WITH_ALL = 50;
 
@@ -151,6 +152,38 @@ async function restartAgent(): Promise<number> {
   return result === "restarted" ? 0 : 1;
 }
 
+const MAX_REQUEST_BYTES = 1024 * 1024;
+
+/** The whole of stdin, or undefined when it is larger than the limit. */
+async function readLimitedStdin(limit: number): Promise<string | undefined> {
+  const chunks: Buffer[] = [];
+  let total = 0;
+  for await (const chunk of process.stdin as AsyncIterable<Buffer>) {
+    total += chunk.length;
+    if (total > limit) {
+      process.stdin.destroy();
+      return undefined;
+    }
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+/** `suica config set --json`: edits on stdin; works with a broken config, so no runtime. */
+async function setConfig(): Promise<number> {
+  const text = await readLimitedStdin(MAX_REQUEST_BYTES);
+  const request = text === undefined ? undefined : parseSaveRequest(text);
+  let result: SaveResultJson;
+  if (request === undefined) {
+    const message = text === undefined ? "request is too large" : "malformed request";
+    result = { status: "bad-request", issues: [{ path: "(root)", message }], sha256: null };
+  } else {
+    result = applyConfigEdits(defaultConfigPath(), request);
+  }
+  process.stdout.write(`${JSON.stringify(result)}\n`);
+  return result.status === "saved" ? 0 : 1;
+}
+
 async function main(argv: readonly string[]): Promise<number> {
   const command = argv[0];
   if (command === "config") {
@@ -158,6 +191,7 @@ async function main(argv: readonly string[]): Promise<number> {
       process.stdout.write(`${JSON.stringify(showConfig(defaultConfigPath()))}\n`);
       return 0;
     }
+    if (argv[1] === "set" && argv.includes("--json")) return setConfig();
     process.stderr.write(USAGE);
     return 2;
   }
