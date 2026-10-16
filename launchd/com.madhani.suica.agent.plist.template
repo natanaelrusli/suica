@@ -2,7 +2,7 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>Label</key><string>com.madhani.mr-review-assistant</string>
+  <key>Label</key><string>com.madhani.suica.agent</string>
   <key>ProgramArguments</key>
   <array>
     <string>__NODE__</string>
@@ -13,7 +13,7 @@
   <dict>
     <key>HOME</key><string>__HOME__</string>
     <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
-    <key>MRA_ENV</key><string>production</string>
+    <key>SUICA_ENV</key><string>production</string>
   </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key>
@@ -21,7 +21,7 @@
     <key>SuccessfulExit</key><false/>
   </dict>
   <key>ThrottleInterval</key><integer>60</integer>
-  <key>StandardOutPath</key><string>__HOME__/Library/Logs/mr-review-assistant/stdout.log</string>
-  <key>StandardErrorPath</key><string>__HOME__/Library/Logs/mr-review-assistant/stderr.log</string>
+  <key>StandardOutPath</key><string>__HOME__/Library/Logs/suica/stdout.log</string>
+  <key>StandardErrorPath</key><string>__HOME__/Library/Logs/suica/stderr.log</string>
 </dict>
 </plist>

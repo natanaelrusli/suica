@@ -3,11 +3,11 @@
 # switching Node versions: the absolute node path is baked into the plist.
 set -eu
 
-LABEL=com.madhani.mr-review-assistant
+LABEL=com.madhani.suica.agent
 REPO=$(cd "$(dirname "$0")/.." && pwd)
 NODE=$(command -v node)
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
-CONFIG="${MRA_CONFIG:-$HOME/.config/mr-review-assistant/config.yaml}"
+CONFIG="${SUICA_CONFIG:-$HOME/.config/suica/config.yaml}"
 
 # A daemon that cannot read its config exits on every start; refuse to install it that way.
 if [ ! -f "$CONFIG" ]; then
@@ -15,7 +15,7 @@ if [ ! -f "$CONFIG" ]; then
   exit 1
 fi
 
-mkdir -p "$HOME/Library/LaunchAgents" "$HOME/Library/Logs/mr-review-assistant"
+mkdir -p "$HOME/Library/LaunchAgents" "$HOME/Library/Logs/suica"
 sed -e "s|__NODE__|$NODE|g" -e "s|__REPO__|$REPO|g" -e "s|__HOME__|$HOME|g" \
   "$REPO/launchd/$LABEL.plist.template" > "$PLIST"
 
