@@ -7,6 +7,9 @@ import { errorMessage } from "./util.ts";
 
 const positiveInt = z.number().int().positive();
 
+const sendModeSchema = z.enum(["auto", "approval", "dry-run"]);
+const clockSchema = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "must be HH:MM (24 hours)");
+
 const configSchema = z
   .object({
     gitlab: z
@@ -29,6 +32,36 @@ const configSchema = z
       .object({
         summaryThreshold: positiveInt.default(4),
         ignoreAuthors: z.array(z.string()).default([]),
+      })
+      .strict()
+      .default({}),
+    teams: z
+      .object({
+        enabled: z.boolean().default(false),
+        command: z.string().min(1).optional(),
+        startTimeoutSeconds: positiveInt.default(30),
+        callTimeoutSeconds: positiveInt.default(60),
+        modes: z
+          .object({
+            nudge: sendModeSchema.default("approval"),
+            notice: sendModeSchema.default("approval"),
+          })
+          .strict()
+          .default({}),
+        workingHours: z
+          .object({
+            start: clockSchema.default("09:00"),
+            end: clockSchema.default("17:00"),
+            days: z.array(z.number().int().min(1).max(7)).min(1).default([1, 2, 3, 4, 5]),
+          })
+          .strict()
+          .refine((hours) => hours.start < hours.end, "start must be before end")
+          .default({}),
+        reminderAfterHours: positiveInt.default(24),
+        noticeDebounceMinutes: positiveInt.default(10),
+        maxMessagesPerReviewer: positiveInt.default(2),
+        templatesPath: z.string().min(1).optional(),
+        people: z.record(z.string(), z.string().email()).default({}),
       })
       .strict()
       .default({}),
