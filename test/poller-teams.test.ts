@@ -27,10 +27,10 @@ function harness(options: { planThrows?: boolean } = {}) {
   let current: Snapshot = snapshot();
   const store: Store = {
     ...realStore,
-    commit: (next) => {
+    commit: (next, history) => {
       if (commitError !== undefined) throw commitError;
       events.push("commit");
-      realStore.commit(next);
+      realStore.commit(next, history);
     },
   };
   const notifier: Notifier = {
@@ -58,6 +58,7 @@ function harness(options: { planThrows?: boolean } = {}) {
     log: createLogger({ write: () => undefined }),
     config,
     teams,
+    now: () => 0,
   };
   return {
     sent,

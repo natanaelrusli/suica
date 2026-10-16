@@ -27,9 +27,9 @@ function harness() {
   let fetchCount = 0;
   const store: Store = {
     ...realStore,
-    commit: (next) => {
+    commit: (next, history) => {
       if (commitError !== undefined) throw commitError;
-      realStore.commit(next);
+      realStore.commit(next, history);
     },
   };
   const notifier: Notifier = {
@@ -49,6 +49,7 @@ function harness() {
     failures: createFailureTracker(),
     log: createLogger({ write: (line) => logs.push(line), minLevel: "debug" }),
     config,
+    now: () => 0,
   };
   return {
     store: realStore,

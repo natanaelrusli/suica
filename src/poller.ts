@@ -14,6 +14,7 @@ import type { Notification } from "./format.ts";
 import { baselineNotifications, buildNotifications } from "./format.ts";
 import { FetchFailure } from "./gitlab.ts";
 import type { GitlabFailureKind } from "./gitlab.ts";
+import { historyEvents } from "./history.ts";
 import type { Logger } from "./log.ts";
 import type { Notifier } from "./notifier.ts";
 import type { Store } from "./store.ts";
@@ -35,6 +36,8 @@ export interface PollDeps {
   readonly log: Logger;
   readonly config: Pick<Config, "gitlab" | "notifications">;
   readonly teams?: TeamsHooks;
+  /** Milliseconds since the epoch; the poll log stamps and times each poll with it. */
+  readonly now: () => number;
 }
 
 export type PollStatus = "ok" | "paused" | "failed";
@@ -69,12 +72,13 @@ async function reportFailure(
   }
 }
 
-async function reportFetchFailure(deps: PollDeps, error: unknown): Promise<void> {
+async function reportFetchFailure(deps: PollDeps, error: unknown): Promise<GitlabFailureKind> {
   const kind: GitlabFailureKind = error instanceof FetchFailure ? error.kind : "gitlab-error";
   const reason = error instanceof FetchFailure ? error.message : "unexpected error";
   await reportFailure(deps, kind, failureNotification(kind, deps.config.gitlab.hostname), {
     reason,
   });
+  return kind;
 }
 
 async function reportStateFailure(deps: PollDeps, error: unknown): Promise<void> {
@@ -108,25 +112,32 @@ async function runTeams(
   await reportFailure(deps, kind, teamsFailureNotification(kind), {});
 }
 
+/** How a poll ended, for the poll log: the failure that ended it, if any. */
+interface PollOutcome {
+  readonly status: PollStatus;
+  readonly failure: FailureKind | null;
+}
+
+const PAUSED: PollOutcome = { status: "paused", failure: null };
+
 /**
  * One poll cycle. Order matters: events are delivered first and state is committed next, so a
  * failed delivery is retried on the next poll instead of being marked as seen. The exception is a
  * partial delivery: once at least one notification went out, the state is committed anyway so the
  * delivered ones are never sent again on every following poll. Teams runs last, after the commit.
  */
-export async function pollOnce(deps: PollDeps): Promise<PollStatus> {
+async function runPoll(deps: PollDeps, start: number): Promise<PollOutcome> {
   const { store, notifier, failures, log, config } = deps;
   if (store.isPaused()) {
     log.debug("polling paused");
-    return "paused";
+    return PAUSED;
   }
 
   let snapshot: Snapshot;
   try {
     snapshot = await deps.fetchSnapshot();
   } catch (error) {
-    await reportFetchFailure(deps, error);
-    return "failed";
+    return { status: "failed", failure: await reportFetchFailure(deps, error) };
   }
   for (const kind of GITLAB_FAILURE_KINDS) failures.recover(kind);
 
@@ -135,15 +146,13 @@ export async function pollOnce(deps: PollDeps): Promise<PollStatus> {
     previous = store.load();
   } catch (error) {
     await reportStateFailure(deps, error);
-    return "failed";
+    return { status: "failed", failure: "state" };
   }
+  const events = detectEvents(snapshot, previous, {
+    ignoreAuthors: new Set(config.notifications.ignoreAuthors),
+  });
   const notifications = previous.baselineDone
-    ? buildNotifications(
-        detectEvents(snapshot, previous, {
-          ignoreAuthors: new Set(config.notifications.ignoreAuthors),
-        }),
-        config.notifications.summaryThreshold,
-      )
+    ? buildNotifications(events, config.notifications.summaryThreshold)
     : baselineNotifications(countPendingReviews(snapshot));
 
   let delivered = 0;
@@ -161,16 +170,16 @@ export async function pollOnce(deps: PollDeps): Promise<PollStatus> {
         total: notifications.length,
       });
     }
-    if (delivered === 0) return "failed";
+    if (delivered === 0) return { status: "failed", failure: "notifier" };
   }
   const complete = delivered === notifications.length;
   if (complete) failures.recover("notifier");
 
   try {
-    store.commit(snapshot);
+    store.commit(snapshot, historyEvents(snapshot, previous, events, start));
   } catch (error) {
     await reportStateFailure(deps, error);
-    return "failed";
+    return { status: "failed", failure: "state" };
   }
   failures.recover("state");
   await runTeams(deps, snapshot, previous);
@@ -180,5 +189,21 @@ export async function pollOnce(deps: PollDeps): Promise<PollStatus> {
     notifications: notifications.length,
     baseline: !previous.baselineDone,
   });
-  return complete ? "ok" : "failed";
+  return complete ? { status: "ok", failure: null } : { status: "failed", failure: "notifier" };
+}
+
+/** Runs one poll and logs it, unless polling is paused. A history problem never changes the result. */
+export async function pollOnce(deps: PollDeps): Promise<PollStatus> {
+  const start = deps.now();
+  const { status, failure } = await runPoll(deps, start);
+  if (status === "paused") return status;
+  try {
+    deps.store.recordPoll({ at: start, status, failure, durationMs: deps.now() - start });
+  } catch (error) {
+    // The database error text can name files; log only the error class.
+    deps.log.warn("poll history not recorded", {
+      reason: error instanceof Error ? error.name : "unknown",
+    });
+  }
+  return status;
 }

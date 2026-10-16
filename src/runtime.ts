@@ -64,6 +64,7 @@ export function createRuntime(configPath: string): Runtime {
     failures: createFailureTracker(),
     log,
     config,
+    now: Date.now,
     ...(teams === undefined ? {} : { teams }),
   };
   return { config, store, log, teams, poll: () => pollOnce(deps) };
