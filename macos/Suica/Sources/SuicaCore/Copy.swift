@@ -57,6 +57,7 @@ public enum Copy {
         "The config file changed on disk. Reload to see it; your edits are kept until then."
     public static let configBadRequest = "This version of the app doesn't match the agent. Rebuild the app."
     public static let configSaveFailed = "Saving failed. The config file was not changed."
+    public static let configInvalid = "The config has problems. Nothing was saved."
     public static let openConfig = "Open config in editor"
     public static let openTemplates = "Open templates folder"
     public static let revealInFinder = "Show in Finder"

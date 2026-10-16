@@ -53,9 +53,15 @@ public final class ConfigEditorModel {
         banner = nil
     }
 
+    /// The view calls this once the agent was restarted, so the suggestion goes away.
+    public func restartHandled() {
+        restartSuggested = false
+    }
+
     public func save() async {
         guard !saving, let document, !dirtyFields.isEmpty else { return }
         let edits = dirtyFields.map { ConfigEditRequest(path: $0.path, value: drafts[Self.key($0)] ?? .null) }
+        let snapshot = drafts
         saving = true
         banner = nil
         fieldIssues = [:]
@@ -72,12 +78,22 @@ public final class ConfigEditorModel {
         }
         switch result.status {
         case "saved":
-            drafts = [:]
+            // Edits made while the save was in flight are not in the file: keep them.
+            for (key, value) in snapshot where drafts[key] == value { drafts[key] = nil }
             restartSuggested = true
             await load()
         case "invalid":
             for issue in result.issues {
                 fieldIssues[issue.path] = fieldIssues[issue.path].map { "\($0) \(issue.message)" } ?? issue.message
+            }
+            // The form shows only messages that belong to a field; the rest must not vanish.
+            let fieldKeys = Set(document.fields.map(Self.key))
+            let unmatched = result.issues.filter { !fieldKeys.contains($0.path) }
+            if result.issues.isEmpty {
+                banner = Copy.configInvalid
+            } else if !unmatched.isEmpty {
+                let lines = unmatched.map { "\(DisplayText.clean($0.path, max: 80)): \(DisplayText.clean($0.message))" }
+                banner = "\(Copy.configInvalid) \(lines.joined(separator: "; "))"
             }
         case "conflict":
             banner = Copy.configConflict

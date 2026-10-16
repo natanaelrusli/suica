@@ -196,3 +196,93 @@ func makeConfig(sha: String? = "abc", fields: [ConfigField]? = nil, issues: [Con
     #expect(!model.saving)
     #expect(await client.saveCalls.count == 1)
 }
+
+@MainActor @Test func editsMadeWhileASaveIsInFlightSurviveASuccessfulSave() async {
+    let gate = Gate()
+    let client = FakeDashboardClient()
+    let model = await loadedEditor(client)
+    let fields = makeConfig().fields
+    await client.setSave(.success(SaveResult(status: "saved", issues: [], sha256: "new")), gate: gate)
+    model.set(fields[0], .int(45))
+    model.set(fields[2], .bool(true))
+    let save = Task { await model.save() }
+    while !model.saving { await Task.yield() }
+    model.set(fields[0], .int(50))  // a newer value for a field that was sent
+    model.set(fields[1], .int(400))  // a field that was not sent
+    await gate.open()
+    await save.value
+    #expect(model.drafts == ["polling.activeSeconds": .int(50), "polling.idleSeconds": .int(400)])
+    #expect(model.isDirty)
+    #expect(model.restartSuggested)
+    #expect(!model.saving)
+}
+
+@MainActor @Test func aSavedDraftThatWasNotChangedDuringTheSaveIsCleared() async {
+    let gate = Gate()
+    let client = FakeDashboardClient()
+    let model = await loadedEditor(client)
+    let fields = makeConfig().fields
+    await client.setSave(.success(SaveResult(status: "saved", issues: [], sha256: "new")), gate: gate)
+    model.set(fields[0], .int(45))
+    let save = Task { await model.save() }
+    while !model.saving { await Task.yield() }
+    model.set(fields[0], .int(45))  // the same value again is still the sent value
+    await gate.open()
+    await save.value
+    #expect(model.drafts.isEmpty)
+    #expect(!model.isDirty)
+}
+
+@MainActor @Test func anIssueOnAPathThatIsNotAFormFieldShowsInTheBanner() async {
+    let client = FakeDashboardClient()
+    await client.setSave(
+        .success(
+            SaveResult(
+                status: "invalid",
+                issues: [
+                    ConfigIssue(path: "polling.activeSeconds", message: "Must be at least 10."),
+                    ConfigIssue(path: "teams.workingHours", message: "start is after\nend"),
+                    ConfigIssue(path: "(root)", message: "unknown key"),
+                ], sha256: nil)))
+    let model = await loadedEditor(client)
+    model.set(makeConfig().fields[0], .int(1))
+    await model.save()
+    #expect(model.fieldIssues["polling.activeSeconds"] == "Must be at least 10.")
+    #expect(
+        model.banner
+            == "\(Copy.configInvalid) teams.workingHours: start is after end; (root): unknown key")
+    #expect(model.isDirty)
+}
+
+@MainActor @Test func anInvalidResultWithoutIssuesStillSaysNothingWasSaved() async {
+    let client = FakeDashboardClient()
+    await client.setSave(.success(SaveResult(status: "invalid", issues: [], sha256: nil)))
+    let model = await loadedEditor(client)
+    model.set(makeConfig().fields[0], .int(1))
+    await model.save()
+    #expect(model.banner == Copy.configInvalid)
+    #expect(Copy.configInvalid == "The config has problems. Nothing was saved.")
+    #expect(model.isDirty)
+}
+
+@MainActor @Test func issuesOnlyOnFormFieldsDoNotSetABanner() async {
+    let client = FakeDashboardClient()
+    await client.setSave(
+        .success(
+            SaveResult(
+                status: "invalid", issues: [ConfigIssue(path: "polling.activeSeconds", message: "Bad.")],
+                sha256: nil)))
+    let model = await loadedEditor(client)
+    model.set(makeConfig().fields[0], .int(1))
+    await model.save()
+    #expect(model.banner == nil)
+}
+
+@MainActor @Test func restartHandledClearsTheSuggestion() async {
+    let model = await loadedEditor()
+    model.set(makeConfig().fields[0], .int(45))
+    await model.save()
+    #expect(model.restartSuggested)
+    model.restartHandled()
+    #expect(!model.restartSuggested)
+}
