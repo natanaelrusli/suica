@@ -82,7 +82,7 @@ public enum Copy {
         "Every \(active) s while MRs are active, \(idle) s when idle"
     }
     public static let configPath = "Config file"
-    public static let statePath = "State folder"
+    public static let statePath = "State database"
     public static let logsPath = "Logs folder"
     public static let templatesPath = "Templates folder"
     public static func pollsOkFailed(ok: Int, failed: Int) -> String { "\(ok) ok / \(failed) failed" }
