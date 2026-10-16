@@ -32,6 +32,13 @@ public final class MenuModel {
             guard mine == latestRefresh else { return }
             state = fresh
             errorText = nil
+            // The confirmation belongs to a row that was waiting for approval; if it no longer is
+            // (sent or skipped elsewhere), do not leave a Send button behind.
+            if let asked = confirmation,
+                !(fresh.teams?.attention.contains { $0.id == asked.id && $0.state == .pending } ?? false)
+            {
+                confirmation = nil
+            }
         } catch {
             guard mine == latestRefresh else { return }
             errorText = Self.message(for: error)

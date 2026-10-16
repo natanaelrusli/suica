@@ -128,3 +128,4 @@ Source of truth for each behaviour is a test in `test/`. `src/events.ts`, `src/f
 - The menu bar app shows what the agent last recorded and refreshes every 30 seconds; the background agent (or `scripts/mra once`) has to have polled for its list to be current.
 - The install script bakes the absolute `node` and repository paths into the app: after moving the repository or switching Node versions, run `scripts/install-macos-app.sh` again.
 - The app and the CLI speak a versioned JSON format (`contracts/agent-state.v1.json`); an app built for a different version shows "The agent speaks a newer protocol. Rebuild the app."
+- The menu bar app gives a Send 300 seconds to finish (the CLI's own worst case with the default Teams timeouts is 210 s). If you raise `teams.callTimeoutSeconds`, raise `sendTimeout` in `macos/MRAMenuBar/Sources/MRACore/AgentClient.swift` and run the install script again.

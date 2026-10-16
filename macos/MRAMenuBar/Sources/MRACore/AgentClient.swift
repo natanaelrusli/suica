@@ -206,16 +206,20 @@ private struct StatusLine: Decodable {
 }
 
 /// The agent's own JSON logger also writes to stdout, so the answer is the last non-empty line.
+/// Only "\n" ends a line: JSON.stringify leaves U+2028, U+2029 and U+0085 unescaped inside strings.
 private func lastLine(of data: Data) -> Data? {
-    let text = String(decoding: data, as: UTF8.self)
-    let line = text.split(whereSeparator: \.isNewline).last { !$0.allSatisfy(\.isWhitespace) }
-    return line.map { Data($0.utf8) }
+    let blanks: Set<UInt8> = [0x20, 0x09, 0x0D]
+    return data.split(separator: 0x0A, omittingEmptySubsequences: true)
+        .last { !$0.allSatisfy { blanks.contains($0) } }
+        .map { Data($0) }
 }
 
 public struct CLIAgentClient: AgentClient {
     private static let shortTimeout: TimeInterval = 20
-    // Teams start (30 s) plus one call (60 s), with headroom.
-    private static let sendTimeout: TimeInterval = 150
+    // The CLI's own worst case with the default config: Teams start (30 s) plus three calls
+    // (lookup, open chat, send; 60 s each) is 210 s. Killing it later than that keeps a row from
+    // being stranded in `sending`; a larger teams.callTimeoutSeconds needs a larger value here.
+    private static let sendTimeout: TimeInterval = 300
 
     private let config: AgentConfig
     private let runner: any CommandRunning

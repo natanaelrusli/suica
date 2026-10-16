@@ -56,13 +56,25 @@ private let stateJSON =
     #expect(state.trackedAuthored == 1)
 }
 
+@Test func unicodeLineSeparatorsInsideTextDoNotBreakTheDocument() async throws {
+    // Node's JSON.stringify leaves U+2028, U+2029 and U+0085 unescaped; only "\n" ends a line.
+    let tricky = "{\"version\":1,\"paused\":false,\"baselineDone\":true,\"trackedAuthored\":1,\"reviewRequested\":2,"
+        + "\"teams\":{\"counts\":{},\"attentionHidden\":0,\"recent\":[],\"attention\":[{\"id\":1,\"kind\":\"nudge\","
+        + "\"status\":\"pending\",\"detail\":\"\",\"recipientName\":\"Bob\",\"mrKey\":\"g/p!5\","
+        + "\"mrTitle\":\"Refactor\u{2028}parser\u{2029}and\u{0085}more\",\"mrUrl\":\"https://x\",\"text\":null,"
+        + "\"createdAt\":1,\"updatedAt\":2}]}}\n"
+    let client = CLIAgentClient(config: config, runner: FakeRunner([output(tricky)]))
+    let state = try await client.state()
+    #expect(state.teams?.attention.first?.mrTitle == "Refactor\u{2028}parser\u{2029}and\u{0085}more")
+}
+
 @Test func sendUsesTheJsonFlagAndALongTimeout() async throws {
     let runner = FakeRunner([output(#"{"status":"sent"}"#)])
     let result = try await CLIAgentClient(config: config, runner: runner).send(id: 7)
     #expect(result == ActionResult(code: "sent"))
     let call = try #require(await runner.invocations.first)
     #expect(Array(call.arguments.dropFirst()) == ["send", "7", "--json"])
-    #expect(call.timeout == 150)
+    #expect(call.timeout == 300)
 }
 
 @Test func aNonZeroExitWithAStatusIsAnOutcomeNotAnError() async throws {

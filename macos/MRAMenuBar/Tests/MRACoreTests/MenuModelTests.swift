@@ -253,3 +253,30 @@ func makeState(attention: [OutboxItem] = [], paused: Bool = false) -> AgentState
     await model.send(item(4, "sent"))
     #expect(await client.sendCalls.isEmpty)
 }
+
+@MainActor @Test func aRefreshThatNoLongerListsTheItemAsPendingClearsTheConfirmation() async {
+    let pending = makeState(attention: [item(7, "pending")])
+    let client = FakeClient(states: [.success(pending)])
+    let model = MenuModel(client: client)
+    await model.refresh()
+    model.requestSend(item(7, "pending"))
+    await model.refresh()
+    #expect(model.confirmation?.id == 7)
+    // Sent elsewhere in the meantime: it moved to "recent" as sent.
+    let sentElsewhere = AgentState(
+        version: 1, paused: false, baselineDone: true, trackedAuthored: 1, reviewRequested: 2,
+        teams: TeamsSection(counts: [:], attentionHidden: 0, attention: [], recent: [item(7, "sent")]))
+    await client.setStates([.success(sentElsewhere)])
+    await model.refresh()
+    #expect(model.confirmation == nil)
+}
+
+@MainActor @Test func aFailedRefreshKeepsTheConfirmation() async {
+    let client = FakeClient(states: [.success(makeState(attention: [item(7, "pending")]))])
+    let model = MenuModel(client: client)
+    await model.refresh()
+    model.requestSend(item(7, "pending"))
+    await client.setStates([.failure(.timedOut)])
+    await model.refresh()
+    #expect(model.confirmation?.id == 7)
+}
