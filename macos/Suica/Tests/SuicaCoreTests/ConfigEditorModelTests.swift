@@ -286,3 +286,56 @@ func makeConfig(sha: String? = "abc", fields: [ConfigField]? = nil, issues: [Con
     model.restartHandled()
     #expect(!model.restartSuggested)
 }
+
+@MainActor @Test func invalidInputBlocksSavingUntilItIsCleared() async {
+    let client = FakeDashboardClient()
+    let model = await loadedEditor(client)
+    let active = makeConfig().fields[0]
+    model.set(active, .int(3))
+    #expect(model.canSave)
+    model.setInputInvalid(active, true)
+    #expect(model.invalidInputKeys == ["polling.activeSeconds"])
+    #expect(!model.canSave)
+    await model.save()
+    #expect(await client.saveCalls.isEmpty)
+    model.setInputInvalid(active, false)
+    #expect(model.invalidInputKeys.isEmpty)
+    #expect(model.canSave)
+    await model.save()
+    #expect(await client.saveCalls.count == 1)
+}
+
+@MainActor @Test func invalidInputIsClearedByDiscardSetAndResetOfThatField() async {
+    let model = await loadedEditor()
+    let fields = makeConfig().fields
+    model.setInputInvalid(fields[0], true)
+    model.setInputInvalid(fields[1], true)
+    model.discard()
+    #expect(model.invalidInputKeys.isEmpty)
+    model.setInputInvalid(fields[0], true)
+    model.set(fields[0], .int(45))
+    #expect(model.invalidInputKeys.isEmpty)
+    model.setInputInvalid(fields[0], true)
+    model.resetToDefault(fields[0])
+    #expect(model.invalidInputKeys.isEmpty)
+}
+
+@MainActor @Test func invalidInputBlocksSavingEvenWithoutADraftChange() async {
+    let model = await loadedEditor()
+    let fields = makeConfig().fields
+    model.setInputInvalid(fields[0], true)
+    #expect(!model.isDirty)
+    #expect(!model.canSave)
+}
+
+@MainActor @Test func aDocumentWithANewHashClearsInvalidInputButTheSameHashKeepsIt() async {
+    let client = FakeDashboardClient()
+    let model = await loadedEditor(client)
+    let active = makeConfig().fields[0]
+    model.setInputInvalid(active, true)
+    await model.load()
+    #expect(!model.invalidInputKeys.isEmpty)
+    await client.setConfigs([.success(makeConfig(sha: "def"))])
+    await model.load()
+    #expect(model.invalidInputKeys.isEmpty)
+}

@@ -47,12 +47,16 @@ struct FieldEditor: View {
             IntInput(field: field, editor: editor)
         case .bool:
             LabeledContent(field.label) {
-                Toggle(field.label, isOn: boolBinding).labelsHidden()
+                // Off would be a guess while the default applies: Discard brings the control back.
+                Toggle(field.label, isOn: boolBinding).labelsHidden().disabled(isReset)
             }
         case .enum:
             LabeledContent(field.label) {
-                Picker(field.label, selection: stringBinding) {
-                    ForEach(enumOptions, id: \.self) { Text(DisplayText.clean($0, max: 60)).tag($0) }
+                Picker(field.label, selection: optionBinding) {
+                    if currentOption == nil { Text(Copy.defaultOption).tag(String?.none) }
+                    ForEach(enumOptions, id: \.self) {
+                        Text(DisplayText.clean($0, max: 60)).tag(String?.some($0))
+                    }
                 }
                 .labelsHidden()
                 .frame(maxWidth: 240)
@@ -90,6 +94,18 @@ struct FieldEditor: View {
                 return ""
             },
             set: { editor.set(field, .string($0)) })
+    }
+
+    private var currentOption: String? {
+        if case .string(let text) = editor.value(of: field) { return text }
+        return nil
+    }
+
+    /// Nothing selected means the default applies; only a real option can be chosen.
+    private var optionBinding: Binding<String?> {
+        Binding(
+            get: { currentOption },
+            set: { if let option = $0 { editor.set(field, .string(option)) } })
     }
 
     private var boolBinding: Binding<Bool> {
@@ -180,7 +196,7 @@ private struct IntInput: View {
                     .multilineTextAlignment(.trailing)
                     .frame(width: 120)
             }
-            if text.isEmpty && editor.value(of: field) != .null {
+            if editor.invalidInputKeys.contains(field.path.joined(separator: ".")) {
                 Text(Copy.invalidNumber).font(.caption).foregroundStyle(.red)
             }
         }
@@ -191,6 +207,9 @@ private struct IntInput: View {
                 text = digits
             } else if let number = Int(digits) {
                 editor.set(field, .int(number))
+            } else {
+                // Empty: not a value, unless the field has none (after "Use default").
+                editor.setInputInvalid(field, editor.value(of: field) != .null)
             }
         }
         .onChange(of: editor.value(of: field)) { _, value in
@@ -239,12 +258,16 @@ private struct ClockInput: View {
                     .multilineTextAlignment(.trailing)
                     .frame(width: 100)
             }
-            if !Self.isClock(text) {
+            if editor.invalidInputKeys.contains(field.path.joined(separator: ".")) {
                 Text(Copy.invalidClock).font(.caption).foregroundStyle(.red)
             }
         }
         .onChange(of: text) { _, new in
-            if Self.isClock(new) { editor.set(field, .string(new)) }
+            if Self.isClock(new) {
+                editor.set(field, .string(new))
+            } else {
+                editor.setInputInvalid(field, !(new.isEmpty && editor.value(of: field) == .null))
+            }
         }
         .onChange(of: editor.value(of: field)) { _, value in
             let shown = Self.render(value)

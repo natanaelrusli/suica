@@ -65,7 +65,10 @@ struct MainWindow: View {
         .navigationTitle("\(Copy.appName) · \((selection ?? .overview).title)")
         .frame(minWidth: 760, minHeight: 480)
         // The Dock icon exists only while the window does.
-        .onAppear { NSApp.setActivationPolicy(.regular) }
+        .onAppear {
+            NSApp.setActivationPolicy(.regular)
+            NSApp.activate()
+        }
         .onDisappear { NSApp.setActivationPolicy(.accessory) }
         // Cancelled when the window closes.
         .task { await window.runRefreshLoop(every: .seconds(30)) }

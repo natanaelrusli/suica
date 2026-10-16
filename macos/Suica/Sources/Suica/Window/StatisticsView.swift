@@ -112,12 +112,16 @@ struct StatisticsView: View {
         }
     }
 
-    /// `YYYY-MM-DD` as a short local label ("Oct 16"); anything else is shown cleaned.
-    private static func shortLabel(_ day: String) -> String {
+    private static let dayParser: DateFormatter = {
         let parser = DateFormatter()
         parser.locale = Locale(identifier: "en_US_POSIX")
         parser.dateFormat = "yyyy-MM-dd"
-        guard let date = parser.date(from: day) else { return DisplayText.clean(day, max: 12) }
+        return parser
+    }()
+
+    /// `YYYY-MM-DD` as a short local label ("Oct 16"); anything else is shown cleaned.
+    private static func shortLabel(_ day: String) -> String {
+        guard let date = dayParser.date(from: day) else { return DisplayText.clean(day, max: 12) }
         return date.formatted(.dateTime.month(.abbreviated).day())
     }
 }

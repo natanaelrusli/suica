@@ -93,7 +93,7 @@ struct ConfigurationView: View {
         ToolbarItemGroup {
             Button(action: openConfig) { Label(Copy.openConfig, systemImage: "doc.text") }
                 .help(Copy.openConfig)
-                .disabled(editor.document == nil)
+                .disabled(editor.document?.exists != true)
             Button(action: openTemplates) { Label(Copy.openTemplates, systemImage: "folder") }
                 .help(Copy.openTemplates)
                 .disabled(window.status == nil)
@@ -108,13 +108,13 @@ struct ConfigurationView: View {
                 Label(Copy.discard, systemImage: "arrow.uturn.backward")
             }
             .help(Copy.discard)
-            .disabled(!editor.isDirty)
+            .disabled(!editor.isDirty && editor.invalidInputKeys.isEmpty)
             Button { Task { await editor.save() } } label: {
                 Label(Copy.save, systemImage: "square.and.arrow.down")
             }
             .help(Copy.save)
             .keyboardShortcut("s")
-            .disabled(!editor.isDirty || editor.saving)
+            .disabled(!editor.canSave)
         }
     }
 

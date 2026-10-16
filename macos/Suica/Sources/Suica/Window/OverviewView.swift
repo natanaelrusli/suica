@@ -58,12 +58,14 @@ struct OverviewView: View {
             HStack {
                 Text(paused ? Copy.paused : Copy.running).font(.headline)
                 Spacer()
-                Button(paused ? Copy.resume : Copy.pause) {
+                // The button flips the popover model's state, so it is labelled from it too.
+                Button(menu.isPaused ? Copy.resume : Copy.pause) {
                     Task {
                         await menu.togglePause()
                         await window.refresh()
                     }
                 }
+                .disabled(menu.state == nil)
             }
             if let polling = status.polling {
                 Text(Copy.pollIntervals(active: polling.activeSeconds, idle: polling.idleSeconds))

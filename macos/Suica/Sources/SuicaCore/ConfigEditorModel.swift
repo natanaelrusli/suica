@@ -9,6 +9,9 @@ public final class ConfigEditorModel {
     public private(set) var banner: String?
     public private(set) var saving = false
     public private(set) var restartSuggested = false
+    /// Fields whose box holds text that is not a value yet (an empty number, a half-typed time).
+    /// The drafts do not show it, so saving is blocked while any is left.
+    public private(set) var invalidInputKeys: Set<String> = []
 
     @ObservationIgnored private let client: any DashboardClient
 
@@ -23,7 +26,10 @@ public final class ConfigEditorModel {
     /// Reloads the document. Drafts are kept: after a conflict the Owner reviews what changed first.
     public func load() async {
         do {
-            document = try await client.config()
+            let fresh = try await client.config()
+            // A new file rebuilds the form, and with it every box; the same file keeps its boxes.
+            if fresh.sha256 != document?.sha256 { invalidInputKeys = [] }
+            document = fresh
             banner = nil
         } catch {
             banner = MenuModel.message(for: error)
@@ -38,6 +44,16 @@ public final class ConfigEditorModel {
     public func set(_ field: ConfigField, _ value: JSONValue) {
         drafts[Self.key(field)] = value
         fieldIssues[Self.key(field)] = nil
+        invalidInputKeys.remove(Self.key(field))
+    }
+
+    /// The view reports, on every change of a box, whether its text is a value.
+    public func setInputInvalid(_ field: ConfigField, _ invalid: Bool) {
+        if invalid {
+            invalidInputKeys.insert(Self.key(field))
+        } else {
+            invalidInputKeys.remove(Self.key(field))
+        }
     }
 
     /// Removes the key from the file, so the agent's default applies.
@@ -47,9 +63,13 @@ public final class ConfigEditorModel {
 
     public var isDirty: Bool { !dirtyFields.isEmpty }
 
+    /// There is something to save and no box holds text the drafts do not show.
+    public var canSave: Bool { !saving && invalidInputKeys.isEmpty && isDirty }
+
     public func discard() {
         drafts = [:]
         fieldIssues = [:]
+        invalidInputKeys = []
         banner = nil
     }
 
@@ -59,7 +79,7 @@ public final class ConfigEditorModel {
     }
 
     public func save() async {
-        guard !saving, let document, !dirtyFields.isEmpty else { return }
+        guard canSave, let document else { return }
         let edits = dirtyFields.map { ConfigEditRequest(path: $0.path, value: drafts[Self.key($0)] ?? .null) }
         let snapshot = drafts
         saving = true

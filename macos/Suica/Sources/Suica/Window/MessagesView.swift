@@ -34,6 +34,7 @@ struct MessagesView: View {
                 ProgressView(Copy.loading)
             }
         }
+        .task { await model.refresh() }
         .toolbar {
             Button { Task { await model.refresh() } } label: {
                 Label(Copy.refresh, systemImage: "arrow.clockwise")

@@ -73,7 +73,7 @@ public enum Copy {
     public static let readOnlyField = "This setting can't be edited here."
     public static let configMissing = "No config file yet. Saving creates it."
     public static let configIssuesHeading = "The config on disk has problems"
-    public static let pollingOn = "Polling is on"
+    public static let defaultOption = "Default"
     public static let teamsOn = "Teams is on"
     public static let teamsOff = "Teams is off"
     public static func needsAttention(_ count: Int) -> String { "\(count) need your attention" }
