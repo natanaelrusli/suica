@@ -63,6 +63,8 @@ Teams is off until `teams.enabled: true`. Messages are chats from you, written f
 - **Reviewer Nudge** to a Reviewer who is added to, or re-requested on, one of your non-draft MRs; one reminder if they are still `UNREVIEWED` 24 hours later; never to someone who already reviewed.
 - **Review Notice** to the Author of an MR you reviewed (approved, requested changes or comments only), 10 minutes after you stopped changing your review.
 
+A message that is no longer needed (the Reviewer has reviewed, the MR is gone) is skipped, also while it waits for your approval; `mra send` refuses it with `obsolete`. A reminder is due 24 hours after the nudge was actually delivered, never before.
+
 Each flow has a send mode: `approval` (default; the message waits for you), `auto` (sent when due) or `dry-run` (rendered and recorded, never sent). Messages only go out in working hours (Mac local time) and wait in the queue otherwise.
 
 ```bash
@@ -73,7 +75,7 @@ scripts/mra retry <id>        # look the person up again after fixing teams.peop
 scripts/mra selftest          # send one test line to your own Teams notes chat
 ```
 
-Statuses in `mra pending`: `pending` waits for you; `unresolved` needs a `teams.people` line (then `mra retry`); `failed` is final; `sending` may have been delivered, so check Teams before deciding.
+Statuses in `mra pending`: `pending` waits for you; `unresolved` needs a `teams.people` line (then `mra retry`), or Teams returned an error for that person's lookup; `failed` is final; `sending` may have been delivered, so check Teams before deciding.
 
 Templates are files in the templates folder: `nudge.txt`, `reminder.txt`, `notice.approved.txt`, `notice.changes.txt`, `notice.comments.txt`. Placeholders: `{{mr.title}}`, `{{mr.url}}`, `{{mr.iid}}`, `{{mr.project}}`, `{{person.name}}`, `{{owner.name}}`. An unknown placeholder stops startup instead of sending a broken message.
 
@@ -109,5 +111,5 @@ Source of truth for each behaviour is a test in `test/`. `src/events.ts`, `src/f
 - `osascript` notifications cannot be clicked; install `terminal-notifier` for click-to-open.
 - A Teams message is sent at most once: a failed or interrupted send is never repeated automatically.
 - An MR is announced to its Author only once per round of your review.
-- Teams planning starts from the moment Teams is enabled; older history is never announced.
+- Teams planning starts from the moment Teams is enabled, and again after every period in which it was switched off; older history is never announced.
 - The Agent Review flow is not implemented yet.

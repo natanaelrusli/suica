@@ -53,6 +53,10 @@ export function createRuntime(configPath: string): Runtime {
       })
     : undefined;
 
+  // While Teams is off nothing keeps the ledger current: forget it so that switching Teams on
+  // later seeds from the then-current state and never announces what happened in between.
+  if (teams === undefined) store.resetTeamsBaseline();
+
   const deps: PollDeps = {
     fetchSnapshot: () => fetchSnapshot(run),
     store,

@@ -21,6 +21,11 @@ export interface Store {
   isPaused(): boolean;
   setPaused(paused: boolean): void;
   loadTeams(): TeamsState;
+  /**
+   * Forgets the review rounds and the Teams baseline. Used while Teams is switched off: the ledger
+   * is not maintained then, so the next start must re-seed it instead of announcing the gap.
+   */
+  resetTeamsBaseline(): void;
   /** Queues the plan's intents (idempotent per `dedupeKey`) and updates the ledger in one transaction. */
   applyTeamsPlan(plan: TeamsPlan, now: number): number;
   listOutbox(statuses: readonly OutboxStatus[]): OutboxRow[];
@@ -278,6 +283,18 @@ export function openStore(path: string): Store {
         });
       }
       return { baselineDone: metaValue(META_TEAMS_BASELINE) === "1", nudges, rounds, undelivered };
+    },
+
+    resetTeamsBaseline() {
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        db.exec("DELETE FROM review_round");
+        db.prepare("DELETE FROM meta WHERE key = ?").run(META_TEAMS_BASELINE);
+        db.exec("COMMIT");
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
     },
 
     applyTeamsPlan(plan, now) {

@@ -223,6 +223,28 @@ describe("nudge delivery in the ledger", () => {
   });
 });
 
+describe("resetTeamsBaseline", () => {
+  it("forgets the review rounds and the baseline but keeps nudges and the outbox", () => {
+    const store = openStore(":memory:");
+    store.applyTeamsPlan(
+      teamsPlan({
+        intents: [intent(1)],
+        nudgeUpdates: [{ key: "g/p!5|bob", record: { sentCount: 1, lastSentAt: NOW } }],
+        roundUpdates: [{ mrKey: "g/p!7", round }],
+        keepNudges: ["g/p!5|bob"],
+        keepRounds: ["g/p!7"],
+      }),
+      NOW,
+    );
+    store.resetTeamsBaseline();
+    const state = store.loadTeams();
+    expect(state.baselineDone).toBe(false);
+    expect(state.rounds.size).toBe(0);
+    expect(state.nudges.size).toBe(1);
+    expect(store.listOutbox(["queued"])).toHaveLength(1);
+  });
+});
+
 describe("identity cache", () => {
   it("saves and loads an email per GitLab username", () => {
     const store = openStore(":memory:");
