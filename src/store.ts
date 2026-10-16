@@ -4,6 +4,15 @@ import { DatabaseSync } from "node:sqlite";
 import type { Snapshot } from "./domain.ts";
 import { myReviewState, reviewerKey } from "./events.ts";
 import type { PreviousState } from "./events.ts";
+import { isOutboxKind, isOutboxStatus, isTemplateName } from "./teams/types.ts";
+import type {
+  NudgeRecord,
+  OutboxRow,
+  OutboxStatus,
+  Round,
+  TeamsPlan,
+  TeamsState,
+} from "./teams/types.ts";
 
 export interface Store {
   load(): PreviousState;
@@ -11,10 +20,67 @@ export interface Store {
   commit(snapshot: Snapshot): void;
   isPaused(): boolean;
   setPaused(paused: boolean): void;
+  loadTeams(): TeamsState;
+  /** Queues the plan's intents (idempotent per `dedupeKey`) and updates the ledger in one transaction. */
+  applyTeamsPlan(plan: TeamsPlan, now: number): number;
+  listOutbox(statuses: readonly OutboxStatus[]): OutboxRow[];
+  getOutbox(id: number): OutboxRow | undefined;
+  /** Compare-and-set: true only for the one caller that found the row in `from`. */
+  transitionOutbox(
+    id: number,
+    from: OutboxStatus,
+    to: OutboxStatus,
+    fields: { detail?: string; text?: string },
+    now: number,
+  ): boolean;
+  loadIdentity(username: string): string | undefined;
+  saveIdentity(username: string, email: string, now: number): void;
   close(): void;
 }
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
+const SCHEMA_V2 = `
+CREATE TABLE IF NOT EXISTS outbox (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  dedupe_key TEXT NOT NULL UNIQUE,
+  kind TEXT NOT NULL,
+  variant TEXT NOT NULL,
+  mr_key TEXT NOT NULL,
+  mr_iid INTEGER NOT NULL,
+  mr_project TEXT NOT NULL,
+  mr_title TEXT NOT NULL,
+  mr_url TEXT NOT NULL,
+  recipient TEXT NOT NULL,
+  recipient_name TEXT NOT NULL,
+  status TEXT NOT NULL,
+  detail TEXT NOT NULL DEFAULT '',
+  text TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS outbox_status ON outbox (status);
+CREATE TABLE IF NOT EXISTS nudge_state (
+  key TEXT PRIMARY KEY,
+  sent_count INTEGER NOT NULL,
+  last_sent_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS review_round (
+  mr_key TEXT PRIMARY KEY,
+  my_state TEXT NOT NULL,
+  my_notes INTEGER NOT NULL,
+  changed_at INTEGER NOT NULL,
+  noticed_state TEXT NOT NULL,
+  noticed_notes INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS identity (
+  username TEXT PRIMARY KEY,
+  email TEXT NOT NULL,
+  resolved_at INTEGER NOT NULL
+);
+`;
+const META_TEAMS_BASELINE = "teams_baseline_done";
+const FINISHED_STATUSES = ["sent", "skipped", "failed", "dry-run"] as const;
+const OUTBOX_RETENTION_MS = 90 * 24 * 3_600_000;
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS tracked_authored (mr_key TEXT PRIMARY KEY);
@@ -41,16 +107,49 @@ function text(row: Row, column: string): string {
   return value;
 }
 
+function integer(row: Row, column: string): number {
+  const value = row[column];
+  if (typeof value !== "number") throw new Error(`column ${column} is not an integer`);
+  return value;
+}
+
+function toOutboxRow(row: Row): OutboxRow {
+  const kind = text(row, "kind");
+  const variant = text(row, "variant");
+  const status = text(row, "status");
+  if (!isOutboxKind(kind) || !isTemplateName(variant) || !isOutboxStatus(status)) {
+    throw new Error("outbox row has an unknown kind, variant or status");
+  }
+  const stored = row["text"];
+  return {
+    id: integer(row, "id"),
+    dedupeKey: text(row, "dedupe_key"),
+    kind,
+    variant,
+    mrKey: text(row, "mr_key"),
+    mrIid: integer(row, "mr_iid"),
+    mrProject: text(row, "mr_project"),
+    mrTitle: text(row, "mr_title"),
+    mrUrl: text(row, "mr_url"),
+    recipient: text(row, "recipient"),
+    recipientName: text(row, "recipient_name"),
+    status,
+    detail: text(row, "detail"),
+    text: typeof stored === "string" ? stored : null,
+    createdAt: integer(row, "created_at"),
+    updatedAt: integer(row, "updated_at"),
+  };
+}
+
 function initSchema(db: DatabaseSync): void {
   const found = db.prepare("PRAGMA user_version").get()?.["user_version"];
   const version = typeof found === "number" ? found : 0;
   if (version > SCHEMA_VERSION) {
     throw new Error(`state database schema ${version} is newer than supported ${SCHEMA_VERSION}`);
   }
-  if (version === 0) {
-    db.exec(SCHEMA);
-    db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
-  }
+  if (version === 0) db.exec(SCHEMA);
+  if (version < 2) db.exec(SCHEMA_V2);
+  if (version !== SCHEMA_VERSION) db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 }
 
 /** The database holds employee IDs: keep the folder and every SQLite file private to the owner. */
@@ -147,6 +246,141 @@ export function openStore(path: string): Store {
       }
       // The -wal and -shm files only exist once something has been written.
       restrictPermissions(path);
+    },
+
+    loadTeams() {
+      const nudges = new Map<string, NudgeRecord>();
+      for (const row of rows("SELECT key, sent_count, last_sent_at FROM nudge_state")) {
+        nudges.set(text(row, "key"), {
+          sentCount: integer(row, "sent_count"),
+          lastSentAt: integer(row, "last_sent_at"),
+        });
+      }
+      const rounds = new Map<string, Round>();
+      for (const row of rows("SELECT * FROM review_round")) {
+        rounds.set(text(row, "mr_key"), {
+          myState: text(row, "my_state"),
+          myNotes: integer(row, "my_notes"),
+          changedAt: integer(row, "changed_at"),
+          noticedState: text(row, "noticed_state"),
+          noticedNotes: integer(row, "noticed_notes"),
+        });
+      }
+      return { baselineDone: metaValue(META_TEAMS_BASELINE) === "1", nudges, rounds };
+    },
+
+    applyTeamsPlan(plan, now) {
+      const insertOutbox = db.prepare(
+        `INSERT OR IGNORE INTO outbox
+           (dedupe_key, kind, variant, mr_key, mr_iid, mr_project, mr_title, mr_url,
+            recipient, recipient_name, status, detail, text, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', '', NULL, ?, ?)`,
+      );
+      const upsertNudge = db.prepare(
+        `INSERT INTO nudge_state (key, sent_count, last_sent_at) VALUES (?, ?, ?)
+         ON CONFLICT(key) DO UPDATE SET
+           sent_count = excluded.sent_count, last_sent_at = excluded.last_sent_at`,
+      );
+      const upsertRound = db.prepare(
+        `INSERT INTO review_round
+           (mr_key, my_state, my_notes, changed_at, noticed_state, noticed_notes)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(mr_key) DO UPDATE SET
+           my_state = excluded.my_state, my_notes = excluded.my_notes,
+           changed_at = excluded.changed_at, noticed_state = excluded.noticed_state,
+           noticed_notes = excluded.noticed_notes`,
+      );
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        let created = 0;
+        for (const item of plan.intents) {
+          const result = insertOutbox.run(
+            item.dedupeKey,
+            item.kind,
+            item.variant,
+            item.mr.key,
+            item.mr.iid,
+            item.mr.projectPath,
+            item.mr.title,
+            item.mr.url,
+            item.recipient.username,
+            item.recipient.name,
+            now,
+            now,
+          );
+          created += Number(result.changes);
+        }
+        for (const { key, record } of plan.nudgeUpdates) {
+          upsertNudge.run(key, record.sentCount, record.lastSentAt);
+        }
+        for (const { mrKey, round } of plan.roundUpdates) {
+          upsertRound.run(
+            mrKey,
+            round.myState,
+            round.myNotes,
+            round.changedAt,
+            round.noticedState,
+            round.noticedNotes,
+          );
+        }
+        const keepNudges = new Set(plan.keepNudges);
+        for (const row of rows("SELECT key FROM nudge_state")) {
+          const key = text(row, "key");
+          if (!keepNudges.has(key)) db.prepare("DELETE FROM nudge_state WHERE key = ?").run(key);
+        }
+        const keepRounds = new Set(plan.keepRounds);
+        for (const row of rows("SELECT mr_key FROM review_round")) {
+          const key = text(row, "mr_key");
+          if (!keepRounds.has(key)) {
+            db.prepare("DELETE FROM review_round WHERE mr_key = ?").run(key);
+          }
+        }
+        db.prepare(
+          `DELETE FROM outbox WHERE updated_at < ? AND status IN (${FINISHED_STATUSES.map(() => "?").join(", ")})`,
+        ).run(now - OUTBOX_RETENTION_MS, ...FINISHED_STATUSES);
+        if (plan.baselineDone) setMeta(META_TEAMS_BASELINE, "1");
+        db.exec("COMMIT");
+        return created;
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
+    },
+
+    listOutbox(statuses) {
+      if (statuses.length === 0) return [];
+      const marks = statuses.map(() => "?").join(", ");
+      return db
+        .prepare(`SELECT * FROM outbox WHERE status IN (${marks}) ORDER BY id`)
+        .all(...statuses)
+        .map(toOutboxRow);
+    },
+
+    getOutbox(id) {
+      const row = db.prepare("SELECT * FROM outbox WHERE id = ?").get(id);
+      return row === undefined ? undefined : toOutboxRow(row);
+    },
+
+    transitionOutbox(id, from, to, fields, now) {
+      const result = db
+        .prepare(
+          `UPDATE outbox SET status = ?, detail = COALESCE(?, detail), text = COALESCE(?, text),
+             updated_at = ? WHERE id = ? AND status = ?`,
+        )
+        .run(to, fields.detail ?? null, fields.text ?? null, now, id, from);
+      return Number(result.changes) === 1;
+    },
+
+    loadIdentity(username) {
+      const row = db.prepare("SELECT email FROM identity WHERE username = ?").get(username);
+      return row === undefined ? undefined : text(row, "email");
+    },
+
+    saveIdentity(username, email, now) {
+      db.prepare(
+        `INSERT INTO identity (username, email, resolved_at) VALUES (?, ?, ?)
+         ON CONFLICT(username) DO UPDATE SET email = excluded.email, resolved_at = excluded.resolved_at`,
+      ).run(username, email, now);
     },
 
     isPaused: () => metaValue(META_PAUSED) === "1",
