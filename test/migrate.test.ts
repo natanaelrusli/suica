@@ -41,13 +41,18 @@ function sandbox(): Sandbox {
   const bin = join(root, "bin");
   mkdirSync(home);
   mkdirSync(bin);
-  for (const name of ["launchctl", "osascript"]) {
-    stub(bin, name, `echo "${name} $*" >> "$HOME/calls.log"`);
-  }
+  stub(bin, "osascript", `echo "osascript $*" >> "$HOME/calls.log"`);
+  // bootout logs and succeeds without unloading; print succeeds only while agent-loaded exists.
+  stub(
+    bin,
+    "launchctl",
+    `echo "launchctl $*" >> "$HOME/calls.log"\nif [ "$1" = print ] && [ ! -e "$HOME/agent-loaded" ]; then exit 1; fi\nexit 0`,
+  );
+  // -f matches by command line (marker: running); -x matches by exact name (marker: running-app).
   stub(
     bin,
     "pgrep",
-    `echo "pgrep $*" >> "$HOME/calls.log"\nif [ -e "$HOME/running" ]; then echo 4242; exit 0; fi\nexit 1`,
+    `echo "pgrep $*" >> "$HOME/calls.log"\nif [ "$1" = -x ]; then marker=running-app; else marker=running; fi\nif [ -e "$HOME/$marker" ]; then echo 4242; exit 0; fi\nexit 1`,
   );
   const path = (...parts: string[]): string => join(home, ...parts);
   return {
@@ -132,6 +137,19 @@ describe("migrate-to-suica.sh", () => {
     expect(output).toContain("already migrated");
   });
 
+  const expectNothingMoved = (box: Sandbox): void => {
+    for (const old of [CONFIG, STATE, WAL, LOG, PLIST, APP]) {
+      expect(existsSync(box.path(old))).toBe(true);
+    }
+    for (const created of [
+      ".config/suica",
+      "Library/Application Support/suica",
+      "Library/Logs/suica",
+    ]) {
+      expect(existsSync(box.path(created))).toBe(false);
+    }
+  };
+
   it("refuses while an old process is running and moves nothing", () => {
     const box = sandbox();
     seedOld(box);
@@ -142,10 +160,34 @@ describe("migrate-to-suica.sh", () => {
     expect(status).toBe(1);
     expect(output).toContain("pid 4242");
     expect(output).toContain("an old process is still running");
-    for (const old of [CONFIG, STATE, WAL, LOG, PLIST, APP]) {
-      expect(existsSync(box.path(old))).toBe(true);
-    }
-    expect(existsSync(box.path(".config/suica"))).toBe(false);
+    expectNothingMoved(box);
+  }, 15_000);
+
+  it("refuses while the old menu bar app is running (exact name) and moves nothing", () => {
+    const box = sandbox();
+    seedOld(box);
+    box.put("running-app", "");
+
+    const { status, output } = box.run();
+
+    expect(status).toBe(1);
+    expect(output).toContain("an old process is still running (pid 4242)");
+    expect(readFileSync(box.path("calls.log"), "utf8")).toContain("pgrep -x MRAMenuBar");
+    expectNothingMoved(box);
+  }, 15_000);
+
+  it("refuses while the old LaunchAgent is still loaded and moves nothing", () => {
+    const box = sandbox();
+    seedOld(box);
+    box.put("agent-loaded", "");
+
+    const { status, output } = box.run();
+
+    expect(status).toBe(1);
+    expect(output).toContain("the old LaunchAgent is still loaded");
+    expect(output).toContain(LABEL);
+    expect(readFileSync(box.path("calls.log"), "utf8")).toContain(`print gui/`);
+    expectNothingMoved(box);
   }, 15_000);
 
   it("refuses when old and new folders both exist and moves nothing", () => {
@@ -165,6 +207,25 @@ describe("migrate-to-suica.sh", () => {
     }
     expect(existsSync(box.path("Library/Application Support/suica"))).toBe(false);
     expect(existsSync(box.path("Library/Logs/suica"))).toBe(false);
+  });
+
+  it("checks every pair before moving: a conflict on only the last pair moves nothing", () => {
+    const box = sandbox();
+    seedOld(box);
+    box.put(NEW_LOG, "newer-log");
+
+    const { status, output } = box.run();
+
+    expect(status).toBe(1);
+    expect(output).toContain(box.path("Library/Logs/mr-review-assistant"));
+    expect(output).toContain(box.path("Library/Logs/suica"));
+    expect(output).toContain("merge them by hand");
+    expect(readFileSync(box.path(NEW_LOG), "utf8")).toBe("newer-log");
+    for (const old of [CONFIG, STATE, WAL, LOG, PLIST, APP]) {
+      expect(existsSync(box.path(old))).toBe(true);
+    }
+    expect(existsSync(box.path(".config/suica"))).toBe(false);
+    expect(existsSync(box.path("Library/Application Support/suica"))).toBe(false);
   });
 
   it("warns about explicit old paths in the config and leaves the YAML untouched", () => {

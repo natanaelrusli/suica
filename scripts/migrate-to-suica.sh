@@ -15,18 +15,31 @@ launchctl bootout "gui/$(id -u)/$OLD_LABEL" >/dev/null 2>&1 || true
 osascript -e "tell application id \"$OLD_LABEL.menubar\" to quit" >/dev/null 2>&1 || true
 
 # 2. Wait up to 5 s for them to exit; refuse before moving anything if one remains.
+# A daemon started from a checkout that no longer carries the old name is invisible to
+# pgrep -f, so also ask launchd whether the old job is still loaded, and look for the old
+# menu bar app by its exact executable name.
 running_pids() {
-  pgrep -f "mr-review-assistant|MRAMenuBar" 2>/dev/null | tr '\n' ' ' || true
+  {
+    pgrep -f "mr-review-assistant|MRAMenuBar" 2>/dev/null || true
+    pgrep -x MRAMenuBar 2>/dev/null || true
+  } | sort -u | tr '\n' ' '
+}
+agent_loaded() {
+  launchctl print "gui/$(id -u)/$OLD_LABEL" >/dev/null 2>&1
 }
 pids=$(running_pids)
 waited=0
-while [ -n "$pids" ] && [ "$waited" -lt 10 ]; do
+while { [ -n "$pids" ] || agent_loaded; } && [ "$waited" -lt 10 ]; do
   sleep 0.5
   waited=$((waited + 1))
   pids=$(running_pids)
 done
 if [ -n "$pids" ]; then
   echo "an old process is still running (pid ${pids% }): quit it and run this again" >&2
+  exit 1
+fi
+if agent_loaded; then
+  echo "the old LaunchAgent is still loaded: $OLD_LABEL; run 'launchctl bootout gui/$(id -u)/$OLD_LABEL' and run this again" >&2
   exit 1
 fi
 
