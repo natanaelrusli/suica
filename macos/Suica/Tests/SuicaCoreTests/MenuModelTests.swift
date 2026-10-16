@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-@testable import MRACore
+@testable import SuicaCore
 
 actor Gate {
     private var continuation: CheckedContinuation<Void, Never>?

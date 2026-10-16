@@ -1,6 +1,6 @@
 /// Every string the app shows. English only; Teams messages are not part of the app.
 public enum Copy {
-    public static let appName = "MR Review Assistant"
+    public static let appName = "Suica"
     public static let running = "Polling"
     public static let paused = "Paused"
     public static func tracked(_ count: Int) -> String { "\(count) of your MRs are tracked" }
@@ -11,7 +11,7 @@ public enum Copy {
     public static let recentHeading = "Recent"
     public static let attentionEmpty = "Nothing is waiting for you."
     public static func moreHidden(_ count: Int) -> String {
-        "and \(count) more (see mra pending --all)"
+        "and \(count) more (see suica pending --all)"
     }
     public static let teamsDisabled = "Teams is off. Set teams.enabled to true in the config."
     public static let send = "Send…"

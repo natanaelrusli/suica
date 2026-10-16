@@ -1,4 +1,4 @@
-import MRACore
+import SuicaCore
 import SwiftUI
 
 struct ItemRow: View {

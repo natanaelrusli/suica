@@ -1,4 +1,4 @@
 node_modules/
 coverage/
 *.log
-macos/MRAMenuBar/.build/
+macos/Suica/.build/

@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-@testable import MRACore
+@testable import SuicaCore
 
 private func goldenData() throws -> Data {
     var url = URL(fileURLWithPath: #filePath)

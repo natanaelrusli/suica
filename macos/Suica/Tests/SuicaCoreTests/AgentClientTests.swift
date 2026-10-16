@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-@testable import MRACore
+@testable import SuicaCore
 
 actor FakeRunner: CommandRunning {
     private(set) var invocations: [Invocation] = []
@@ -36,7 +36,7 @@ private let stateJSON =
     #expect(call.arguments == ["/Users/me/suica/src/cli.ts", "state"])
     #expect(call.workingDirectory == "/Users/me/suica")
     #expect(call.environment["PATH"] == "/opt/homebrew/bin:/usr/bin")
-    #expect(call.environment["MRA_ENV"] == "production")
+    #expect(call.environment["SUICA_ENV"] == "production")
     #expect(call.environment["HOME"]?.isEmpty == false)
     #expect(call.timeout == 20)
 }
@@ -138,7 +138,7 @@ func exitZeroWithGarbageIsBadOutput(text: String) async {
 }
 
 @Test func configFromTheBundleNeedsAllThreeKeys() {
-    let full: [String: Any] = ["MRANodePath": "/n", "MRARepoPath": "/r", "MRASearchPath": "/p"]
+    let full: [String: Any] = ["SuicaNodePath": "/n", "SuicaRepoPath": "/r", "SuicaSearchPath": "/p"]
     #expect(AgentConfig(infoDictionary: full) == AgentConfig(nodePath: "/n", repoPath: "/r", searchPath: "/p"))
     for key in full.keys {
         var missing = full

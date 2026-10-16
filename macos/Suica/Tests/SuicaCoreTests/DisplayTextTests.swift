@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-@testable import MRACore
+@testable import SuicaCore
 
 @Test func collapsesNewlinesTabsAndControlCharacters() {
     #expect(DisplayText.clean("a\n\tb\u{0007}c") == "a b c")
@@ -52,7 +52,7 @@ import Testing
 @Test func copyHelpersFormatTheirArguments() {
     #expect(Copy.tracked(4) == "4 of your MRs are tracked")
     #expect(Copy.waitingForYou(5) == "5 MRs are waiting for your review")
-    #expect(Copy.moreHidden(50) == "and 50 more (see mra pending --all)")
+    #expect(Copy.moreHidden(50) == "and 50 more (see suica pending --all)")
     #expect(Copy.confirmTitle("Bob") == "Send this message to Bob?")
     #expect(Copy.kindLabel("nudge") == "Nudge")
     #expect(Copy.kindLabel("reminder") == "Reminder")

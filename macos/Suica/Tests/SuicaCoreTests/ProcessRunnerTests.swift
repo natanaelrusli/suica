@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-@testable import MRACore
+@testable import SuicaCore
 
 private func shell(_ script: String, timeout: TimeInterval = 10, directory: String = "/tmp") -> Invocation {
     Invocation(

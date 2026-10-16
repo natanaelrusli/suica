@@ -1,5 +1,5 @@
 import AppKit
-import MRACore
+import SuicaCore
 import SwiftUI
 
 struct MenuView: View {

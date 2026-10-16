@@ -176,8 +176,8 @@ public struct AgentConfig: Equatable, Sendable {
             guard let text = infoDictionary?[key] as? String, !text.isEmpty else { return nil }
             return text
         }
-        guard let node = value("MRANodePath"), let repo = value("MRARepoPath"),
-            let search = value("MRASearchPath")
+        guard let node = value("SuicaNodePath"), let repo = value("SuicaRepoPath"),
+            let search = value("SuicaSearchPath")
         else { return nil }
         self.init(nodePath: node, repoPath: repo, searchPath: search)
     }
@@ -234,7 +234,7 @@ public struct CLIAgentClient: AgentClient {
         return Invocation(
             executable: config.nodePath,
             arguments: ["\(config.repoPath)/src/cli.ts"] + arguments,
-            environment: ["PATH": config.searchPath, "HOME": home, "MRA_ENV": "production"],
+            environment: ["PATH": config.searchPath, "HOME": home, "SUICA_ENV": "production"],
             workingDirectory: config.repoPath,
             timeout: timeout)
     }

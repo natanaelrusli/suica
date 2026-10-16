@@ -1,5 +1,5 @@
 import AppKit
-import MRACore
+import SuicaCore
 import SwiftUI
 
 /// Used when the bundle has no agent paths (for example `swift run`): every call reports unreachable.
@@ -14,7 +14,7 @@ private struct UnconfiguredClient: AgentClient {
 private let refreshInterval: Duration = .seconds(30)
 
 @main
-struct MRAMenuBarApp: App {
+struct SuicaApp: App {
     @State private var model: MenuModel
 
     init() {
