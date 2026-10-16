@@ -14,10 +14,51 @@ import type {
   TeamsState,
 } from "./teams/types.ts";
 
+export type HistoryKind = "review-requested" | "owner-reviewed" | "reviewer-reviewed" | "activity";
+
+export interface HistoryEvent {
+  readonly kind: HistoryKind;
+  readonly mrKey: string;
+  /** Empty unless `kind` is "reviewer-reviewed". */
+  readonly username: string;
+  readonly at: number;
+}
+
+export interface PollLogEntry {
+  readonly at: number;
+  readonly status: "ok" | "failed";
+  readonly failure: string | null;
+  readonly durationMs: number;
+}
+
+/** Both lists are ordered by `at`. */
+export interface HistoryRows {
+  readonly polls: readonly PollLogEntry[];
+  readonly events: readonly HistoryEvent[];
+}
+
+const HISTORY_KINDS: readonly string[] = [
+  "review-requested",
+  "owner-reviewed",
+  "reviewer-reviewed",
+  "activity",
+];
+
+function isHistoryKind(value: string): value is HistoryKind {
+  return HISTORY_KINDS.includes(value);
+}
+
 export interface Store {
   load(): PreviousState;
-  /** Replaces the stored state with `snapshot` in one transaction and marks the baseline as done. */
-  commit(snapshot: Snapshot): void;
+  /**
+   * Replaces the stored state with `snapshot` in one transaction and marks the baseline as done.
+   * The `history` rows are inserted in the same transaction.
+   */
+  commit(snapshot: Snapshot, history?: readonly HistoryEvent[]): void;
+  /** Inserts the poll, then forgets poll-log and history rows older than 90 days before it. */
+  recordPoll(entry: PollLogEntry): void;
+  /** The poll log and the history events at or after `since`, oldest first. */
+  loadHistory(since: number): HistoryRows;
   isPaused(): boolean;
   setPaused(paused: boolean): void;
   loadTeams(): TeamsState;
@@ -43,7 +84,17 @@ export interface Store {
   close(): void;
 }
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
+const SCHEMA_V3 = `
+CREATE TABLE IF NOT EXISTS poll_log (
+  at INTEGER NOT NULL, status TEXT NOT NULL, failure TEXT, duration_ms INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS poll_log_at ON poll_log (at);
+CREATE TABLE IF NOT EXISTS history_event (
+  kind TEXT NOT NULL, mr_key TEXT NOT NULL, username TEXT NOT NULL, at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS history_event_at ON history_event (at);
+`;
 const SCHEMA_V2 = `
 CREATE TABLE IF NOT EXISTS outbox (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -86,6 +137,7 @@ CREATE TABLE IF NOT EXISTS identity (
 const META_TEAMS_BASELINE = "teams_baseline_done";
 const FINISHED_STATUSES = ["sent", "skipped", "failed", "dry-run"] as const;
 const OUTBOX_RETENTION_MS = 90 * 24 * 3_600_000;
+const HISTORY_RETENTION_MS = 90 * 24 * 3_600_000;
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS tracked_authored (mr_key TEXT PRIMARY KEY);
@@ -146,6 +198,29 @@ function toOutboxRow(row: Row): OutboxRow {
   };
 }
 
+function toHistoryEvent(row: Row): HistoryEvent {
+  const kind = text(row, "kind");
+  if (!isHistoryKind(kind)) throw new Error("history row has an unknown kind");
+  return {
+    kind,
+    mrKey: text(row, "mr_key"),
+    username: text(row, "username"),
+    at: integer(row, "at"),
+  };
+}
+
+function toPollLogEntry(row: Row): PollLogEntry {
+  const status = text(row, "status");
+  if (status !== "ok" && status !== "failed") throw new Error("poll log row has an unknown status");
+  const failure = row["failure"];
+  return {
+    at: integer(row, "at"),
+    status,
+    failure: typeof failure === "string" ? failure : null,
+    durationMs: integer(row, "duration_ms"),
+  };
+}
+
 function initSchema(db: DatabaseSync): void {
   const found = db.prepare("PRAGMA user_version").get()?.["user_version"];
   const version = typeof found === "number" ? found : 0;
@@ -154,6 +229,7 @@ function initSchema(db: DatabaseSync): void {
   }
   if (version === 0) db.exec(SCHEMA);
   if (version < 2) db.exec(SCHEMA_V2);
+  if (version < 3) db.exec(SCHEMA_V3);
   if (version !== SCHEMA_VERSION) db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 }
 
@@ -216,7 +292,7 @@ export function openStore(path: string): Store {
       };
     },
 
-    commit(snapshot) {
+    commit(snapshot, history = []) {
       const insertTracked = db.prepare(
         "INSERT OR REPLACE INTO tracked_authored (mr_key) VALUES (?)",
       );
@@ -227,6 +303,9 @@ export function openStore(path: string): Store {
         "INSERT OR REPLACE INTO reviewer_state (mr_key, username, state) VALUES (?, ?, ?)",
       );
       const insertNote = db.prepare("INSERT OR REPLACE INTO seen_note (note_id) VALUES (?)");
+      const insertEvent = db.prepare(
+        "INSERT INTO history_event (kind, mr_key, username, at) VALUES (?, ?, ?, ?)",
+      );
       db.exec("BEGIN IMMEDIATE");
       try {
         db.exec(
@@ -243,6 +322,7 @@ export function openStore(path: string): Store {
           }
           for (const note of mr.notes) insertNote.run(note.id);
         }
+        for (const item of history) insertEvent.run(item.kind, item.mrKey, item.username, item.at);
         setMeta(META_BASELINE, "1");
         db.exec("COMMIT");
       } catch (error) {
@@ -251,6 +331,36 @@ export function openStore(path: string): Store {
       }
       // The -wal and -shm files only exist once something has been written.
       restrictPermissions(path);
+    },
+
+    recordPoll(entry) {
+      const cutoff = entry.at - HISTORY_RETENTION_MS;
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        db.prepare(
+          "INSERT INTO poll_log (at, status, failure, duration_ms) VALUES (?, ?, ?, ?)",
+        ).run(entry.at, entry.status, entry.failure, entry.durationMs);
+        db.prepare("DELETE FROM poll_log WHERE at < ?").run(cutoff);
+        db.prepare("DELETE FROM history_event WHERE at < ?").run(cutoff);
+        db.exec("COMMIT");
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
+      restrictPermissions(path);
+    },
+
+    loadHistory(since) {
+      return {
+        polls: db
+          .prepare("SELECT * FROM poll_log WHERE at >= ? ORDER BY at, rowid")
+          .all(since)
+          .map(toPollLogEntry),
+        events: db
+          .prepare("SELECT * FROM history_event WHERE at >= ? ORDER BY at, rowid")
+          .all(since)
+          .map(toHistoryEvent),
+      };
     },
 
     loadTeams() {

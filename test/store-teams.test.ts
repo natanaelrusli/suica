@@ -53,7 +53,7 @@ describe("schema v2", () => {
     store.close();
 
     const raw = new DatabaseSync(path);
-    expect(raw.prepare("PRAGMA user_version").get()?.["user_version"]).toBe(2);
+    expect(raw.prepare("PRAGMA user_version").get()?.["user_version"]).toBe(3);
     raw.close();
   });
 });
