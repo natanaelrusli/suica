@@ -206,6 +206,7 @@ async function reviewsJson(): Promise<number> {
   const snapshot = await fetchSnapshot(glabRunner(config.gitlab));
   const store = openStore(config.statePath ?? defaultStatePath());
   try {
+    store.recoverStalePostings(Date.now());
     const document = buildReviewList(snapshot, store.latestAgentReviews());
     process.stdout.write(`${JSON.stringify(document)}\n`);
     return 0;

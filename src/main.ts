@@ -17,6 +17,8 @@ async function main(): Promise<void> {
   runtime.log.info("daemon started");
   const interrupted = runtime.store.failInterruptedAgentReviews(Date.now());
   if (interrupted > 0) runtime.log.warn("agent reviews interrupted", { count: interrupted });
+  const recovered = runtime.store.recoverStalePostings(Date.now());
+  if (recovered > 0) runtime.log.warn("agent review posts interrupted", { count: recovered });
   try {
     await runDaemon({
       // A queued review starts after the poll and runs beside the loop.

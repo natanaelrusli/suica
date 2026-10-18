@@ -68,6 +68,30 @@ describe("agent reviews", () => {
     expect(store.countAgentReviews("auto", NOW)).toBe(1);
     store.close();
   });
+
+  it("puts a post cut off more than 15 minutes ago back to ready, and leaves a live one alone", () => {
+    const store = openStore(tempDb());
+    const stale = store.queueAgentReview("g/p!1", "manual", NOW) ?? 0;
+    const live = store.queueAgentReview("g/p!2", "manual", NOW) ?? 0;
+    const minute = 60_000;
+    store.transitionAgentReview(stale, ["queued"], "posting", { detail: "" }, NOW);
+    store.transitionAgentReview(live, ["queued"], "posting", { detail: "" }, NOW + 5 * minute);
+    expect(store.recoverStalePostings(NOW + 15 * minute)).toBe(0);
+    expect(store.recoverStalePostings(NOW + 16 * minute)).toBe(1);
+    expect(store.getAgentReview(stale)).toMatchObject({
+      status: "ready",
+      updatedAt: NOW + 16 * minute,
+    });
+    expect(store.getAgentReview(stale)?.detail).toMatch(
+      /Check the MR in GitLab before posting again/,
+    );
+    expect(store.getAgentReview(live)?.status).toBe("posting");
+    // The post that was cut off cannot mark it posted any more.
+    expect(store.transitionAgentReview(stale, ["posting"], "posted", {}, NOW + 17 * minute)).toBe(
+      false,
+    );
+    store.close();
+  });
 });
 
 describe("schema 7", () => {

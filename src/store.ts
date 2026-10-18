@@ -180,6 +180,11 @@ export interface Store {
   ): boolean;
   /** Runs cut off by a stop or crash; returns how many were marked failed. */
   failInterruptedAgentReviews(now: number): number;
+  /**
+   * Posts still `posting` 15 minutes after they started were cut off (a killed `suica review post`,
+   * a crash, a reboot): back to ready with a note to check GitLab first. Returns how many.
+   */
+  recoverStalePostings(now: number): number;
   loadIdentity(username: string): string | undefined;
   saveIdentity(username: string, email: string, now: number): void;
   close(): void;
@@ -266,6 +271,8 @@ const OUTBOX_RETENTION_MS = 90 * 24 * 3_600_000;
 const HISTORY_RETENTION_MS = 90 * 24 * 3_600_000;
 const TOKEN_USAGE_RETENTION_MS = 90 * 24 * 3_600_000;
 const AGENT_REVIEW_RETENTION_MS = 90 * 24 * 3_600_000;
+/** Longer than any live post: the app stops `suica review post` after 10 minutes. */
+const POSTING_STALE_MS = 15 * 60_000;
 const OPEN_REVIEW_STATUSES: readonly AgentReviewStatus[] = ["queued", "running"];
 const DONE_REVIEW_STATUSES: readonly AgentReviewStatus[] = [
   "posted",
@@ -710,6 +717,20 @@ export function openStore(path: string): Store {
           "UPDATE agent_review SET status = 'failed', detail = 'interrupted: the agent stopped during the run', updated_at = ? WHERE status = 'running'",
         )
         .run(now);
+      return Number(result.changes);
+    },
+
+    recoverStalePostings(now) {
+      // One guarded UPDATE: a post that finishes later finds the row no longer posting.
+      const result = db
+        .prepare(
+          "UPDATE agent_review SET status = 'ready', detail = ?, updated_at = ? WHERE status = 'posting' AND updated_at < ?",
+        )
+        .run(
+          "Posting was interrupted. Check the MR in GitLab before posting again: some comments may have arrived.",
+          now,
+          now - POSTING_STALE_MS,
+        );
       return Number(result.changes);
     },
 
