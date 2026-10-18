@@ -18,6 +18,7 @@ function row(id: number, status: OutboxStatus, overrides: Partial<OutboxRow> = {
     recipientName: "Bob",
     status,
     detail: "",
+    approved: false,
     text: "Halo Bob",
     createdAt: id * 100,
     updatedAt: id * 100,
@@ -31,14 +32,26 @@ describe("buildAgentState", () => {
   it("matches the golden contract file", () => {
     const rows = [
       row(2, "pending", { createdAt: 1000, updatedAt: 2000 }),
-      row(1, "sent", { createdAt: 500, updatedAt: 600 }),
+      row(1, "sent", { approved: true, createdAt: 500, updatedAt: 600 }),
     ];
     const golden: unknown = JSON.parse(readFileSync("contracts/agent-state.v1.json", "utf8"));
-    expect(buildAgentState({ ...base, rows })).toEqual(golden);
+    const agentReview = {
+      running: {
+        id: 4,
+        mrKey: "g/p!7",
+        mrTitle: "Add thing",
+        cli: "claude",
+        model: "opus",
+        startedAt: 1792148400000,
+      },
+      queued: [{ id: 5, mrKey: "g/p!8", mrTitle: null }],
+    };
+    expect(buildAgentState({ ...base, rows, agentReview })).toEqual(golden);
   });
 
   it("reports teams as null when Teams is disabled", () => {
     expect(buildAgentState({ ...base, rows: undefined }).teams).toBeNull();
+    expect(buildAgentState({ ...base, rows: undefined }).agentReview).toBeNull();
   });
 
   it("puts pending, unresolved, failed, sending and queued rows in attention, oldest first", () => {
@@ -89,13 +102,29 @@ describe("buildAgentState", () => {
     expect(teams?.attention[0]?.mrTitle).toBe(title);
   });
 
+  it("marks only notices about an MR the Owner approved", () => {
+    const rows = [
+      row(1, "sent", { kind: "notice", variant: "notice.approved" }),
+      row(2, "sent", { kind: "notice", variant: "notice.changes" }),
+      row(3, "sent"),
+    ];
+    const recent = buildAgentState({ ...base, rows }).teams?.recent ?? [];
+    expect(recent.map((item) => [item.id, item.mrApproved])).toEqual([
+      [3, false],
+      [2, false],
+      [1, true],
+    ]);
+  });
+
   it("does not expose the template variant or internal keys", () => {
     const item = buildAgentState({ ...base, rows: [row(1, "pending")] }).teams?.attention[0];
     expect(Object.keys(item ?? {}).sort()).toEqual([
+      "approved",
       "createdAt",
       "detail",
       "id",
       "kind",
+      "mrApproved",
       "mrKey",
       "mrTitle",
       "mrUrl",

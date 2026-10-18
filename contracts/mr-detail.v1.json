@@ -1,0 +1,73 @@
+{
+  "version": 1,
+  "key": "g/p!7",
+  "title": "Add thing",
+  "description": "## What\nAdds the thing.",
+  "url": "https://gitlab.example/g/p/-/merge_requests/7",
+  "draft": false,
+  "sourceBranch": "feat/thing",
+  "targetBranch": "main",
+  "createdAt": "2026-10-16T11:36:48+07:00",
+  "updatedAt": "2026-10-16T13:26:54+07:00",
+  "author": { "username": "alice", "name": "Alice" },
+  "labels": ["backend"],
+  "pipelineStatus": "SUCCESS",
+  "additions": 3,
+  "deletions": 1,
+  "reviewers": [{ "username": "me", "name": "Nata", "state": "UNREVIEWED" }],
+  "approvedBy": [{ "username": "bob", "name": "Bob" }],
+  "discussions": [
+    {
+      "id": "gid://gitlab/Discussion/1",
+      "resolvable": false,
+      "resolved": false,
+      "notes": [
+        {
+          "id": "gid://gitlab/Note/1",
+          "body": "requested review from @me",
+          "system": true,
+          "createdAt": "2026-10-16T11:36:48+07:00",
+          "author": { "username": "alice", "name": "Alice" },
+          "filePath": null,
+          "line": null
+        }
+      ]
+    },
+    {
+      "id": "gid://gitlab/Discussion/2",
+      "resolvable": true,
+      "resolved": false,
+      "notes": [
+        {
+          "id": "gid://gitlab/DiffNote/2",
+          "body": "Why **here**?",
+          "system": false,
+          "createdAt": "2026-10-16T13:26:54+07:00",
+          "author": { "username": "bob", "name": "Bob" },
+          "filePath": "src/a.ts",
+          "line": 2
+        }
+      ]
+    }
+  ],
+  "discussionsTruncated": false,
+  "files": [
+    {
+      "oldPath": "src/a.ts",
+      "newPath": "src/a.ts",
+      "newFile": false,
+      "renamedFile": false,
+      "deletedFile": false,
+      "diff": "@@ -1,2 +1,4 @@\n a\n-b\n+c\n+d\n+e\n"
+    },
+    {
+      "oldPath": "big.lock",
+      "newPath": "big.lock",
+      "newFile": false,
+      "renamedFile": false,
+      "deletedFile": false,
+      "diff": null
+    }
+  ],
+  "filesTruncated": false
+}

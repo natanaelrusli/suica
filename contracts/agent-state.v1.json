@@ -4,6 +4,23 @@
   "baselineDone": true,
   "trackedAuthored": 4,
   "reviewRequested": 5,
+  "agentReview": {
+    "running": {
+      "id": 4,
+      "mrKey": "g/p!7",
+      "mrTitle": "Add thing",
+      "cli": "claude",
+      "model": "opus",
+      "startedAt": 1792148400000
+    },
+    "queued": [
+      {
+        "id": 5,
+        "mrKey": "g/p!8",
+        "mrTitle": null
+      }
+    ]
+  },
   "teams": {
     "counts": {
       "queued": 0,
@@ -27,6 +44,8 @@
         "mrTitle": "Add thing",
         "mrUrl": "https://gitlab.example/g/p/-/merge_requests/5",
         "text": "Halo Bob",
+        "approved": false,
+        "mrApproved": false,
         "createdAt": 1000,
         "updatedAt": 2000
       }
@@ -42,6 +61,8 @@
         "mrTitle": "Add thing",
         "mrUrl": "https://gitlab.example/g/p/-/merge_requests/5",
         "text": "Halo Bob",
+        "approved": true,
+        "mrApproved": false,
         "createdAt": 500,
         "updatedAt": 600
       }

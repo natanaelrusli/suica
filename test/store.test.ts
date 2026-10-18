@@ -86,6 +86,22 @@ describe("openStore", () => {
     second.close();
   });
 
+  it("upgrades a schema 3 outbox, leaving the approval of older rows unknown", () => {
+    const path = tempDb();
+    openStore(path).close();
+    const raw = new DatabaseSync(path);
+    raw.exec("ALTER TABLE outbox DROP COLUMN approved; PRAGMA user_version = 3");
+    raw.exec(
+      `INSERT INTO outbox (dedupe_key, kind, variant, mr_key, mr_iid, mr_project, mr_title, mr_url,
+         recipient, recipient_name, status, detail, text, created_at, updated_at)
+       VALUES ('k', 'nudge', 'nudge', 'g/p!5', 5, 'g/p', 't', 'u', 'bob', 'Bob', 'sent', '', 'halo', 1, 1)`,
+    );
+    raw.close();
+    const store = openStore(path);
+    expect(store.listOutbox(["sent"])[0]?.approved).toBeNull();
+    store.close();
+  });
+
   it("refuses a database written by a newer version", () => {
     const path = tempDb();
     const raw = new DatabaseSync(path);

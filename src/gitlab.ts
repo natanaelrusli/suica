@@ -18,7 +18,10 @@ export class FetchFailure extends Error {
   }
 }
 
-export type GraphqlRunner = (query: string) => Promise<unknown>;
+export type GraphqlRunner = (
+  query: string,
+  variables?: Readonly<Record<string, string>>,
+) => Promise<unknown>;
 
 const PAGE_SIZE = 100;
 const NOTES_WINDOW = 50;
@@ -43,6 +46,7 @@ fragment MrFields on MergeRequest {
   title
   webUrl
   draft
+  createdAt
   project { fullPath }
   author { username name }
   reviewers { nodes { username name mergeRequestInteraction { reviewState } } }
@@ -69,6 +73,7 @@ const mrSchema = z.object({
   title: z.string(),
   webUrl: httpUrlSchema,
   draft: z.boolean(),
+  createdAt: z.string().nullable().optional(),
   project: z.object({ fullPath: z.string() }),
   author: personSchema.nullable(),
   reviewers: z.object({ nodes: z.array(reviewerSchema) }),
@@ -103,6 +108,7 @@ function toMergeRequest(node: z.infer<typeof mrSchema>): MergeRequest {
     title: node.title,
     url: node.webUrl,
     draft: node.draft,
+    createdAt: node.createdAt ?? null,
     author: node.author ?? GHOST,
     reviewers: node.reviewers.nodes.map((reviewer) => ({
       username: reviewer.username,
@@ -156,31 +162,67 @@ export function classifyFailure(failure: ExecFailure): GitlabFailureKind {
   return "gitlab-error";
 }
 
+/** Runs `glab api <endpoint>` with `fields` and parses its JSON output. */
+async function runGlab(
+  config: Config["gitlab"],
+  exec: Exec,
+  endpoint: string,
+  fields: readonly string[] = [],
+): Promise<unknown> {
+  let stdout: string;
+  try {
+    ({ stdout } = await exec(
+      config.glabPath,
+      ["api", endpoint, "--hostname", config.hostname, ...fields],
+      { timeoutMs: config.timeoutSeconds * 1000 },
+    ));
+  } catch (error) {
+    const failure = execFailure(error);
+    throw new FetchFailure(
+      classifyFailure(failure),
+      failure.code === "ENOENT"
+        ? "glab executable not found"
+        : `glab failed with code ${String(failure.code ?? "unknown")}`,
+    );
+  }
+  try {
+    const output: unknown = JSON.parse(stdout);
+    return output;
+  } catch {
+    throw new FetchFailure("gitlab-error", "glab output was not JSON");
+  }
+}
+
+/** Variables travel as separate `-f` fields, so values never end up inside the query text. */
 export function glabRunner(config: Config["gitlab"], exec: Exec = defaultExec): GraphqlRunner {
-  return async (query) => {
-    let stdout: string;
-    try {
-      ({ stdout } = await exec(
-        config.glabPath,
-        ["api", "graphql", "--hostname", config.hostname, "-f", `query=${query}`],
-        { timeoutMs: config.timeoutSeconds * 1000 },
-      ));
-    } catch (error) {
-      const failure = execFailure(error);
-      throw new FetchFailure(
-        classifyFailure(failure),
-        failure.code === "ENOENT"
-          ? "glab executable not found"
-          : `glab failed with code ${String(failure.code ?? "unknown")}`,
-      );
-    }
-    try {
-      const output: unknown = JSON.parse(stdout);
-      return output;
-    } catch {
-      throw new FetchFailure("gitlab-error", "glab output was not JSON");
-    }
-  };
+  return (query, variables = {}) =>
+    runGlab(config, exec, "graphql", [
+      "-f",
+      `query=${query}`,
+      ...Object.entries(variables).flatMap(([name, value]) => ["-f", `${name}=${value}`]),
+    ]);
+}
+
+/** A REST GET; `path` is relative to the API root and must already be URL-encoded. */
+export type RestRunner = (path: string) => Promise<unknown>;
+
+export function glabRest(config: Config["gitlab"], exec: Exec = defaultExec): RestRunner {
+  return (path) => runGlab(config, exec, path);
+}
+
+/** A REST POST with string form fields, each sent as a literal `-f` value; returns the JSON reply. */
+export type PostRunner = (
+  path: string,
+  fields: Readonly<Record<string, string>>,
+) => Promise<unknown>;
+
+export function glabPost(config: Config["gitlab"], exec: Exec = defaultExec): PostRunner {
+  return (path, fields) =>
+    runGlab(config, exec, path, [
+      "-X",
+      "POST",
+      ...Object.entries(fields).flatMap(([name, value]) => ["-f", `${name}=${value}`]),
+    ]);
 }
 
 export async function fetchSnapshot(run: GraphqlRunner): Promise<Snapshot> {

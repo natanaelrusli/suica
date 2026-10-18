@@ -8,13 +8,14 @@ private func output(_ text: String, exit: Int32 = 0) -> Result<CommandResult, Ag
 }
 
 private let config = AgentConfig(
-    nodePath: "/opt/homebrew/bin/node", repoPath: "/Users/me/suica",
-    searchPath: "/opt/homebrew/bin:/usr/bin")
+    cliPath: "/Users/me/.local/bin/suica", searchPath: "/opt/homebrew/bin:/usr/bin")
 
 private let statusJSON =
     #"{"version":1,"agent":{"label":"l","loaded":true,"running":false,"pid":null},"configError":null,"paused":false,"teamsEnabled":false,"lastPoll":null,"polling":{"activeSeconds":1,"idleSeconds":2},"paths":{"config":"c","state":"s","logs":"l","templates":"t"}}"#
 private let statsJSON =
     #"{"version":1,"generatedAt":5,"lastPoll":null,"polls24h":{"ok":0,"failed":0},"polls7d":{"ok":0,"failed":0},"days":[],"ownerAfterRequest":{"count":0,"medianMinutes":null,"p90Minutes":null},"reviewerAfterNudge":{"count":0,"medianMinutes":null,"p90Minutes":null}}"#
+private let usageJSON =
+    #"{"version":1,"generatedAt":6,"last24h":{"runs":0,"inputTokens":0,"outputTokens":0,"cacheReadTokens":0,"cacheCreationTokens":0},"last7d":{"runs":0,"inputTokens":0,"outputTokens":0,"cacheReadTokens":0,"cacheCreationTokens":0},"last30d":{"runs":0,"inputTokens":0,"outputTokens":0,"cacheReadTokens":0,"cacheCreationTokens":0},"byPurpose":[],"days":[]}"#
 private let configJSON =
     #"{"version":1,"path":"/p","exists":false,"sha256":null,"issues":[],"fields":[]}"#
 
@@ -37,16 +38,32 @@ private let edits = [
     ConfigEditRequest(path: ["teams", "command"], value: .null),
 ]
 
+@Test func usageUsesItsCommand() async throws {
+    let (client, runner) = client([output(usageJSON)])
+    #expect(try await client.usage().generatedAt == 6)
+    #expect(await runner.invocations.map { $0.arguments } == [["usage"]])
+}
+
 @Test func statusStatsAndConfigUseTheirCommands() async throws {
     let (client, runner) = client([output(statusJSON), output(statsJSON), output(configJSON)])
     #expect(try await client.status().paths.state == "s")
     #expect(try await client.stats().generatedAt == 5)
     #expect(try await client.config().exists == false)
     let calls = await runner.invocations
-    #expect(calls.map { Array($0.arguments.dropFirst()) } == [["status", "--json"], ["stats"], ["config", "show", "--json"]])
+    #expect(calls.map { $0.arguments } == [["status", "--json"], ["stats"], ["config", "show", "--json"]])
     #expect(calls.allSatisfy { $0.timeout == 20 && $0.stdin == nil })
-    #expect(calls.allSatisfy { $0.arguments[0] == "/Users/me/suica/src/cli.ts" })
+    #expect(calls.allSatisfy { $0.executable == "/Users/me/.local/bin/suica" })
     #expect(calls.allSatisfy { $0.environment["SUICA_ENV"] == "production" })
+}
+
+@Test func reviewsAndMergeRequestsUseTheirCommandsWithTheGitLabTimeout() async throws {
+    let reviews = #"{"version":1,"mergeRequests":[]}"#
+    let (client, runner) = client([output(reviews), output(reviews, exit: 1)])
+    #expect(try await client.reviews().mergeRequests.isEmpty)
+    await #expect(throws: AgentError.failed(exitCode: 1)) { try await client.mergeRequest(key: "g/p!7") }
+    let calls = await runner.invocations
+    #expect(calls.map { $0.arguments } == [["reviews", "--json"], ["mr", "g/p!7", "--json"]])
+    #expect(calls.allSatisfy { $0.timeout == 90 })
 }
 
 @Test func documentsIgnoreLogLinesBeforeThem() async throws {
@@ -73,7 +90,7 @@ private let edits = [
     let result = try await client.saveConfig(base: base, edits: edits)
     #expect(result.status == "saved" && result.sha256 == "abc" && result.issues.isEmpty)
     let call = try #require(await runner.invocations.first)
-    #expect(Array(call.arguments.dropFirst()) == ["config", "set", "--json"])
+    #expect(call.arguments == ["config", "set", "--json"])
     #expect(call.timeout == 20)
     let sent = try JSONDecoder().decode(SentRequest.self, from: try #require(call.stdin))
     #expect(sent.baseSha256 == base)
@@ -126,7 +143,7 @@ private let edits = [
     #expect(try await client.restartAgent() == ActionResult(code: "restarted"))
     #expect(try await client.restartAgent().code == "not-installed")
     let calls = await runner.invocations
-    #expect(calls.map { Array($0.arguments.dropFirst()) } == [["agent", "restart", "--json"], ["agent", "restart", "--json"]])
+    #expect(calls.map { $0.arguments } == [["agent", "restart", "--json"], ["agent", "restart", "--json"]])
     #expect(calls.allSatisfy { $0.timeout == 30 && $0.stdin == nil })
 }
 

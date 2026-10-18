@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Exec } from "../src/exec.ts";
-import { FetchFailure, glabRunner, parseSnapshot } from "../src/gitlab.ts";
+import { FetchFailure, glabRest, glabRunner, parseSnapshot } from "../src/gitlab.ts";
 
 const config = { hostname: "gitlab.example", glabPath: "glab", timeoutSeconds: 60 };
 
@@ -154,6 +154,32 @@ describe("glabRunner", () => {
     await expect(run("query { x }")).resolves.toEqual({ ok: true });
     expect(calls).toEqual([
       ["glab", "api", "graphql", "--hostname", "gitlab.example", "-f", "query=query { x }"],
+    ]);
+  });
+
+  it("passes variables as separate fields and REST paths as the endpoint", async () => {
+    const calls: string[][] = [];
+    const exec: Exec = (file, args) => {
+      calls.push([file, ...args]);
+      return Promise.resolve({ stdout: "[]", stderr: "" });
+    };
+    await glabRunner(config, exec)("query Q", { path: "g/p", iid: "7" });
+    await glabRest(config, exec)("projects/g%2Fp/merge_requests/7/diffs");
+    expect(calls).toEqual([
+      [
+        "glab",
+        "api",
+        "graphql",
+        "--hostname",
+        "gitlab.example",
+        "-f",
+        "query=query Q",
+        "-f",
+        "path=g/p",
+        "-f",
+        "iid=7",
+      ],
+      ["glab", "api", "projects/g%2Fp/merge_requests/7/diffs", "--hostname", "gitlab.example"],
     ]);
   });
 

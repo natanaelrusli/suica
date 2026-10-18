@@ -7,12 +7,12 @@
   <key>CFBundleIdentifier</key><string>com.madhani.suica</string>
   <key>CFBundleExecutable</key><string>Suica</string>
   <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundleVersion</key><string>1</string>
   <key>CFBundleShortVersionString</key><string>1.0</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>LSUIElement</key><true/>
-  <key>SuicaNodePath</key><string>__NODE__</string>
-  <key>SuicaRepoPath</key><string>__REPO__</string>
+  <key>SuicaCLIPath</key><string>__CLI__</string>
   <key>SuicaSearchPath</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
 </dict>
 </plist>

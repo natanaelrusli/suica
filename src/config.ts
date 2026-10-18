@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { parse } from "yaml";
 import { z } from "zod";
+import { MODEL_CLI_CHOICES } from "./model-cli.ts";
 import { errorMessage } from "./util.ts";
 
 const positiveInt = z.number().int().positive();
@@ -62,6 +63,33 @@ export const configSchema = z
         maxMessagesPerReviewer: positiveInt.default(2),
         templatesPath: z.string().min(1).optional(),
         people: z.record(z.string(), z.string().email()).default({}),
+      })
+      .strict()
+      .default({}),
+    model: z
+      .object({
+        cli: z.enum(MODEL_CLI_CHOICES).default("auto"),
+      })
+      .strict()
+      .default({}),
+    review: z
+      .object({
+        auto: z.boolean().default(true),
+        // approval: a ready review waits for the Owner; auto: it is posted as soon as it is ready.
+        post: z.enum(["approval", "auto"]).default("approval"),
+        // A skill name only, as typed after the slash: it ends up in a prompt and a file path.
+        skill: z
+          .string()
+          .regex(/^[\w-]+(:[\w-]+)?$/, "must be a skill name such as plugin:skill")
+          .default("madhani:madhani-code-review"),
+        // Passed as one argument after --model / -m; a leading letter or digit keeps it from being a flag.
+        model: z
+          .string()
+          .regex(/^[A-Za-z0-9][\w.:[\]/-]*$/, "must be a model name such as sonnet, opus or haiku")
+          .optional(),
+        maxChangedLines: positiveInt.default(800),
+        maxPerDay: positiveInt.default(10),
+        timeoutMinutes: positiveInt.default(20),
       })
       .strict()
       .default({}),

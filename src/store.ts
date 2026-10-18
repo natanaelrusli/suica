@@ -44,6 +44,73 @@ const HISTORY_KINDS: readonly string[] = [
   "activity",
 ];
 
+/** What a language model run was for. Stored as text, so a later purpose needs no migration. */
+export type TokenPurpose = "review" | "reply" | "other";
+
+/** One language model run, as the model reported it. */
+export interface TokenUsageEntry {
+  readonly at: number;
+  readonly purpose: TokenPurpose;
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly cacheReadTokens: number;
+  readonly cacheCreationTokens: number;
+}
+
+/** Read back from the database: a purpose written by a newer build stays as written. */
+export type StoredTokenUsage = Omit<TokenUsageEntry, "purpose"> & { readonly purpose: string };
+
+export const AGENT_REVIEW_STATUSES = [
+  "queued",
+  "running",
+  "ready",
+  "posting",
+  "posted",
+  "discarded",
+  "failed",
+  "skipped",
+] as const;
+export type AgentReviewStatus = (typeof AGENT_REVIEW_STATUSES)[number];
+export type AgentReviewTrigger = "auto" | "manual";
+
+/** One Agent Review of one MR, from queued to posted or dropped. */
+export interface AgentReviewRow {
+  readonly id: number;
+  readonly mrKey: string;
+  readonly trigger: AgentReviewTrigger;
+  readonly status: AgentReviewStatus;
+  /** Null until known (a review queued by key alone gets it when the run reads the MR). */
+  readonly mrTitle: string | null;
+  /** The model that wrote it, as the CLI reported it; null until it ran or when not reported. */
+  readonly model: string | null;
+  /** When the run started; null while queued. */
+  readonly startedAt: number | null;
+  /** The CLI that ran it; null until it starts. */
+  readonly cli: string | null;
+  /** The reviewed commit; null until the checkout. */
+  readonly headSha: string | null;
+  /** The review as the model wrote it, before it is sanitised for GitLab. */
+  readonly body: string | null;
+  /** Why it failed or was skipped, or a note about posting. */
+  readonly detail: string;
+  readonly createdAt: number;
+  readonly updatedAt: number;
+}
+
+export interface AgentReviewFields {
+  readonly mrTitle?: string;
+  readonly model?: string;
+  readonly startedAt?: number;
+  readonly cli?: string;
+  readonly headSha?: string;
+  readonly body?: string;
+  readonly detail?: string;
+}
+
+function isAgentReviewStatus(value: string): value is AgentReviewStatus {
+  return (AGENT_REVIEW_STATUSES as readonly string[]).includes(value);
+}
+
 function isHistoryKind(value: string): value is HistoryKind {
   return HISTORY_KINDS.includes(value);
 }
@@ -61,6 +128,10 @@ export interface Store {
   loadHistory(since: number): HistoryRows;
   /** The latest poll (the last recorded of a tie), undefined when the log is empty. */
   lastPoll(): PollLogEntry | undefined;
+  /** Also drops rows older than the retention. */
+  recordTokenUsage(entry: TokenUsageEntry): void;
+  /** Ordered by `at`. */
+  loadTokenUsage(since: number): StoredTokenUsage[];
   isPaused(): boolean;
   setPaused(paused: boolean): void;
   loadTeams(): TeamsState;
@@ -78,15 +149,68 @@ export interface Store {
     id: number,
     from: OutboxStatus,
     to: OutboxStatus,
-    fields: { detail?: string; text?: string },
+    fields: { detail?: string; text?: string; approved?: true },
     now: number,
   ): boolean;
+  /** Undefined when a review of this MR is already queued or running. */
+  queueAgentReview(
+    mrKey: string,
+    trigger: AgentReviewTrigger,
+    now: number,
+    mrTitle?: string,
+  ): number | undefined;
+  /** Every MR that has a review row of any status. */
+  agentReviewedKeys(): Set<string>;
+  /** The review running now, if any, and the queue in the order it runs. */
+  agentReviewActivity(): { running: AgentReviewRow | undefined; queued: AgentReviewRow[] };
+  countAgentReviews(trigger: AgentReviewTrigger, since: number): number;
+  nextQueuedAgentReview(): AgentReviewRow | undefined;
+  getAgentReview(id: number): AgentReviewRow | undefined;
+  /** The newest review of each MR. */
+  latestAgentReviews(): Map<string, AgentReviewRow>;
+  /** True when this commit already has a review that is ready, being posted or posted. */
+  hasAgentReviewAt(mrKey: string, headSha: string): boolean;
+  /** Only from one of `from`; false when the row was elsewhere, so two callers never both win. */
+  transitionAgentReview(
+    id: number,
+    from: readonly AgentReviewStatus[],
+    to: AgentReviewStatus,
+    fields: AgentReviewFields,
+    now: number,
+  ): boolean;
+  /** Runs cut off by a stop or crash; returns how many were marked failed. */
+  failInterruptedAgentReviews(now: number): number;
   loadIdentity(username: string): string | undefined;
   saveIdentity(username: string, email: string, now: number): void;
   close(): void;
 }
 
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 7;
+/** Columns schema 6 lacked when it first shipped; schema 6 now creates the table with them. */
+const SCHEMA_V7_COLUMNS: readonly (readonly [string, string])[] = [
+  ["mr_title", "TEXT"],
+  ["model", "TEXT"],
+  ["started_at", "INTEGER"],
+];
+const SCHEMA_V6 = `
+CREATE TABLE IF NOT EXISTS agent_review (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  mr_key TEXT NOT NULL, trigger TEXT NOT NULL, status TEXT NOT NULL, mr_title TEXT,
+  cli TEXT, model TEXT, head_sha TEXT, body TEXT, detail TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, started_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS agent_review_mr ON agent_review (mr_key, id);
+`;
+const SCHEMA_V5 = `
+CREATE TABLE IF NOT EXISTS token_usage (
+  at INTEGER NOT NULL, purpose TEXT NOT NULL,
+  input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL,
+  cache_read_tokens INTEGER NOT NULL, cache_creation_tokens INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS token_usage_at ON token_usage (at);
+`;
+/** Rows from before schema 4 keep NULL: nobody knows any more whether the Owner approved them. */
+const SCHEMA_V4 = `ALTER TABLE outbox ADD COLUMN approved INTEGER;`;
 const SCHEMA_V3 = `
 CREATE TABLE IF NOT EXISTS poll_log (
   at INTEGER NOT NULL, status TEXT NOT NULL, failure TEXT, duration_ms INTEGER NOT NULL
@@ -140,6 +264,15 @@ const META_TEAMS_BASELINE = "teams_baseline_done";
 const FINISHED_STATUSES = ["sent", "skipped", "failed", "dry-run"] as const;
 const OUTBOX_RETENTION_MS = 90 * 24 * 3_600_000;
 const HISTORY_RETENTION_MS = 90 * 24 * 3_600_000;
+const TOKEN_USAGE_RETENTION_MS = 90 * 24 * 3_600_000;
+const AGENT_REVIEW_RETENTION_MS = 90 * 24 * 3_600_000;
+const OPEN_REVIEW_STATUSES: readonly AgentReviewStatus[] = ["queued", "running"];
+const DONE_REVIEW_STATUSES: readonly AgentReviewStatus[] = [
+  "posted",
+  "discarded",
+  "failed",
+  "skipped",
+];
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS tracked_authored (mr_key TEXT PRIMARY KEY);
@@ -180,6 +313,7 @@ function toOutboxRow(row: Row): OutboxRow {
     throw new Error("outbox row has an unknown kind, variant or status");
   }
   const stored = row["text"];
+  const approved = row["approved"];
   return {
     id: integer(row, "id"),
     dedupeKey: text(row, "dedupe_key"),
@@ -195,6 +329,7 @@ function toOutboxRow(row: Row): OutboxRow {
     status,
     detail: text(row, "detail"),
     text: typeof stored === "string" ? stored : null,
+    approved: typeof approved === "number" ? approved === 1 : null,
     createdAt: integer(row, "created_at"),
     updatedAt: integer(row, "updated_at"),
   };
@@ -223,6 +358,52 @@ function toPollLogEntry(row: Row): PollLogEntry {
   };
 }
 
+function nullableText(row: Row, column: string): string | null {
+  const value = row[column];
+  return typeof value === "string" ? value : null;
+}
+
+function toAgentReview(row: Row): AgentReviewRow {
+  const status = text(row, "status");
+  const trigger = text(row, "trigger");
+  if (!isAgentReviewStatus(status) || (trigger !== "auto" && trigger !== "manual")) {
+    throw new Error("agent review row has an unknown status or trigger");
+  }
+  return {
+    id: integer(row, "id"),
+    mrKey: text(row, "mr_key"),
+    trigger,
+    status,
+    mrTitle: nullableText(row, "mr_title"),
+    model: nullableText(row, "model"),
+    startedAt: typeof row["started_at"] === "number" ? row["started_at"] : null,
+    cli: nullableText(row, "cli"),
+    headSha: nullableText(row, "head_sha"),
+    body: nullableText(row, "body"),
+    detail: text(row, "detail"),
+    createdAt: integer(row, "created_at"),
+    updatedAt: integer(row, "updated_at"),
+  };
+}
+
+function toTokenUsage(row: Row): StoredTokenUsage {
+  return {
+    at: integer(row, "at"),
+    purpose: text(row, "purpose"),
+    inputTokens: integer(row, "input_tokens"),
+    outputTokens: integer(row, "output_tokens"),
+    cacheReadTokens: integer(row, "cache_read_tokens"),
+    cacheCreationTokens: integer(row, "cache_creation_tokens"),
+  };
+}
+
+function hasColumn(db: DatabaseSync, table: string, column: string): boolean {
+  return db
+    .prepare("SELECT 1 FROM pragma_table_info(?) WHERE name = ?")
+    .all(table, column)
+    .some(() => true);
+}
+
 function initSchema(db: DatabaseSync): void {
   const found = db.prepare("PRAGMA user_version").get()?.["user_version"];
   const version = typeof found === "number" ? found : 0;
@@ -232,6 +413,17 @@ function initSchema(db: DatabaseSync): void {
   if (version === 0) db.exec(SCHEMA);
   if (version < 2) db.exec(SCHEMA_V2);
   if (version < 3) db.exec(SCHEMA_V3);
+  // A database set back by hand (see the README) may already have the column.
+  if (version < 4 && !hasColumn(db, "outbox", "approved")) db.exec(SCHEMA_V4);
+  if (version < 5) db.exec(SCHEMA_V5);
+  if (version < 6) db.exec(SCHEMA_V6);
+  if (version < 7) {
+    for (const [column, type] of SCHEMA_V7_COLUMNS) {
+      if (!hasColumn(db, "agent_review", column)) {
+        db.exec(`ALTER TABLE agent_review ADD COLUMN ${column} ${type}`);
+      }
+    }
+  }
   if (version !== SCHEMA_VERSION) db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 }
 
@@ -372,6 +564,162 @@ export function openStore(path: string): Store {
       return row === undefined ? undefined : toPollLogEntry(row);
     },
 
+    recordTokenUsage(entry) {
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        db.prepare(
+          `INSERT INTO token_usage
+             (at, purpose, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+        ).run(
+          entry.at,
+          entry.purpose,
+          entry.inputTokens,
+          entry.outputTokens,
+          entry.cacheReadTokens,
+          entry.cacheCreationTokens,
+        );
+        db.prepare("DELETE FROM token_usage WHERE at < ?").run(entry.at - TOKEN_USAGE_RETENTION_MS);
+        db.exec("COMMIT");
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
+      restrictPermissions(path);
+    },
+
+    queueAgentReview(mrKey, trigger, now, mrTitle) {
+      const marks = (statuses: readonly string[]): string => statuses.map(() => "?").join(", ");
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        const open = db
+          .prepare(
+            `SELECT 1 FROM agent_review WHERE mr_key = ? AND status IN (${marks(OPEN_REVIEW_STATUSES)})`,
+          )
+          .get(mrKey, ...OPEN_REVIEW_STATUSES);
+        let id: number | undefined;
+        if (open === undefined) {
+          const result = db
+            .prepare(
+              `INSERT INTO agent_review (mr_key, trigger, status, mr_title, created_at, updated_at)
+               VALUES (?, ?, 'queued', ?, ?, ?)`,
+            )
+            .run(mrKey, trigger, mrTitle ?? null, now, now);
+          id = Number(result.lastInsertRowid);
+        }
+        db.prepare(
+          `DELETE FROM agent_review WHERE updated_at < ? AND status IN (${marks(DONE_REVIEW_STATUSES)})`,
+        ).run(now - AGENT_REVIEW_RETENTION_MS, ...DONE_REVIEW_STATUSES);
+        db.exec("COMMIT");
+        restrictPermissions(path);
+        return id;
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
+    },
+
+    agentReviewedKeys() {
+      return new Set(
+        rows("SELECT DISTINCT mr_key FROM agent_review").map((row) => text(row, "mr_key")),
+      );
+    },
+
+    agentReviewActivity() {
+      const running = db
+        .prepare("SELECT * FROM agent_review WHERE status = 'running' ORDER BY id LIMIT 1")
+        .get();
+      return {
+        running: running === undefined ? undefined : toAgentReview(running),
+        queued: rows("SELECT * FROM agent_review WHERE status = 'queued' ORDER BY id").map(
+          toAgentReview,
+        ),
+      };
+    },
+
+    countAgentReviews(trigger, since) {
+      const row = db
+        .prepare(
+          "SELECT COUNT(*) AS n FROM agent_review WHERE trigger = ? AND created_at >= ? AND status != 'skipped'",
+        )
+        .get(trigger, since);
+      return row === undefined ? 0 : integer(row, "n");
+    },
+
+    nextQueuedAgentReview() {
+      const row = db
+        .prepare("SELECT * FROM agent_review WHERE status = 'queued' ORDER BY id LIMIT 1")
+        .get();
+      return row === undefined ? undefined : toAgentReview(row);
+    },
+
+    getAgentReview(id) {
+      const row = db.prepare("SELECT * FROM agent_review WHERE id = ?").get(id);
+      return row === undefined ? undefined : toAgentReview(row);
+    },
+
+    latestAgentReviews() {
+      const latest = new Map<string, AgentReviewRow>();
+      for (const row of rows(
+        "SELECT * FROM agent_review WHERE id IN (SELECT MAX(id) FROM agent_review GROUP BY mr_key)",
+      )) {
+        const review = toAgentReview(row);
+        latest.set(review.mrKey, review);
+      }
+      return latest;
+    },
+
+    hasAgentReviewAt(mrKey, headSha) {
+      return (
+        db
+          .prepare(
+            "SELECT 1 FROM agent_review WHERE mr_key = ? AND head_sha = ? AND status IN ('ready', 'posting', 'posted')",
+          )
+          .get(mrKey, headSha) !== undefined
+      );
+    },
+
+    transitionAgentReview(id, from, to, fields, now) {
+      const result = db
+        .prepare(
+          `UPDATE agent_review SET status = ?, cli = COALESCE(?, cli), head_sha = COALESCE(?, head_sha),
+             body = COALESCE(?, body), detail = COALESCE(?, detail), mr_title = COALESCE(?, mr_title),
+             model = COALESCE(?, model), started_at = COALESCE(?, started_at), updated_at = ?
+           WHERE id = ? AND status IN (${from.map(() => "?").join(", ")})`,
+        )
+        .run(
+          to,
+          fields.cli ?? null,
+          fields.headSha ?? null,
+          fields.body ?? null,
+          fields.detail ?? null,
+          fields.mrTitle ?? null,
+          fields.model ?? null,
+          fields.startedAt ?? null,
+          now,
+          id,
+          ...from,
+        );
+      restrictPermissions(path);
+      return result.changes === 1;
+    },
+
+    failInterruptedAgentReviews(now) {
+      const result = db
+        .prepare(
+          "UPDATE agent_review SET status = 'failed', detail = 'interrupted: the agent stopped during the run', updated_at = ? WHERE status = 'running'",
+        )
+        .run(now);
+      return Number(result.changes);
+    },
+
+    loadTokenUsage(since) {
+      return db
+        .prepare("SELECT * FROM token_usage WHERE at >= ? ORDER BY at, rowid")
+        .all(since)
+        .map(toTokenUsage);
+    },
+
     loadTeams() {
       const nudges = new Map<string, NudgeRecord>();
       const undelivered = new Set<string>();
@@ -420,8 +768,8 @@ export function openStore(path: string): Store {
       const insertOutbox = db.prepare(
         `INSERT OR IGNORE INTO outbox
            (dedupe_key, kind, variant, mr_key, mr_iid, mr_project, mr_title, mr_url,
-            recipient, recipient_name, status, detail, text, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', '', NULL, ?, ?)`,
+            recipient, recipient_name, status, detail, text, approved, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', '', NULL, 0, ?, ?)`,
       );
       const upsertNudge = db.prepare(
         `INSERT INTO nudge_state (key, sent_count, last_sent_at) VALUES (?, ?, ?)
@@ -512,9 +860,17 @@ export function openStore(path: string): Store {
       const result = db
         .prepare(
           `UPDATE outbox SET status = ?, detail = COALESCE(?, detail), text = COALESCE(?, text),
-             updated_at = ? WHERE id = ? AND status = ?`,
+             approved = COALESCE(?, approved), updated_at = ? WHERE id = ? AND status = ?`,
         )
-        .run(to, fields.detail ?? null, fields.text ?? null, now, id, from);
+        .run(
+          to,
+          fields.detail ?? null,
+          fields.text ?? null,
+          fields.approved === true ? 1 : null,
+          now,
+          id,
+          from,
+        );
       return Number(result.changes) === 1;
     },
 

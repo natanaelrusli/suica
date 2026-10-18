@@ -13,6 +13,7 @@ import {
 import { ConfigError, parseConfig } from "../src/config.ts";
 import type { Exec, ExecOptions } from "../src/exec.ts";
 import type { StatusStore } from "../src/agent-status.ts";
+import type { DetectedCli } from "../src/model-cli.ts";
 
 interface Call {
   readonly file: string;
@@ -88,6 +89,12 @@ describe("service status", () => {
   });
 });
 
+const CLIS: readonly DetectedCli[] = [
+  { id: "claude", name: "Claude Code", path: "/Users/o/.local/bin/claude" },
+  { id: "codex", name: "Codex", path: "/opt/homebrew/bin/codex" },
+  { id: "gemini", name: "Gemini CLI", path: null },
+];
+
 describe("buildStatus", () => {
   const service = { loaded: true, running: true, pid: 4242 };
 
@@ -108,10 +115,12 @@ describe("buildStatus", () => {
         service,
         configPath: "/Users/o/.config/suica/config.yaml",
         logsPath: "/Users/o/Library/Logs/suica",
+        modelClis: CLIS,
         loaded: {
           config,
           paused: false,
           lastPoll: { at: 1792148400000, status: "ok", failure: null, durationMs: 1500 },
+          reviews: { running: undefined, queued: [] },
         },
       }),
     ).toEqual(golden);
@@ -125,7 +134,13 @@ describe("buildStatus", () => {
       service,
       configPath: "/c/config.yaml",
       logsPath: "/l",
-      loaded: { config, paused: false, lastPoll: null },
+      modelClis: CLIS,
+      loaded: {
+        config,
+        paused: false,
+        lastPoll: null,
+        reviews: { running: undefined, queued: [] },
+      },
     });
     expect(status.paths.state).toBe(join(homedir(), "s", "state.db"));
     expect(status.paths.templates).toBe(join(homedir(), "t"));
@@ -136,6 +151,7 @@ describe("buildStatus", () => {
       service: { loaded: false, running: false, pid: null },
       configPath: "/c/config.yaml",
       logsPath: "/l",
+      modelClis: CLIS,
       loaded: { error: "invalid config: gitlab: Required" },
     });
     expect(status).toMatchObject({
@@ -144,6 +160,8 @@ describe("buildStatus", () => {
       teamsEnabled: null,
       lastPoll: null,
       polling: null,
+      agentReview: null,
+      modelCli: { selected: null, active: null, clis: CLIS },
       agent: { label: AGENT_LABEL, loaded: false },
       paths: {
         config: "/c/config.yaml",
@@ -167,6 +185,7 @@ describe("store failures", () => {
         service,
         configPath: "/c/config.yaml",
         logsPath: "/l",
+        modelClis: CLIS,
         loaded: { config, storeError: "cannot read the state database (Error)" },
       }),
     ).toEqual({
@@ -177,6 +196,8 @@ describe("store failures", () => {
       teamsEnabled: true,
       lastPoll: null,
       polling: { activeSeconds: 60, idleSeconds: 300 },
+      agentReview: null,
+      modelCli: { selected: "auto", active: "claude", clis: CLIS },
       paths: {
         config: "/c/config.yaml",
         state: "/x/state.db",
@@ -197,6 +218,7 @@ describe("store failures", () => {
     const store: StatusStore = {
       lastPoll: () => ({ at: 2, status: "failed", failure: "x", durationMs: 6 }),
       isPaused: () => true,
+      agentReviewActivity: () => ({ running: undefined, queued: [] }),
       close: () => {
         closed = true;
       },

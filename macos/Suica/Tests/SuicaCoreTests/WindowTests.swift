@@ -7,6 +7,7 @@ actor FakeDashboardClient: DashboardClient {
     private var statuses: [Result<StatusDocument, AgentError>]
     private var statsResults: [Result<StatsDocument, AgentError>]
     private var configs: [Result<ConfigDocument, AgentError>]
+    private var usageResults: [Result<UsageDocument, AgentError>]
     private var saveResult: Result<SaveResult, AgentError> = .success(
         SaveResult(status: "saved", issues: [], sha256: "new"))
     private var restartResult: Result<ActionResult, AgentError> = .success(ActionResult(code: "restarted"))
@@ -15,6 +16,7 @@ actor FakeDashboardClient: DashboardClient {
     private var firstStatusGate: Gate?
     private(set) var statusCalls = 0
     private(set) var statsCalls = 0
+    private(set) var usageCalls = 0
     private(set) var configCalls = 0
     private(set) var restartCalls = 0
     private(set) var saveCalls: [(base: String?, edits: [ConfigEditRequest])] = []
@@ -22,15 +24,18 @@ actor FakeDashboardClient: DashboardClient {
     init(
         statuses: [Result<StatusDocument, AgentError>] = [.success(makeStatus())],
         stats: [Result<StatsDocument, AgentError>] = [.success(makeStats())],
-        configs: [Result<ConfigDocument, AgentError>] = [.success(makeConfig())]
+        configs: [Result<ConfigDocument, AgentError>] = [.success(makeConfig())],
+        usage: [Result<UsageDocument, AgentError>] = [.success(makeUsage())]
     ) {
         self.statuses = statuses
         self.statsResults = stats
         self.configs = configs
+        self.usageResults = usage
     }
 
     func setStatuses(_ next: [Result<StatusDocument, AgentError>]) { statuses = next }
     func setStats(_ next: [Result<StatsDocument, AgentError>]) { statsResults = next }
+    func setUsage(_ next: [Result<UsageDocument, AgentError>]) { usageResults = next }
     func setConfigs(_ next: [Result<ConfigDocument, AgentError>]) { configs = next }
     func setSave(_ result: Result<SaveResult, AgentError>, gate: Gate? = nil) {
         saveResult = result
@@ -54,6 +59,13 @@ actor FakeDashboardClient: DashboardClient {
         statsCalls += 1
         let result =
             statsResults.count > 1 ? statsResults.removeFirst() : (statsResults.first ?? .failure(.launchFailed))
+        return try result.get()
+    }
+
+    func usage() async throws(AgentError) -> UsageDocument {
+        usageCalls += 1
+        let result =
+            usageResults.count > 1 ? usageResults.removeFirst() : (usageResults.first ?? .failure(.launchFailed))
         return try result.get()
     }
 
@@ -92,6 +104,12 @@ func makeStats(ok: Int = 3) -> StatsDocument {
         reviewerAfterNudge: Turnaround(count: 0, medianMinutes: nil, p90Minutes: nil))
 }
 
+func makeUsage(input: Int = 0) -> UsageDocument {
+    let totals = TokenTotals(runs: 0, inputTokens: input, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0)
+    return UsageDocument(
+        version: 1, generatedAt: 0, last24h: totals, last7d: totals, last30d: totals, byPurpose: [], days: [])
+}
+
 @MainActor @Test func refreshKeepsTheLastGoodStatusOnFailure() async {
     let client = FakeDashboardClient()
     let model = WindowModel(client: client, menu: MenuModel(client: FakeClient(states: [.success(makeState())])))
@@ -111,6 +129,47 @@ func makeStats(ok: Int = 3) -> StatsDocument {
     #expect(model.status?.agent.running == false)
     #expect(model.stats?.polls24h.ok == 9)
     #expect(model.errorText == nil)
+}
+
+@MainActor @Test func refreshReadsUsageAndKeepsTheLastGoodOneOnFailure() async {
+    let client = FakeDashboardClient(usage: [.success(makeUsage(input: 7))])
+    let model = WindowModel(client: client, menu: MenuModel(client: FakeClient(states: [.success(makeState())])))
+    await model.refresh()
+    #expect(model.usage?.last24h.inputTokens == 7)
+    await client.setUsage([.failure(.failed(exitCode: 1))])
+    await model.refresh()
+    #expect(model.usage?.last24h.inputTokens == 7)
+    #expect(model.errorText == MenuModel.message(for: .failed(exitCode: 1)))
+    // With a broken config the status document already says why.
+    await client.setStatuses([.success(makeBrokenConfigStatus())])
+    await model.refresh()
+    #expect(model.errorText == nil)
+}
+
+@MainActor @Test func switchingTheModelCliWritesOnlyThatKeyOnTheCurrentFileAndRefreshes() async {
+    let client = FakeDashboardClient(configs: [.success(makeConfig(sha: "now"))])
+    let model = WindowModel(client: client, menu: MenuModel(client: FakeClient(states: [.success(makeState())])))
+    await model.switchModelCli(to: "codex")
+    let saves = await client.saveCalls
+    #expect(saves.count == 1)
+    #expect(saves.first?.base == "now")
+    #expect(saves.first?.edits == [ConfigEditRequest(path: ["model", "cli"], value: .string("codex"))])
+    #expect(model.banner == Copy.modelCliSwitched)
+    #expect(await client.statusCalls == 1)
+    #expect(!model.savingSetting)
+}
+
+@MainActor @Test func aRefusedModelCliSwitchSaysWhy() async {
+    let client = FakeDashboardClient()
+    await client.setSave(
+        .success(SaveResult(status: "invalid", issues: [ConfigIssue(path: "gitlab", message: "Required")], sha256: nil)))
+    let model = WindowModel(client: client, menu: MenuModel(client: FakeClient(states: [.success(makeState())])))
+    await model.switchModelCli(to: "gemini")
+    #expect(model.banner == "\(Copy.configInvalid) gitlab: Required")
+    await client.setConfigs([.failure(.timedOut)])
+    await model.switchModelCli(to: "gemini")
+    #expect(model.banner == Copy.agentTimedOut)
+    #expect(await client.saveCalls.count == 1)
 }
 
 func makeBrokenConfigStatus() -> StatusDocument {
@@ -241,6 +300,35 @@ func makeBrokenConfigStatus() -> StatusDocument {
     #expect(Copy.lastPoll("5 min ago", ok: false) == "Last poll 5 min ago: failed")
     #expect(Copy.flash(for: "restarted") == "Agent restarted.")
     #expect(Copy.flash(for: "not-installed") == Copy.agentNotInstalled)
-    #expect(Copy.agentNotInstalled == "Agent not installed. Run scripts/install-launchagent.sh.")
+    #expect(Copy.agentNotInstalled == "Agent not installed. Run suica agent install.")
     #expect(Copy.configSaveFailed == "Saving failed. The config file was not changed.")
+}
+
+@Test func tokenCountsAreShortenedFromTenThousand() {
+    #expect(Copy.tokens(0) == "0")
+    #expect(Copy.tokens(9_999) == "9,999")
+    #expect(Copy.tokens(12_345) == "12.3K")
+    #expect(Copy.tokens(1_234_567) == "1.2M")
+}
+
+@Test func knownPurposesHaveNamesAndOthersAreShownAsSent() {
+    #expect(Copy.purpose("review") == "Agent reviews")
+    #expect(Copy.purpose("reply") == "Replies")
+    #expect(Copy.purpose("triage") == "triage")
+}
+
+@MainActor @Test func theReviewSettingsSaveTheirOneKeyAndAnEmptyModelRemovesIt() async {
+    let client = FakeDashboardClient(configs: [.success(makeConfig(sha: "now"))])
+    let model = WindowModel(client: client, menu: MenuModel(client: FakeClient(states: [.success(makeState())])))
+    await model.setReviewPosting("auto")
+    await model.setReviewModel("opus")
+    await model.setReviewModel(nil)
+    let saves = await client.saveCalls
+    #expect(saves.map(\.edits) == [
+        [ConfigEditRequest(path: ["review", "post"], value: .string("auto"))],
+        [ConfigEditRequest(path: ["review", "model"], value: .string("opus"))],
+        [ConfigEditRequest(path: ["review", "model"], value: .null)],
+    ])
+    #expect(saves.allSatisfy { $0.base == "now" })
+    #expect(model.banner == Copy.reviewSettingSaved)
 }

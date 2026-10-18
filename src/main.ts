@@ -13,11 +13,18 @@ async function main(): Promise<void> {
     controller.abort();
   });
 
-  const runtime = createRuntime(defaultConfigPath());
+  const runtime = createRuntime(defaultConfigPath(), controller.signal);
   runtime.log.info("daemon started");
+  const interrupted = runtime.store.failInterruptedAgentReviews(Date.now());
+  if (interrupted > 0) runtime.log.warn("agent reviews interrupted", { count: interrupted });
   try {
     await runDaemon({
-      poll: () => runtime.poll(),
+      // A queued review starts after the poll and runs beside the loop.
+      poll: async () => {
+        const status = await runtime.poll();
+        runtime.reviews.tick();
+        return status;
+      },
       readIdleSeconds: () => readIdleSeconds(),
       polling: runtime.config.polling,
       sleep: abortableSleep,
@@ -25,6 +32,7 @@ async function main(): Promise<void> {
       signal: controller.signal,
     });
   } finally {
+    await runtime.reviews.idle();
     runtime.store.close();
   }
   runtime.log.info("daemon stopped");

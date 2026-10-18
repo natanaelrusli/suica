@@ -27,6 +27,7 @@ export function mr(
     title: `MR ${iid}`,
     url: `https://gitlab.example/${projectPath}/-/merge_requests/${iid}`,
     draft: false,
+    createdAt: null,
     author: person("author", "Author"),
     reviewers: [],
     notes: [],

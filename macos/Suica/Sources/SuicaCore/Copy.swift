@@ -1,3 +1,5 @@
+import Foundation
+
 /// Every string the app shows. English only; Teams messages are not part of the app.
 public enum Copy {
     public static let appName = "Suica"
@@ -8,7 +10,6 @@ public enum Copy {
         "\(count) MRs are waiting for your review"
     }
     public static let attentionHeading = "Needs your attention"
-    public static let recentHeading = "Recent"
     public static let attentionEmpty = "Nothing is waiting for you."
     public static func moreHidden(_ count: Int) -> String {
         "and \(count) more (see suica pending --all)"
@@ -28,7 +29,7 @@ public enum Copy {
     public static let notRetried = "Not retried automatically"
     public static let needsPeople = "Add this person to teams.people, then Retry"
     public static let agentUnreachable =
-        "Can't reach the agent. Check that the repository and Node still exist, then Refresh."
+        "Can't reach the suica CLI. Check that it is still installed (scripts/install-cli.sh), then Refresh."
     public static let agentTimedOut = "The agent took too long to answer."
     public static let agentOutdated = "The agent speaks a newer protocol. Rebuild the app."
 
@@ -41,7 +42,7 @@ public enum Copy {
     public static let configuration = "Configuration"
     public static let agentRunning = "Agent running"
     public static let agentStopped = "Agent installed but not running"
-    public static let agentNotInstalled = "Agent not installed. Run scripts/install-launchagent.sh."
+    public static let agentNotInstalled = "Agent not installed. Run suica agent install."
     public static func lastPoll(_ relative: String, ok: Bool) -> String {
         "Last poll \(relative): \(ok ? "ok" : "failed")"
     }
@@ -51,6 +52,8 @@ public enum Copy {
     public static let restartToApply = "Saved. Restart the agent to apply the changes."
     public static let save = "Save"
     public static let discard = "Discard changes"
+    public static let unsavedChanges = "You have unsaved changes."
+    public static let fixInvalidInput = "Fix the fields marked in red before saving."
     public static let reload = "Reload"
     public static let resetToDefault = "Use default"
     public static let configConflict =
@@ -81,24 +84,179 @@ public enum Copy {
     public static func pollIntervals(active: Int, idle: Int) -> String {
         "Every \(active) s while MRs are active, \(idle) s when idle"
     }
+    public static let agentHeading = "Background agent"
+    public static let pollingHeading = "GitLab polling"
+    public static let filesHeading = "Files"
     public static let configPath = "Config file"
     public static let statePath = "State database"
     public static let logsPath = "Logs folder"
     public static let templatesPath = "Templates folder"
     public static func pollsOkFailed(ok: Int, failed: Int) -> String { "\(ok) ok / \(failed) failed" }
     public static func p90(_ text: String) -> String { "90th percentile \(text)" }
+    public static func median(_ text: String) -> String { "Median \(text)" }
+    public static let pollHealth = "Poll health"
+    public static let last24Hours = "Last 24 hours"
+    public static let last7Days = "Last 7 days"
+    public static let turnaroundHeading = "Turnaround, last 30 days"
     public static let last14Days = "Last 14 days"
     public static let chartTitle = "Daily counts, last 14 days"
     public static let chartDay = "Day"
     public static let chartCount = "Count"
     public static let chartSeries = "Series"
     public static let loading = "Loading…"
+    public static let agentStoppedShort = "Stopped"
+    public static let agentMissingShort = "Not installed"
+    public static let teamsOffShort = "Off"
+    // Review requests
+    public static let noReviewRequests = "No open merge requests are waiting for your review."
+    public static let selectMergeRequest = "Select a merge request."
+    public static func reviewGroup(_ group: ReviewGroup) -> String {
+        switch group {
+        case .waiting: "Waiting for you"
+        case .reviewed: "You reviewed"
+        case .drafts: "Drafts"
+        case .all: "All"
+        }
+    }
+    public static let nothingWaiting = "Nothing is waiting for your review."
+    // Agent Review
+    public static let agentReviewTab = "Agent review"
+    public static let reviewWithAgent = "Review with agent"
+    public static let reviewAgain = "Review again"
+    public static let postToGitLab = "Post to GitLab…"
+    public static let discardReview = "Discard"
+    public static let postConfirmTitle = "Post this review to GitLab as you?"
+    public static let postConfirmMessage =
+        "It is posted as one comment on the MR, with a label saying an agent wrote it. Lines starting with / are escaped, and mentions and links are removed."
+    public static let post = "Post"
+    public static let cancel = "Cancel"
+    public static let noAgentReview =
+        "The agent has not reviewed this MR. It reviews with the skill set in review.skill, read-only, on a temporary checkout, and nothing is posted until you approve it."
+    public static func agentReviewStatus(_ status: String) -> String {
+        switch status {
+        case "queued": "Queued: starts after the agent's next poll"
+        case "running": "Reviewing…"
+        case "ready": "Ready: read it, then post or discard"
+        case "posting": "Posting…"
+        case "posted": "Posted to GitLab"
+        case "discarded": "Discarded"
+        case "failed": "Failed"
+        case "skipped": "Skipped"
+        default: status
+        }
+    }
+    public static func agentReviewBadge(_ status: String) -> String? {
+        switch status {
+        case "queued": "Agent review queued"
+        case "running": "Agent reviewing now"
+        case "ready": "Agent review ready"
+        case "posted": "Agent review posted"
+        case "failed": "Agent review failed"
+        default: nil
+        }
+    }
+    public static func cliName(_ cli: String?) -> String {
+        switch cli {
+        case "claude": "Claude Code"
+        case "codex": "Codex"
+        case let other?: other
+        case nil: "the agent"
+        }
+    }
+    public static func agentReviewMeta(cli: String?, model: String?, sha: String?) -> String {
+        let who = model.map { "\(cliName(cli)) (\(DisplayText.clean($0, max: 60)))" } ?? cliName(cli)
+        return sha.map { "By \(who) at commit \(String($0.prefix(8)))" } ?? "By \(who)"
+    }
+    // Agent Review activity (Overview and menu bar)
+    public static let agentReviewHeading = "Agent Review"
+    public static let reviewingNow = "Reviewing now"
+    public static let notReviewing = "Not reviewing anything right now."
+    public static func reviewing(_ title: String) -> String { "Reviewing \(title)" }
+    public static func queuedReviews(_ count: Int) -> String { count == 1 ? "1 more queued" : "\(count) more queued" }
+    public static let nextInQueue = "Next in queue"
+    public static func autoReviews(_ on: Bool) -> String {
+        on ? "Automatic: every MR waiting for you" : "Automatic reviews are off (review.auto)"
+    }
+    public static let reviewSettingSaved = "Saved. Restart the agent to apply it to the next review."
+    public static let postingPicker = "Posting"
+    public static let postWait = "Wait for me to post"
+    public static let postAuto = "Post automatically"
+    public static let reviewModelPicker = "Model"
+    public static let cliDefaultModel = "CLI default"
+    public static let autoPostConfirmTitle = "Post reviews to GitLab automatically?"
+    public static let autoPostConfirmMessage =
+        "Every review is posted as you as soon as it is written, without you reading it first. It carries the agent label; lines starting with / are escaped and mentions and links are removed."
+    public static let turnOnAutoPost = "Post automatically"
+    public static let otherModelsHint = "Other model names: Configuration → Agent Review → Review model."
+    public static func reviewModel(_ model: String?) -> String {
+        "Model: \(model.map { DisplayText.clean($0, max: 60) } ?? "CLI default")"
+    }
+    /// "Claude Code · opus · for 3 min".
+    public static func runningLine(cli: String?, model: String?, since startedAt: Int?, now: Date = Date()) -> String {
+        var parts = [cliName(cli)]
+        if let model { parts.append(DisplayText.clean(model, max: 60)) }
+        if let startedAt {
+            let minutes = max(0, Int(now.timeIntervalSince1970 * 1000 - Double(startedAt)) / 60_000)
+            parts.append(minutes < 1 ? "just started" : "for \(minutes) min")
+        }
+        return parts.joined(separator: " · ")
+    }
+    public static func agentReviewOutcome(_ code: String) -> String {
+        switch code {
+        case "queued": "Review queued. It starts after the agent's next poll."
+        case "already-queued": "A review of this MR is already queued or running."
+        case "posted": "Review posted to GitLab."
+        case "discarded": "Review discarded."
+        case "failed": "Posting failed. Check the MR in GitLab before posting again."
+        case "bad-key": "This merge request key cannot be reviewed."
+        default: "Nothing to do: the review changed in the meantime."
+        }
+    }
+    public static func approvals(_ approved: Int, of total: Int) -> String { "\(approved)/\(total) approved" }
+    public static func yourState(_ state: String) -> String { "You: \(reviewerState(state))" }
+    public static let descriptionTab = "Description"
+    public static let noDescription = "No description."
+    public static func changesTab(_ count: Int) -> String { "Changes (\(count))" }
+    public static func commentsTab(_ count: Int) -> String { "Comments (\(count))" }
+    public static let noComments = "No comments yet."
+    public static let showActivity = "Show GitLab activity"
+    public static let resolved = "Resolved"
+    public static let unresolved = "Unresolved"
+    public static let draft = "Draft"
+    public static let openInGitLab = "Open in GitLab"
+    public static let diffTooLarge = "This diff is too large to show here. Open it in GitLab."
+    public static let filesTruncated = "Only the first 100 files are shown. Open the MR in GitLab for the rest."
+    public static let discussionsTruncated = "Only the first 100 discussions are shown."
+    public static let newFile = "New"
+    public static let deletedFile = "Deleted"
+    public static let renamedFile = "Renamed"
+    public static let reviewersHeading = "Reviewers"
+    public static func byAuthor(_ name: String) -> String { "by \(name)" }
+    public static func pipeline(_ status: String) -> String { "Pipeline \(status.lowercased())" }
+    public static func reviewerState(_ state: String) -> String {
+        switch state {
+        case "APPROVED": "Approved"
+        case "REQUESTED_CHANGES": "Requested changes"
+        case "REVIEWED": "Reviewed"
+        case "REVIEW_STARTED": "Reviewing"
+        case "UNAPPROVED": "Unapproved"
+        case "UNREVIEWED": "Not reviewed"
+        default: state.lowercased().replacingOccurrences(of: "_", with: " ")
+        }
+    }
+    // Messages
+    public static let yourMRs = "Your MRs"
+    public static let othersMRs = "Others' MRs"
+    public static let yourMRsHint = "Nudges and reminders to the reviewers of your merge requests."
+    public static let othersMRsHint = "Review notices to the authors of merge requests you reviewed."
     public static func groupHeading(_ key: String) -> String {
         switch key {
         case "gitlab": "GitLab"
         case "polling": "Polling"
         case "notifications": "Notifications"
         case "teams": "Teams"
+        case "model": "Language model"
+        case "review": "Agent Review"
         default: key.prefix(1).uppercased() + key.dropFirst()
         }
     }
@@ -109,7 +267,6 @@ public enum Copy {
 
     // MARK: Statistics
 
-    public static let polls24h = "Polls, last 24 hours"
     public static let reviewRequests = "Review requests"
     public static let activity = "Activity on your MRs"
     public static let nudgesSent = "Nudges sent"
@@ -119,6 +276,84 @@ public enum Copy {
     public static let noData = "Not enough data yet"
     public static func minutes(_ m: Int) -> String {
         m < 60 ? "\(m) min" : "\(m / 60) h \(m % 60) min"
+    }
+
+    // MARK: Model CLI
+
+    public static let modelCliHeading = "Language model"
+    public static let modelCliPicker = "Model CLI"
+    public static let modelCliAuto = "Auto (first installed)"
+    public static func notInstalled(_ name: String) -> String { "\(name) (not installed)" }
+    public static func modelCliInUse(_ name: String) -> String { "In use: \(name)" }
+    public static let noModelCliInstalled = "None of claude, codex or gemini is installed."
+    public static func modelCliMissing(_ name: String) -> String {
+        "\(name) is not installed, so nothing runs. Install it or pick another."
+    }
+    public static let modelCliSwitched = "Model CLI switched. Restart the agent to apply it."
+    public static let modelCliNote = "Used by Agent Review, which is not built yet."
+
+    // MARK: Token usage
+
+    public static let tokenUsage = "Token usage"
+    public static let last30Days = "Last 30 days"
+    public static func runs(_ count: Int) -> String { count == 1 ? "1 run" : "\(count) runs" }
+    public static let inputTokens = "Input"
+    public static let outputTokens = "Output"
+    public static let cacheReadTokens = "Cache read"
+    public static let cacheCreationTokens = "Cache write"
+    public static let byPurpose = "By purpose, last 30 days"
+    public static let tokensChartTitle = "Daily tokens, last 14 days"
+    public static let chartTokens = "Tokens"
+    public static let noTokenUsage =
+        "No language model runs recorded yet. Suica writes its messages from templates; tokens appear here once Agent Review runs."
+    public static func purpose(_ raw: String) -> String {
+        switch raw {
+        case "review": "Agent reviews"
+        case "reply": "Replies"
+        case "other": "Other"
+        default: DisplayText.clean(raw, max: 40)
+        }
+    }
+    /// 1234 → "1,234"; 12_345 → "12.3K"; 1_234_567 → "1.2M".
+    public static func tokens(_ count: Int) -> String {
+        count < 10_000
+            ? count.formatted(.number.locale(Locale(identifier: "en_US")))
+            : count.formatted(.number.notation(.compactName).precision(.fractionLength(0...1)).locale(Locale(identifier: "en_US")))
+    }
+
+    // MARK: Message rows
+
+    public static let youApprovedMr = "You approved this MR in GitLab"
+    public static let trackedShort = "Tracked"
+    public static let toReviewShort = "To review"
+    public static let needsYouShort = "Needs you"
+    public static func recentHeading(_ count: Int) -> String { "Recent (\(count))" }
+
+    public static func outcomeLabel(_ outcome: ItemOutcome) -> String {
+        switch outcome {
+        case .approvedByYou: "Sent with your approval"
+        case .sentAutomatically: "Sent without approval"
+        case .sent: "Sent"
+        case .skippedByYou: "Skipped by you"
+        case .noLongerNeeded: "No longer needed"
+        case .skipped: "Skipped"
+        case .dryRun: "Dry run, not sent"
+        case .failed: "Failed"
+        }
+    }
+
+    public static func stateLabel(_ state: ItemState) -> String {
+        switch state {
+        case .queued: "Queued"
+        case .pending: "Waiting for your approval"
+        case .sending: "Sending"
+        case .sent: "Sent"
+        case .skipped: "Skipped"
+        case .failed: "Failed"
+        case .unresolved: "Person not found"
+        case .dryRun: "Dry run"
+        case .unknown: "Unknown"
+        }
     }
 
     public static func kindLabel(_ kind: String) -> String {

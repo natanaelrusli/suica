@@ -8,6 +8,10 @@ export interface ExecResult {
 
 export interface ExecOptions {
   readonly timeoutMs: number;
+  /** Working folder of the child; the caller's when absent. */
+  readonly cwd?: string;
+  /** Kills the child when aborted. */
+  readonly signal?: AbortSignal;
 }
 
 export type Exec = (
@@ -22,6 +26,8 @@ const MAX_BUFFER_BYTES = 16 * 1024 * 1024;
 export const defaultExec: Exec = async (file, args, options) => {
   const { stdout, stderr } = await execFileAsync(file, [...args], {
     timeout: options.timeoutMs,
+    ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
+    ...(options.signal === undefined ? {} : { signal: options.signal }),
     maxBuffer: MAX_BUFFER_BYTES,
     encoding: "utf8",
   });

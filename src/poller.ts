@@ -1,7 +1,7 @@
 import type { Config } from "./config.ts";
 import type { Snapshot } from "./domain.ts";
 import { countPendingReviews, detectEvents } from "./events.ts";
-import type { PreviousState } from "./events.ts";
+import type { ActivityEvent, PreviousState } from "./events.ts";
 import { execFailure } from "./exec.ts";
 import {
   NOTIFY_AFTER,
@@ -36,6 +36,8 @@ export interface PollDeps {
   readonly log: Logger;
   readonly config: Pick<Config, "gitlab" | "notifications">;
   readonly teams?: TeamsHooks;
+  /** Queues Agent Reviews after the commit; `newRequests` just asked for the Owner's review. May throw. */
+  readonly queueReviews?: (snapshot: Snapshot, newRequests: readonly string[]) => void;
   /** Milliseconds since the epoch; the poll log stamps and times each poll with it. */
   readonly now: () => number;
 }
@@ -86,6 +88,19 @@ async function reportStateFailure(deps: PollDeps, error: unknown): Promise<void>
   await reportFailure(deps, "state", STATE_FAILURE_NOTIFICATION, {
     reason: error instanceof Error ? error.name : "unknown",
   });
+}
+
+/** Runs after the state commit, on every poll; a problem never fails the poll. */
+function queueReviews(deps: PollDeps, snapshot: Snapshot, events: readonly ActivityEvent[]): void {
+  if (deps.queueReviews === undefined) return;
+  const keys = events.flatMap((event) => (event.kind === "review-requested" ? [event.mr.key] : []));
+  try {
+    deps.queueReviews(snapshot, keys);
+  } catch (error) {
+    deps.log.warn("agent review not queued", {
+      reason: error instanceof Error ? error.name : "unknown",
+    });
+  }
 }
 
 /** Runs after the state commit; a Teams problem never changes the poll status. */
@@ -182,6 +197,7 @@ async function runPoll(deps: PollDeps, start: number): Promise<PollOutcome> {
     return { status: "failed", failure: "state" };
   }
   failures.recover("state");
+  queueReviews(deps, snapshot, previous.baselineDone ? events : []);
   await runTeams(deps, snapshot, previous);
   log.debug("poll complete", {
     review_requested: snapshot.reviewRequested.length,

@@ -53,7 +53,7 @@ describe("schema v2", () => {
     store.close();
 
     const raw = new DatabaseSync(path);
-    expect(raw.prepare("PRAGMA user_version").get()?.["user_version"]).toBe(3);
+    expect(raw.prepare("PRAGMA user_version").get()?.["user_version"]).toBe(7);
     raw.close();
   });
 });
@@ -79,6 +79,7 @@ describe("applyTeamsPlan", () => {
       status: "queued",
       detail: "",
       text: null,
+      approved: false,
       createdAt: NOW,
       updatedAt: NOW,
     });

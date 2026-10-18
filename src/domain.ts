@@ -26,6 +26,8 @@ export interface MergeRequest {
   readonly title: string;
   readonly url: string;
   readonly draft: boolean;
+  /** ISO 8601 as GitLab sends it; null when it was not fetched. */
+  readonly createdAt: string | null;
   readonly author: Person;
   readonly reviewers: readonly Reviewer[];
   /** Most recent notes only; empty for MRs fetched without notes. */

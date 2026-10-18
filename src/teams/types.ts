@@ -114,6 +114,8 @@ export interface OutboxRow {
   readonly detail: string;
   /** Rendered text, once the row left `queued`. */
   readonly text: string | null;
+  /** True once the Owner approved sending it; null for rows older than schema 4. */
+  readonly approved: boolean | null;
   readonly createdAt: number;
   readonly updatedAt: number;
 }

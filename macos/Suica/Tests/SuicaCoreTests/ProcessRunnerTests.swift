@@ -107,3 +107,20 @@ private func shell(_ script: String, timeout: TimeInterval = 10, directory: Stri
             timeout: 10, stdin: big))
     #expect(result.exitCode == 1)
 }
+
+/// The installed `suica` command is a `#!/bin/sh` wrapper that execs node: the runner must start it
+/// directly and pass the arguments through.
+@Test func runsAShellWrapperLikeTheInstalledCli() async throws {
+    let folder = FileManager.default.temporaryDirectory.appending(path: "suica-wrapper-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let wrapper = folder.appending(path: "suica")
+    try Data("#!/bin/sh\nexec /bin/echo \"$@\"\n".utf8).write(to: wrapper)
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: wrapper.path)
+    let result = try await ProcessRunner().run(
+        Invocation(
+            executable: wrapper.path, arguments: ["state", "a b"], environment: ["PATH": "/usr/bin:/bin"],
+            workingDirectory: "/tmp", timeout: 10))
+    #expect(result.exitCode == 0)
+    #expect(String(decoding: result.stdout, as: UTF8.self) == "state a b\n")
+}

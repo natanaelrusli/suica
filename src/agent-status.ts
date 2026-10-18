@@ -1,6 +1,10 @@
 import type { Exec } from "./exec.ts";
 import { ConfigError, defaultStatePath } from "./config.ts";
 import type { Config } from "./config.ts";
+import { resolveModelCli } from "./model-cli.ts";
+import { buildReviewActivity } from "./reviews.ts";
+import type { ReviewActivityJson } from "./reviews.ts";
+import type { DetectedCli, ModelCliChoice, ModelCliId } from "./model-cli.ts";
 import type { PollLogEntry, Store } from "./store.ts";
 import { defaultTemplatesPath } from "./teams/templates.ts";
 
@@ -67,6 +71,23 @@ export interface StatusJson {
   readonly teamsEnabled: boolean | null;
   readonly lastPoll: PollLogEntry | null;
   readonly polling: { readonly activeSeconds: number; readonly idleSeconds: number } | null;
+  /** Null when the config or the state database could not be read. */
+  readonly agentReview:
+    | (ReviewActivityJson & {
+        readonly auto: boolean;
+        /** `review.post`: approval or auto. */
+        readonly post: string;
+        /** `review.model`; null for the CLI's default. */
+        readonly model: string | null;
+      })
+    | null;
+  readonly modelCli: {
+    /** `model.cli` from the config; null when the config could not be loaded. */
+    readonly selected: ModelCliChoice | null;
+    /** The CLI language model work runs with; null when none fits. */
+    readonly active: ModelCliId | null;
+    readonly clis: readonly DetectedCli[];
+  };
   readonly paths: {
     readonly config: string;
     readonly state: string;
@@ -79,15 +100,21 @@ export interface StatusInput {
   readonly service: ServiceStatus;
   readonly configPath: string;
   readonly logsPath: string;
+  readonly modelClis: readonly DetectedCli[];
   readonly loaded:
-    | { readonly config: Config; readonly paused: boolean; readonly lastPoll: PollLogEntry | null }
+    | {
+        readonly config: Config;
+        readonly paused: boolean;
+        readonly lastPoll: PollLogEntry | null;
+        readonly reviews: ReturnType<Store["agentReviewActivity"]>;
+      }
     /** The config loaded but the state database could not be read. */
     | { readonly config: Config; readonly storeError: string }
     | { readonly error: string };
 }
 
 /** The part of the store the status document reads. */
-export type StatusStore = Pick<Store, "lastPoll" | "isPaused" | "close">;
+export type StatusStore = Pick<Store, "lastPoll" | "isPaused" | "agentReviewActivity" | "close">;
 
 export interface StatusDeps {
   readonly loadConfig: (path: string) => Config;
@@ -110,7 +137,12 @@ export function loadStatusInput(configPath: string, deps: StatusDeps): StatusInp
   try {
     const store = deps.openStore(config.statePath ?? defaultStatePath());
     try {
-      return { config, paused: store.isPaused(), lastPoll: store.lastPoll() ?? null };
+      return {
+        config,
+        paused: store.isPaused(),
+        lastPoll: store.lastPoll() ?? null,
+        reviews: store.agentReviewActivity(),
+      };
     } finally {
       store.close();
     }
@@ -132,6 +164,8 @@ export function buildStatus(input: StatusInput): StatusJson {
       teamsEnabled: null,
       lastPoll: null,
       polling: null,
+      agentReview: null,
+      modelCli: { selected: null, active: null, clis: input.modelClis },
       paths: {
         config: input.configPath,
         state: defaultStatePath(),
@@ -152,6 +186,19 @@ export function buildStatus(input: StatusInput): StatusJson {
     polling: {
       activeSeconds: config.polling.activeSeconds,
       idleSeconds: config.polling.idleSeconds,
+    },
+    agentReview: storeFailed
+      ? null
+      : {
+          auto: config.review.auto,
+          post: config.review.post,
+          model: config.review.model ?? null,
+          ...buildReviewActivity(loaded.reviews, config.review.model),
+        },
+    modelCli: {
+      selected: config.model.cli,
+      active: resolveModelCli(config.model.cli, input.modelClis),
+      clis: input.modelClis,
     },
     paths: {
       config: input.configPath,

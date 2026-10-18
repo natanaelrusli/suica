@@ -1,3 +1,5 @@
+import { MODEL_CLI_CHOICES } from "./model-cli.ts";
+
 export type FieldType =
   "string" | "int" | "bool" | "enum" | "clock" | "weekdays" | "stringList" | "emailMap";
 
@@ -156,6 +158,57 @@ export const CONFIG_FIELDS: readonly ConfigField[] = [
     type: "emailMap",
     label: "People",
     help: "GitLab username to email, for people Teams cannot find by name",
+  },
+  {
+    path: ["model", "cli"],
+    type: "enum",
+    label: "Model CLI",
+    help: "Which coding agent CLI runs language model work: auto (the first installed of claude, codex, gemini), claude, codex or gemini",
+    options: MODEL_CLI_CHOICES,
+  },
+  {
+    path: ["review", "auto"],
+    type: "bool",
+    label: "Review automatically",
+    help: "Review every MR waiting for you that the agent has not reviewed yet, oldest first, and again after a new Review Request; reviews wait in the app until you post them",
+  },
+  {
+    path: ["review", "post"],
+    type: "enum",
+    label: "Posting",
+    help: "approval: a ready review waits until you post it; auto: it is posted to GitLab as you as soon as it is ready",
+    options: ["approval", "auto"],
+  },
+  {
+    path: ["review", "skill"],
+    type: "string",
+    label: "Review skill",
+    help: "Claude Code skill the review follows, as typed after the slash (plugin:skill)",
+  },
+  {
+    path: ["review", "model"],
+    type: "string",
+    label: "Review model",
+    help: "Model the CLI reviews with, such as sonnet, opus or haiku for Claude Code, or a full model name; empty uses the CLI's default",
+    placeholder: "CLI default",
+  },
+  {
+    path: ["review", "maxChangedLines"],
+    type: "int",
+    label: "Largest MR (changed lines)",
+    help: "Larger MRs are skipped",
+  },
+  {
+    path: ["review", "maxPerDay"],
+    type: "int",
+    label: "Automatic reviews per day",
+    help: "At most this many automatic reviews in 24 hours; reviews you start yourself do not count",
+  },
+  {
+    path: ["review", "timeoutMinutes"],
+    type: "int",
+    label: "Review timeout (minutes)",
+    help: "A review run is stopped after this long",
   },
   {
     path: ["statePath"],

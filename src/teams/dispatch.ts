@@ -134,7 +134,9 @@ export async function deliver(
     );
     return { status: "unresolved" };
   }
-  if (!deps.store.transitionOutbox(row.id, from, "sending", { text }, deps.now())) {
+  // Leaving `pending` is only possible through `suica send`, so it is the Owner's approval.
+  const approval = from === "pending" ? { approved: true as const } : {};
+  if (!deps.store.transitionOutbox(row.id, from, "sending", { text, ...approval }, deps.now())) {
     return { status: "busy" };
   }
   try {

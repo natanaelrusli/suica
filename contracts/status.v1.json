@@ -1,11 +1,52 @@
 {
   "version": 1,
-  "agent": { "label": "com.madhani.suica.agent", "loaded": true, "running": true, "pid": 4242 },
+  "agent": {
+    "label": "com.madhani.suica.agent",
+    "loaded": true,
+    "running": true,
+    "pid": 4242
+  },
   "configError": null,
   "paused": false,
   "teamsEnabled": true,
-  "lastPoll": { "at": 1792148400000, "status": "ok", "failure": null, "durationMs": 1500 },
-  "polling": { "activeSeconds": 120, "idleSeconds": 300 },
+  "lastPoll": {
+    "at": 1792148400000,
+    "status": "ok",
+    "failure": null,
+    "durationMs": 1500
+  },
+  "polling": {
+    "activeSeconds": 120,
+    "idleSeconds": 300
+  },
+  "agentReview": {
+    "auto": true,
+    "post": "approval",
+    "model": null,
+    "running": null,
+    "queued": []
+  },
+  "modelCli": {
+    "selected": "auto",
+    "active": "claude",
+    "clis": [
+      {
+        "id": "claude",
+        "name": "Claude Code",
+        "path": "/Users/o/.local/bin/claude"
+      },
+      {
+        "id": "codex",
+        "name": "Codex",
+        "path": "/opt/homebrew/bin/codex"
+      },
+      {
+        "id": "gemini",
+        "name": "Gemini CLI",
+        "path": null
+      }
+    ]
+  },
   "paths": {
     "config": "/Users/o/.config/suica/config.yaml",
     "state": "/Users/o/Library/Application Support/suica/state.db",

@@ -75,6 +75,45 @@ public struct StatusPaths: Codable, Equatable, Sendable {
     public let templates: String
 }
 
+public struct DetectedModelCli: Codable, Equatable, Sendable {
+    /// claude, codex or gemini; kept as sent so a CLI added later never fails the whole document.
+    public let id: String
+    public let name: String
+    /// Nil when it is not installed.
+    public let path: String?
+
+    public init(id: String, name: String, path: String?) {
+        self.id = id
+        self.name = name
+        self.path = path
+    }
+}
+
+public struct ModelCliStatus: Codable, Equatable, Sendable {
+    /// `model.cli` (auto or a CLI id); nil when the config could not be loaded.
+    public let selected: String?
+    /// The id of the CLI language model work runs with; nil when none fits.
+    public let active: String?
+    public let clis: [DetectedModelCli]
+
+    public init(selected: String?, active: String?, clis: [DetectedModelCli]) {
+        self.selected = selected
+        self.active = active
+        self.clis = clis
+    }
+}
+
+/// Agent Review in the status document: the settings that matter on Overview and the activity.
+public struct StatusAgentReview: Codable, Equatable, Sendable {
+    public let auto: Bool
+    /// `review.post`: approval or auto; nil from an agent without the setting.
+    public let post: String?
+    /// `review.model`; nil for the CLI's default.
+    public let model: String?
+    public let running: RunningReview?
+    public let queued: [QueuedReview]
+}
+
 /// `suica status --json`. `configError` is also set when the state database cannot be read; then
 /// `paused` and `lastPoll` are nil but `teamsEnabled` and `polling` are filled. When the config
 /// itself failed, `paused`, `teamsEnabled`, `lastPoll` and `polling` are all nil.
@@ -87,6 +126,10 @@ public struct StatusDocument: Codable, Equatable, Sendable {
     public let lastPoll: PollEntry?
     public let polling: PollingIntervals?
     public let paths: StatusPaths
+    /// Nil from an agent older than the model CLI switch.
+    public var modelCli: ModelCliStatus? = nil
+    /// Nil when the config or the state database could not be read, or from an older agent.
+    public var agentReview: StatusAgentReview? = nil
 }
 
 // MARK: - Stats
@@ -124,6 +167,66 @@ public struct StatsDocument: Codable, Equatable, Sendable {
     public let days: [DayStats]
     public let ownerAfterRequest: Turnaround
     public let reviewerAfterNudge: Turnaround
+}
+
+// MARK: - Token usage
+
+/// Language model tokens summed over some runs.
+public struct TokenTotals: Codable, Equatable, Sendable {
+    public let runs: Int
+    public let inputTokens: Int
+    public let outputTokens: Int
+    public let cacheReadTokens: Int
+    public let cacheCreationTokens: Int
+
+    public init(runs: Int, inputTokens: Int, outputTokens: Int, cacheReadTokens: Int, cacheCreationTokens: Int) {
+        self.runs = runs
+        self.inputTokens = inputTokens
+        self.outputTokens = outputTokens
+        self.cacheReadTokens = cacheReadTokens
+        self.cacheCreationTokens = cacheCreationTokens
+    }
+
+    public var allTokens: Int { inputTokens + outputTokens + cacheReadTokens + cacheCreationTokens }
+}
+
+public struct PurposeUsage: Codable, Equatable, Sendable {
+    /// review, reply, other; kept as sent so a new purpose never fails the whole document.
+    public let purpose: String
+    public let runs: Int
+    public let inputTokens: Int
+    public let outputTokens: Int
+    public let cacheReadTokens: Int
+    public let cacheCreationTokens: Int
+
+    public var totals: TokenTotals {
+        TokenTotals(
+            runs: runs, inputTokens: inputTokens, outputTokens: outputTokens,
+            cacheReadTokens: cacheReadTokens, cacheCreationTokens: cacheCreationTokens)
+    }
+}
+
+public struct DayUsage: Codable, Equatable, Sendable {
+    /// Local calendar day, `YYYY-MM-DD`.
+    public let day: String
+    public let runs: Int
+    public let inputTokens: Int
+    public let outputTokens: Int
+    public let cacheReadTokens: Int
+    public let cacheCreationTokens: Int
+}
+
+/// `suica usage`.
+public struct UsageDocument: Codable, Equatable, Sendable {
+    public let version: Int
+    public let generatedAt: Int
+    public let last24h: TokenTotals
+    public let last7d: TokenTotals
+    public let last30d: TokenTotals
+    /// Over the last 30 days, most tokens first.
+    public let byPurpose: [PurposeUsage]
+    /// Oldest first.
+    public let days: [DayUsage]
 }
 
 // MARK: - Config
@@ -238,6 +341,7 @@ public func decodeDocument<T: Decodable>(_ type: T.Type, from data: Data) throws
 public protocol DashboardClient: Sendable {
     func status() async throws(AgentError) -> StatusDocument
     func stats() async throws(AgentError) -> StatsDocument
+    func usage() async throws(AgentError) -> UsageDocument
     func config() async throws(AgentError) -> ConfigDocument
     func saveConfig(base: String?, edits: [ConfigEditRequest]) async throws(AgentError) -> SaveResult
     func restartAgent() async throws(AgentError) -> ActionResult

@@ -1,20 +1,27 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { installAgent, plistPath, uninstallAgent } from "./agent-install.ts";
 import { buildStatus, loadStatusInput, readServiceStatus, restartService } from "./agent-status.ts";
 import { actionJson, buildAgentState } from "./agent-state.ts";
 import { defaultConfigPath, defaultStatePath, loadConfig } from "./config.ts";
 import { applyConfigEdits, parseSaveRequest, showConfig } from "./config-edit.ts";
 import type { SaveResultJson } from "./config-edit.ts";
 import { defaultExec } from "./exec.ts";
+import { fetchSnapshot, glabPost, glabRest, glabRunner } from "./gitlab.ts";
+import { detectModelClis } from "./model-cli.ts";
+import { buildReviewActivity, buildReviewList, fetchMrDetail, parseMrKey } from "./reviews.ts";
+import { discardAgentReview, postAgentReview } from "./agent-review.ts";
+import { createLogger } from "./log.ts";
 import { createRuntime } from "./runtime.ts";
 import type { Runtime } from "./runtime.ts";
 import { buildStats, localDayKey } from "./stats.ts";
 import { openStore } from "./store.ts";
 import { formatOutbox } from "./teams/format-outbox.ts";
 import { OUTBOX_STATUSES } from "./teams/types.ts";
+import { buildUsage } from "./usage.ts";
 
 const USAGE =
-  "usage: suica <once|status|state|stats|pause|resume|pending [--all]|send <id> [--json]|skip <id> [--json]|retry <id> [--json]|selftest|config show --json|config set --json|agent restart --json>\n";
+  "usage: suica <once|status|state|stats|usage|pause|resume|pending [--all]|send <id> [--json]|skip <id> [--json]|retry <id> [--json]|selftest|reviews --json|mr <key> --json|review queue <key> --json|review post <id> --json|review discard <id> --json|config show --json|config set --json|agent install|agent uninstall|agent restart --json>\n";
 const TEAMS_DISABLED = "teams is disabled: set teams.enabled to true in the config\n";
 const SHOWN_WITH_ALL = 50;
 
@@ -23,6 +30,7 @@ const SIMPLE = new Set([
   "status",
   "state",
   "stats",
+  "usage",
   "pause",
   "resume",
   "selftest",
@@ -67,6 +75,10 @@ async function run(runtime: Runtime, command: string, argv: readonly string[]): 
         baselineDone: state.baselineDone,
         trackedAuthored: state.trackedAuthored.size,
         reviewRequested: state.myReviewStates.size,
+        agentReview: buildReviewActivity(
+          runtime.store.agentReviewActivity(),
+          runtime.config.review.model,
+        ),
         rows: teams?.list(true),
       });
       process.stdout.write(`${JSON.stringify(document)}\n`);
@@ -129,7 +141,8 @@ async function statusJson(): Promise<number> {
   const service = await readServiceStatus(defaultExec, process.getuid?.() ?? 0);
   const loaded = loadStatusInput(configPath, { loadConfig, openStore });
   const logsPath = join(homedir(), "Library", "Logs", "suica");
-  const document = buildStatus({ service, configPath, logsPath, loaded });
+  const modelClis = detectModelClis();
+  const document = buildStatus({ service, configPath, logsPath, modelClis, loaded });
   process.stdout.write(`${JSON.stringify(document)}\n`);
   return 0;
 }
@@ -158,6 +171,114 @@ function statsJson(): number {
   } finally {
     store.close();
   }
+}
+
+const USAGE_HISTORY_MS = 30 * 86_400_000;
+
+/** `suica usage`: language model tokens. Like `suica stats`, it never creates the runtime. */
+function usageJson(): number {
+  const config = loadConfig(defaultConfigPath());
+  const store = openStore(config.statePath ?? defaultStatePath());
+  try {
+    const now = Date.now();
+    const document = buildUsage({
+      rows: store.loadTokenUsage(now - USAGE_HISTORY_MS),
+      now,
+      days: 14,
+      dayKey: localDayKey,
+    });
+    process.stdout.write(`${JSON.stringify(document)}\n`);
+    return 0;
+  } finally {
+    store.close();
+  }
+}
+
+/** `suica reviews --json` and `suica mr <key> --json`: no runtime. */
+async function reviewsJson(): Promise<number> {
+  const config = loadConfig(defaultConfigPath());
+  const snapshot = await fetchSnapshot(glabRunner(config.gitlab));
+  const store = openStore(config.statePath ?? defaultStatePath());
+  try {
+    const document = buildReviewList(snapshot, store.latestAgentReviews());
+    process.stdout.write(`${JSON.stringify(document)}\n`);
+    return 0;
+  } finally {
+    store.close();
+  }
+}
+
+/**
+ * `suica review queue|post|discard`: the background agent runs queued reviews after its next poll;
+ * post and discard act on a review that waits for the Owner. Each prints `{"status": …}`.
+ */
+async function reviewCommand(argv: readonly string[]): Promise<number> {
+  const [action, target] = [argv[1], argv[2]];
+  const config = loadConfig(defaultConfigPath());
+  const store = openStore(config.statePath ?? defaultStatePath());
+  const reply = (status: string, ok: boolean): number => {
+    process.stdout.write(`${actionJson(status)}\n`);
+    return ok ? 0 : 1;
+  };
+  try {
+    if (action === "queue") {
+      if (target === undefined || parseMrKey(target) === undefined) return reply("bad-key", false);
+      const id = store.queueAgentReview(target, "manual", Date.now());
+      return id === undefined ? reply("already-queued", true) : reply("queued", true);
+    }
+    const id = parseId(target);
+    if (id === undefined || (action !== "post" && action !== "discard")) {
+      process.stderr.write(USAGE);
+      return 2;
+    }
+    if (action === "discard") {
+      const done = discardAgentReview(store, id, Date.now());
+      return reply(done ? "discarded" : "nothing", done);
+    }
+    const outcome = await postAgentReview(
+      { store, config, now: Date.now, log: createLogger(), post: glabPost(config.gitlab) },
+      id,
+    );
+    return reply(outcome, outcome === "posted");
+  } finally {
+    store.close();
+  }
+}
+
+async function mrJson(key: string): Promise<number> {
+  const { gitlab } = loadConfig(defaultConfigPath());
+  const document = await fetchMrDetail(glabRunner(gitlab), glabRest(gitlab), key);
+  process.stdout.write(`${JSON.stringify(document)}\n`);
+  return 0;
+}
+
+async function installAgentCommand(): Promise<number> {
+  const paths = {
+    node: process.execPath,
+    main: join(import.meta.dirname, "main.ts"),
+    home: homedir(),
+  };
+  const configPath = defaultConfigPath();
+  const outcome = await installAgent(defaultExec, process.getuid?.() ?? 0, paths, configPath);
+  switch (outcome) {
+    case "installed":
+      process.stdout.write(`installed ${plistPath(paths.home)} (node: ${paths.node})\n`);
+      return 0;
+    case "no-config":
+      process.stderr.write(`config not found: ${configPath} (see README, Setup)\n`);
+      return 1;
+    case "failed":
+      process.stderr.write(`launchctl could not load ${plistPath(paths.home)}\n`);
+      return 1;
+  }
+}
+
+async function uninstallAgentCommand(): Promise<number> {
+  const removed = await uninstallAgent(defaultExec, process.getuid?.() ?? 0, homedir());
+  process.stdout.write(
+    removed ? "removed the background agent\n" : "the background agent was not installed\n",
+  );
+  return 0;
 }
 
 async function restartAgent(): Promise<number> {
@@ -209,8 +330,20 @@ async function main(argv: readonly string[]): Promise<number> {
     process.stderr.write(USAGE);
     return 2;
   }
+  if (command === "reviews" && argv.includes("--json")) return reviewsJson();
+  if (command === "review" && argv.includes("--json")) return reviewCommand(argv);
+  if (command === "mr" && argv.includes("--json")) {
+    const key = argv[1];
+    if (key === undefined || parseMrKey(key) === undefined) {
+      process.stderr.write(USAGE);
+      return 2;
+    }
+    return mrJson(key);
+  }
   if (command === "agent") {
     if (argv[1] === "restart" && argv.includes("--json")) return restartAgent();
+    if (argv[1] === "install") return installAgentCommand();
+    if (argv[1] === "uninstall") return uninstallAgentCommand();
     process.stderr.write(USAGE);
     return 2;
   }
@@ -220,6 +353,7 @@ async function main(argv: readonly string[]): Promise<number> {
   }
   if (command === "status" && argv.includes("--json")) return statusJson();
   if (command === "stats") return statsJson();
+  if (command === "usage") return usageJson();
   const runtime = createRuntime(defaultConfigPath());
   try {
     return await run(runtime, command, argv);

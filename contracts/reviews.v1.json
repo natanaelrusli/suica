@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "me": {
+    "username": "me",
+    "name": "Nata"
+  },
+  "mergeRequests": [
+    {
+      "key": "g/p!7",
+      "title": "MR 7",
+      "url": "https://gitlab.example/g/p/-/merge_requests/7",
+      "draft": true,
+      "author": {
+        "username": "alice",
+        "name": "Alice"
+      },
+      "reviewers": [
+        {
+          "username": "me",
+          "name": "me",
+          "state": "UNREVIEWED"
+        }
+      ],
+      "agentReview": {
+        "id": 3,
+        "status": "ready",
+        "cli": "claude",
+        "model": "claude-opus-5-5",
+        "startedAt": 1792148500000,
+        "headSha": "0123456789abcdef0123456789abcdef01234567",
+        "body": "# Code review: g/p!7\n\n## Findings\n1. `src/a.ts:4`: Blocker.",
+        "detail": "",
+        "createdAt": 1792148400000,
+        "updatedAt": 1792152000000
+      }
+    }
+  ]
+}

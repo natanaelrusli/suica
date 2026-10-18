@@ -16,6 +16,7 @@ const row = (overrides: Partial<OutboxRow> = {}): OutboxRow => ({
   recipientName: "Bob",
   status: "pending",
   detail: "",
+  approved: false,
   text: "Halo Bob,\nboleh minta tolong review?",
   createdAt: 1,
   updatedAt: 1,

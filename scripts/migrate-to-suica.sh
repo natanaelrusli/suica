@@ -122,7 +122,7 @@ elif [ "$moved" -eq 0 ]; then
   echo "nothing to move; removed$removed"
 fi
 if [ "$warned" -gt 0 ]; then
-  echo "fix the keys above first, then run scripts/install-launchagent.sh and scripts/install-macos-app.sh"
+  echo "fix the keys above first, then run scripts/install-cli.sh, suica agent install and scripts/install-macos-app.sh"
 elif [ "$moved" -ne 0 ]; then
-  echo "migrated; now run scripts/install-launchagent.sh and scripts/install-macos-app.sh"
+  echo "migrated; now run scripts/install-cli.sh, suica agent install and scripts/install-macos-app.sh"
 fi

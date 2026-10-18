@@ -37,6 +37,7 @@ function outbox(
     recipientName: "Bob",
     status,
     detail: "",
+    approved: false,
     text: null,
     createdAt: updatedAt,
     updatedAt,

@@ -7,6 +7,7 @@ struct ConfigurationView: View {
     let editor: ConfigEditorModel
     /// Bumped by Discard so fields that hold text the model never saw start over too.
     @State private var generation = 0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         Group {
@@ -22,6 +23,7 @@ struct ConfigurationView: View {
                 ProgressView(Copy.loading)
             }
         }
+        .motion(value: editor.document == nil)
         .toolbar { toolbar }
         .task { await editor.load() }
         // The boxes that reported invalid text are destroyed with this view.
@@ -33,27 +35,86 @@ struct ConfigurationView: View {
             if let text = editor.banner { NoticeBox(text: DisplayText.clean(text, max: 600), tint: .red) }
             if editor.restartSuggested {
                 HStack {
-                    Text(Copy.restartToApply).foregroundStyle(.orange)
+                    Label(Copy.restartToApply, systemImage: "arrow.clockwise.circle.fill")
+                        .foregroundStyle(.orange)
                     Spacer()
-                    Button(Copy.restartAgent, action: restart).disabled(window.restarting)
+                    if window.restarting { ProgressView().controlSize(.small) }
+                    Button(Copy.restartAgent, action: restart)
+                        .buttonStyle(.borderedProminent)
+                        .tint(.orange)
+                        .disabled(window.restarting)
                 }
             }
             if let text = window.banner { NoticeBox(text: text, tint: .secondary) }
-            if !document.exists { Text(Copy.configMissing).foregroundStyle(.secondary) }
+            if !document.exists {
+                Label(Copy.configMissing, systemImage: "doc.badge.plus").foregroundStyle(.secondary)
+            }
             if !document.issues.isEmpty { issues(document.issues) }
             ForEach(groups(document.fields), id: \.key) { group in
-                Section(group.title) {
+                Section {
                     ForEach(group.fields, id: \.path) { FieldEditor(field: $0, editor: editor) }
+                } header: {
+                    Label(group.title, systemImage: Self.symbol(for: group.key)).font(.headline)
                 }
             }
         }
         .formStyle(.grouped)
+        .safeAreaInset(edge: .bottom) {
+            if hasUnsavedInput {
+                unsavedBar.transition(Motion.slide(from: .bottom, reduceMotion: reduceMotion))
+            }
+        }
+        .motion(value: hasUnsavedInput)
+        .motion(value: editor.restartSuggested)
+        .motion(value: editor.banner)
+        .motion(value: editor.saving)
+        .motion(value: window.restarting)
         .id("\(generation)|\(document.sha256 ?? "")")
+    }
+
+    private var hasUnsavedInput: Bool { editor.isDirty || !editor.invalidInputKeys.isEmpty }
+
+    private var unsavedBar: some View {
+        HStack(spacing: 10) {
+            Image(systemName: editor.invalidInputKeys.isEmpty ? "pencil.circle.fill" : "exclamationmark.circle.fill")
+                .foregroundStyle(editor.invalidInputKeys.isEmpty ? Color.accentColor : Color.red)
+                .accessibilityHidden(true)
+            Text(editor.invalidInputKeys.isEmpty ? Copy.unsavedChanges : Copy.fixInvalidInput)
+            Spacer()
+            if editor.saving { ProgressView().controlSize(.small) }
+            Button(Copy.discard, action: discard)
+            Button(Copy.save) { Task { await editor.save() } }
+                .buttonStyle(.borderedProminent)
+                .disabled(!editor.canSave)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(.bar)
+        .overlay(alignment: .top) { Divider() }
+    }
+
+    private func discard() {
+        editor.discard()
+        generation += 1
+    }
+
+    private static func symbol(for group: String) -> String {
+        switch group {
+        case "gitlab": "server.rack"
+        case "polling": "arrow.triangle.2.circlepath"
+        case "notifications": "bell"
+        case "teams": "bubble.left.and.bubble.right"
+        case "model": "sparkles"
+        case "review": "checkmark.bubble"
+        default: "internaldrive"
+        }
     }
 
     private func issues(_ issues: [ConfigIssue]) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(Copy.configIssuesHeading).fontWeight(.semibold)
+            Label(Copy.configIssuesHeading, systemImage: "exclamationmark.triangle.fill")
+                .fontWeight(.semibold)
+                .foregroundStyle(.red)
             ForEach(Array(issues.enumerated()), id: \.offset) { _, issue in
                 Text("\(DisplayText.clean(issue.path, max: 80)): \(DisplayText.clean(issue.message))")
                     .font(.callout)
@@ -103,10 +164,7 @@ struct ConfigurationView: View {
                 Label(Copy.reload, systemImage: "arrow.clockwise")
             }
             .help(Copy.reload)
-            Button {
-                editor.discard()
-                generation += 1
-            } label: {
+            Button(action: discard) {
                 Label(Copy.discard, systemImage: "arrow.uturn.backward")
             }
             .help(Copy.discard)

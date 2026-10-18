@@ -33,6 +33,15 @@ describe("parseConfig", () => {
         maxMessagesPerReviewer: 2,
         people: {},
       },
+      model: { cli: "auto" },
+      review: {
+        auto: true,
+        post: "approval",
+        skill: "madhani:madhani-code-review",
+        maxChangedLines: 800,
+        maxPerDay: 10,
+        timeoutMinutes: 20,
+      },
     });
   });
 
@@ -151,5 +160,20 @@ describe("a leading ~ in the path settings", () => {
   it("is kept as typed by validateConfig, which the editor uses", () => {
     const result = validateConfig({ gitlab: { hostname: "h" }, statePath: "~/x/state.db" });
     expect(result.ok && result.config.statePath).toBe("~/x/state.db");
+  });
+});
+
+describe("review.model", () => {
+  it("takes model names and refuses anything that could be read as a flag", () => {
+    for (const model of ["sonnet", "opus", "haiku", "claude-opus-5-5", "opus[1m]", "gpt-5.5"]) {
+      expect(
+        parseConfig(`gitlab:\n  hostname: h\nreview:\n  model: "${model}"\n`).review.model,
+      ).toBe(model);
+    }
+    for (const model of ["-x", "--dangerously-skip-permissions", "", "a b", "a;b"]) {
+      expect(() => parseConfig(`gitlab:\n  hostname: h\nreview:\n  model: "${model}"\n`)).toThrow(
+        /review.model/,
+      );
+    }
   });
 });

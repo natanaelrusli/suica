@@ -193,13 +193,12 @@ public struct ProcessRunner: CommandRunning {
 // MARK: - Agent client
 
 public struct AgentConfig: Equatable, Sendable {
-    public let nodePath: String
-    public let repoPath: String
+    /// Absolute path of the installed `suica` command (scripts/install-cli.sh).
+    public let cliPath: String
     public let searchPath: String
 
-    public init(nodePath: String, repoPath: String, searchPath: String) {
-        self.nodePath = nodePath
-        self.repoPath = repoPath
+    public init(cliPath: String, searchPath: String) {
+        self.cliPath = cliPath
         self.searchPath = searchPath
     }
 
@@ -209,10 +208,8 @@ public struct AgentConfig: Equatable, Sendable {
             guard let text = infoDictionary?[key] as? String, !text.isEmpty else { return nil }
             return text
         }
-        guard let node = value("SuicaNodePath"), let repo = value("SuicaRepoPath"),
-            let search = value("SuicaSearchPath")
-        else { return nil }
-        self.init(nodePath: node, repoPath: repo, searchPath: search)
+        guard let cli = value("SuicaCLIPath"), let search = value("SuicaSearchPath") else { return nil }
+        self.init(cliPath: cli, searchPath: search)
     }
 
     public static func fromBundle(_ bundle: Bundle) -> AgentConfig? {
@@ -250,6 +247,8 @@ private func lastLine(of data: Data) -> Data? {
 public struct CLIAgentClient: AgentClient {
     private static let shortTimeout: TimeInterval = 20
     private static let restartTimeout: TimeInterval = 30
+    // GitLab reads wait for glab, which the CLI stops after gitlab.timeoutSeconds (60 s by default).
+    private static let gitlabTimeout: TimeInterval = 90
     // The CLI's own worst case with the default config: Teams start (30 s) plus three calls
     // (lookup, open chat, send; 60 s each) is 210 s. Killing it later than that keeps a row from
     // being stranded in `sending`; a larger teams.callTimeoutSeconds needs a larger value here.
@@ -268,10 +267,10 @@ public struct CLIAgentClient: AgentClient {
     ) -> Invocation {
         let home = ProcessInfo.processInfo.environment["HOME"] ?? NSHomeDirectory()
         return Invocation(
-            executable: config.nodePath,
-            arguments: ["\(config.repoPath)/src/cli.ts"] + arguments,
+            executable: config.cliPath,
+            arguments: arguments,
             environment: ["PATH": config.searchPath, "HOME": home, "SUICA_ENV": "production"],
-            workingDirectory: config.repoPath,
+            workingDirectory: home,
             timeout: timeout, stdin: stdin)
     }
 
@@ -318,8 +317,10 @@ public struct CLIAgentClient: AgentClient {
 // MARK: - Dashboard client
 
 extension CLIAgentClient: DashboardClient {
-    private func document<T: Decodable>(_ type: T.Type, _ arguments: [String]) async throws(AgentError) -> T {
-        let result = try await runner.run(invocation(arguments, timeout: Self.shortTimeout))
+    private func document<T: Decodable>(
+        _ type: T.Type, _ arguments: [String], timeout: TimeInterval = Self.shortTimeout
+    ) async throws(AgentError) -> T {
+        let result = try await runner.run(invocation(arguments, timeout: timeout))
         guard result.exitCode == 0 else { throw AgentError.failed(exitCode: result.exitCode) }
         guard let line = lastLine(of: result.stdout) else { throw AgentError.badOutput }
         return try decodeDocument(type, from: line)
@@ -331,6 +332,10 @@ extension CLIAgentClient: DashboardClient {
 
     public func stats() async throws(AgentError) -> StatsDocument {
         try await document(StatsDocument.self, ["stats"])
+    }
+
+    public func usage() async throws(AgentError) -> UsageDocument {
+        try await document(UsageDocument.self, ["usage"])
     }
 
     public func config() async throws(AgentError) -> ConfigDocument {
@@ -361,5 +366,29 @@ extension CLIAgentClient: DashboardClient {
 
     public func restartAgent() async throws(AgentError) -> ActionResult {
         try await action(["agent", "restart", "--json"], timeout: Self.restartTimeout)
+    }
+}
+
+// MARK: - Reviews client
+
+extension CLIAgentClient: ReviewsClient {
+    public func reviews() async throws(AgentError) -> ReviewListDocument {
+        try await document(ReviewListDocument.self, ["reviews", "--json"], timeout: Self.gitlabTimeout)
+    }
+
+    public func mergeRequest(key: String) async throws(AgentError) -> MergeRequestDetail {
+        try await document(MergeRequestDetail.self, ["mr", key, "--json"], timeout: Self.gitlabTimeout)
+    }
+
+    public func queueAgentReview(key: String) async throws(AgentError) -> ActionResult {
+        try await action(["review", "queue", key, "--json"], timeout: Self.shortTimeout)
+    }
+
+    public func postAgentReview(id: Int) async throws(AgentError) -> ActionResult {
+        try await action(["review", "post", String(id), "--json"], timeout: Self.gitlabTimeout)
+    }
+
+    public func discardAgentReview(id: Int) async throws(AgentError) -> ActionResult {
+        try await action(["review", "discard", String(id), "--json"], timeout: Self.shortTimeout)
     }
 }

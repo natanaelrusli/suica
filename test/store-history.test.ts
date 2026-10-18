@@ -27,7 +27,7 @@ function poll(at: number, overrides: Partial<PollLogEntry> = {}): PollLogEntry {
 }
 
 describe("schema v3", () => {
-  it("upgrades a v2 database to v3 and keeps its rows", () => {
+  it("upgrades a v2 database to the current schema and keeps its rows", () => {
     const path = tempDb();
     const first = openStore(path);
     first.applyTeamsPlan(teamsPlan({ intents: [intent(1)] }), NOW);
@@ -42,7 +42,7 @@ describe("schema v3", () => {
     store.close();
 
     const raw = new DatabaseSync(path);
-    expect(raw.prepare("PRAGMA user_version").get()?.["user_version"]).toBe(3);
+    expect(raw.prepare("PRAGMA user_version").get()?.["user_version"]).toBe(7);
     raw.close();
   });
 });

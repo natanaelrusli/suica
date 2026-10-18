@@ -90,7 +90,17 @@ describe("dispatchQueued", () => {
         text: "Halo Bob, boleh minta tolong review MR ini? Add thing\nhttps://gitlab.example/g/p/-/merge_requests/5\nTerima kasih!",
       },
     ]);
-    expect(h.store.getOutbox(id ?? 0)).toMatchObject({ status: "sent" });
+    expect(h.store.getOutbox(id ?? 0)).toMatchObject({ status: "sent", approved: false });
+  });
+
+  it("records the Owner's approval on a pending row that is sent", async () => {
+    const h = setup({ mode: "approval" });
+    const [id] = enqueue(h.store, 1);
+    h.store.commit(own());
+    await dispatchQueued(h.deps, own());
+    expect(h.store.getOutbox(id ?? 0)).toMatchObject({ status: "pending", approved: false });
+    expect(await sendPending(h.deps, id ?? 0)).toEqual({ status: "sent" });
+    expect(h.store.getOutbox(id ?? 0)).toMatchObject({ status: "sent", approved: true });
   });
 
   it("opens one session for several messages", async () => {

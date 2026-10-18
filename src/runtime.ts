@@ -2,8 +2,11 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { defaultStatePath, loadConfig } from "./config.ts";
 import type { Config } from "./config.ts";
+import { createReviewWorker, queueAutomaticReviews } from "./agent-review.ts";
+import type { ReviewWorker } from "./agent-review.ts";
+import { defaultExec } from "./exec.ts";
 import { createFailureTracker } from "./failures.ts";
-import { fetchSnapshot, glabRunner } from "./gitlab.ts";
+import { fetchSnapshot, glabPost, glabRest, glabRunner } from "./gitlab.ts";
 import { createLogger } from "./log.ts";
 import type { Logger } from "./log.ts";
 import { createNotifier } from "./notifier.ts";
@@ -22,6 +25,8 @@ export interface Runtime {
   readonly log: Logger;
   /** Undefined when `teams.enabled` is false. */
   readonly teams: TeamsService | undefined;
+  /** Runs queued Agent Reviews; only the daemon ticks it. */
+  readonly reviews: ReviewWorker;
   poll(): Promise<PollStatus>;
 }
 
@@ -31,7 +36,8 @@ function defaultTeamsCommand(): string {
   return join(homedir(), ".config", "teams-mcp", "run.sh");
 }
 
-export function createRuntime(configPath: string): Runtime {
+/** `signal` stops a running Agent Review when the daemon shuts down. */
+export function createRuntime(configPath: string, signal?: AbortSignal): Runtime {
   const log = createLogger();
   const config = loadConfig(configPath);
   const store = openStore(config.statePath ?? defaultStatePath());
@@ -57,15 +63,32 @@ export function createRuntime(configPath: string): Runtime {
   // later seeds from the then-current state and never announces what happened in between.
   if (teams === undefined) store.resetTeamsBaseline();
 
+  const notifier = createNotifier();
+  const reviews = createReviewWorker({
+    store,
+    config,
+    exec: defaultExec,
+    graphql: run,
+    rest: glabRest(config.gitlab),
+    post: glabPost(config.gitlab),
+    notifier,
+    log,
+    now: Date.now,
+    ...(signal === undefined ? {} : { signal }),
+  });
+
   const deps: PollDeps = {
     fetchSnapshot: () => fetchSnapshot(run),
     store,
-    notifier: createNotifier(),
+    notifier,
+    queueReviews: (snapshot, newRequests) => {
+      queueAutomaticReviews({ store, config, log, now: Date.now }, snapshot, newRequests);
+    },
     failures: createFailureTracker(),
     log,
     config,
     now: Date.now,
     ...(teams === undefined ? {} : { teams }),
   };
-  return { config, store, log, teams, poll: () => pollOnce(deps) };
+  return { config, store, log, teams, reviews, poll: () => pollOnce(deps) };
 }

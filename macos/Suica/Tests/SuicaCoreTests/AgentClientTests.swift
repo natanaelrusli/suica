@@ -21,8 +21,7 @@ private func output(_ text: String, exit: Int32 = 0) -> Result<CommandResult, Ag
 }
 
 private let config = AgentConfig(
-    nodePath: "/opt/homebrew/bin/node", repoPath: "/Users/me/suica",
-    searchPath: "/opt/homebrew/bin:/usr/bin")
+    cliPath: "/Users/me/.local/bin/suica", searchPath: "/opt/homebrew/bin:/usr/bin")
 
 private let stateJSON =
     #"{"version":1,"paused":false,"baselineDone":true,"trackedAuthored":1,"reviewRequested":2,"teams":null}"#
@@ -32,22 +31,22 @@ private let stateJSON =
     let state = try await CLIAgentClient(config: config, runner: runner).state()
     #expect(state.reviewRequested == 2)
     let call = try #require(await runner.invocations.first)
-    #expect(call.executable == "/opt/homebrew/bin/node")
-    #expect(call.arguments == ["/Users/me/suica/src/cli.ts", "state"])
-    #expect(call.workingDirectory == "/Users/me/suica")
+    #expect(call.executable == "/Users/me/.local/bin/suica")
+    #expect(call.arguments == ["state"])
+    #expect(call.workingDirectory == call.environment["HOME"])
     #expect(call.environment["PATH"] == "/opt/homebrew/bin:/usr/bin")
     #expect(call.environment["SUICA_ENV"] == "production")
     #expect(call.environment["HOME"]?.isEmpty == false)
     #expect(call.timeout == 20)
 }
 
-@Test func pathsWithSpacesAreOneArgument() async throws {
-    let spaced = AgentConfig(nodePath: "/n", repoPath: "/Users/a b/My Repo", searchPath: "/usr/bin")
+@Test func aCliPathWithSpacesIsTheExecutableAsIs() async throws {
+    let spaced = AgentConfig(cliPath: "/Users/a b/.local/bin/suica", searchPath: "/usr/bin")
     let runner = FakeRunner([output(stateJSON)])
     _ = try await CLIAgentClient(config: spaced, runner: runner).state()
     let call = try #require(await runner.invocations.first)
-    #expect(call.arguments[0] == "/Users/a b/My Repo/src/cli.ts")
-    #expect(call.workingDirectory == "/Users/a b/My Repo")
+    #expect(call.executable == "/Users/a b/.local/bin/suica")
+    #expect(call.arguments == ["state"])
 }
 
 @Test func stateIgnoresLogLinesBeforeTheDocument() async throws {
@@ -73,7 +72,7 @@ private let stateJSON =
     let result = try await CLIAgentClient(config: config, runner: runner).send(id: 7)
     #expect(result == ActionResult(code: "sent"))
     let call = try #require(await runner.invocations.first)
-    #expect(Array(call.arguments.dropFirst()) == ["send", "7", "--json"])
+    #expect(call.arguments == ["send", "7", "--json"])
     #expect(call.timeout == 300)
 }
 
@@ -94,7 +93,7 @@ private let stateJSON =
     let client = CLIAgentClient(config: config, runner: runner)
     #expect(try await client.skip(id: 3).code == "skipped")
     #expect(try await client.retry(id: 4).code == "nothing")
-    let calls = await runner.invocations.map { Array($0.arguments.dropFirst()) }
+    let calls = await runner.invocations.map { $0.arguments }
     #expect(calls == [["skip", "3", "--json"], ["retry", "4", "--json"]])
     #expect(await runner.invocations.allSatisfy { $0.timeout == 20 })
 }
@@ -132,14 +131,14 @@ func exitZeroWithGarbageIsBadOutput(text: String) async {
     let client = CLIAgentClient(config: config, runner: runner)
     try await client.setPaused(true)
     try await client.setPaused(false)
-    let calls = await runner.invocations.map { Array($0.arguments.dropFirst()) }
+    let calls = await runner.invocations.map { $0.arguments }
     #expect(calls == [["pause"], ["resume"]])
     await #expect(throws: AgentError.failed(exitCode: 1)) { try await client.setPaused(true) }
 }
 
-@Test func configFromTheBundleNeedsAllThreeKeys() {
-    let full: [String: Any] = ["SuicaNodePath": "/n", "SuicaRepoPath": "/r", "SuicaSearchPath": "/p"]
-    #expect(AgentConfig(infoDictionary: full) == AgentConfig(nodePath: "/n", repoPath: "/r", searchPath: "/p"))
+@Test func configFromTheBundleNeedsBothKeys() {
+    let full: [String: Any] = ["SuicaCLIPath": "/c", "SuicaSearchPath": "/p"]
+    #expect(AgentConfig(infoDictionary: full) == AgentConfig(cliPath: "/c", searchPath: "/p"))
     for key in full.keys {
         var missing = full
         missing[key] = nil

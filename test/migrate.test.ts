@@ -119,7 +119,7 @@ describe("migrate-to-suica.sh", () => {
     expect(calls).toContain("bootout gui/");
     expect(calls).toContain(LABEL);
     expect(calls).toContain(`${LABEL}.menubar`);
-    expect(output).toContain("now run scripts/install-launchagent.sh");
+    expect(output).toContain("now run scripts/install-cli.sh, suica agent install");
   });
 
   it("says already migrated and changes nothing on a second run", () => {
@@ -317,7 +317,7 @@ describe("migrate-to-suica.sh", () => {
     expect(readFileSync(box.path(NEW_CONFIG), "utf8")).toBe(yaml);
     const lines = output.trimEnd().split("\n");
     expect(lines[lines.length - 1]).toContain("fix the keys above first");
-    expect(lines[lines.length - 1]).toContain("scripts/install-launchagent.sh");
+    expect(lines[lines.length - 1]).toContain("scripts/install-cli.sh, suica agent install");
     expect(lines[lines.length - 1]).toContain("scripts/install-macos-app.sh");
   });
 

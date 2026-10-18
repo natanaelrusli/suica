@@ -23,6 +23,21 @@ private func data(_ text: String) -> Data { Data(text.utf8) }
     #expect(status.polling == PollingIntervals(activeSeconds: 120, idleSeconds: 300))
     #expect(status.paths.config == "/Users/o/.config/suica/config.yaml")
     #expect(status.paths.templates == "/Users/o/.config/suica/templates")
+    #expect(status.modelCli?.selected == "auto" && status.modelCli?.active == "claude")
+    #expect(status.modelCli?.clis.map(\.id) == ["claude", "codex", "gemini"])
+    #expect(status.modelCli?.clis.last == DetectedModelCli(id: "gemini", name: "Gemini CLI", path: nil))
+    #expect(status.agentReview?.auto == true && status.agentReview?.model == nil)
+    #expect(status.agentReview?.post == "approval")
+    #expect(status.agentReview?.running == nil && status.agentReview?.queued.isEmpty == true)
+}
+
+@Test func aStatusFromAnOlderAgentHasNoModelCli() throws {
+    let json = """
+        {"version":1,"agent":{"label":"x","loaded":true,"running":true,"pid":7},"configError":null,
+        "paused":false,"teamsEnabled":false,"lastPoll":null,"polling":{"activeSeconds":1,"idleSeconds":2},
+        "paths":{"config":"c","state":"s","logs":"l","templates":"t"}}
+        """
+    #expect(try decodeDocument(StatusDocument.self, from: data(json)).modelCli == nil)
 }
 
 @Test func aBrokenConfigLeavesTheConfigDependentStatusFieldsNil() throws {
@@ -77,11 +92,25 @@ private func data(_ text: String) -> Data { Data(text.utf8) }
     #expect(stats.ownerAfterRequest.medianMinutes == nil && stats.ownerAfterRequest.p90Minutes == nil)
 }
 
+@Test func usageMatchesTheGoldenFile() throws {
+    let usage = try decodeDocument(UsageDocument.self, from: contract("usage.v1.json"))
+    #expect(usage.generatedAt == 1_792_152_000_000)
+    #expect(
+        usage.last24h
+            == TokenTotals(runs: 2, inputTokens: 2400, outputTokens: 350, cacheReadTokens: 1000, cacheCreationTokens: 0))
+    #expect(usage.last7d.runs == 3 && usage.last30d.runs == 4)
+    #expect(usage.last30d.allTokens == 3500 + 560 + 6000 + 300)
+    #expect(usage.byPurpose.map(\.purpose) == ["review", "reply"])
+    #expect(usage.byPurpose.first?.totals.allTokens == 9910)
+    #expect(usage.days.map(\.day) == ["2026-10-15", "2026-10-16"])
+    #expect(usage.days.first?.cacheCreationTokens == 300 && usage.days.last?.runs == 2)
+}
+
 @Test func configMatchesTheGoldenFile() throws {
     let config = try decodeDocument(ConfigDocument.self, from: contract("config.v1.json"))
     #expect(config.path == "/tmp/config.yaml" && config.exists && config.sha256 == "0")
     #expect(config.issues.isEmpty)
-    #expect(config.fields.count == 24)
+    #expect(config.fields.count == 32)
     let first = try #require(config.fields.first)
     #expect(first.path == ["gitlab", "hostname"] && first.type == .string)
     #expect(first.value == .string("repo.example") && first.effective == .string("repo.example"))

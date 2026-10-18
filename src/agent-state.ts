@@ -1,3 +1,4 @@
+import type { ReviewActivityJson } from "./reviews.ts";
 import { ATTENTION_STATUSES, OUTBOX_STATUSES } from "./teams/types.ts";
 import type { OutboxRow, OutboxStatus } from "./teams/types.ts";
 
@@ -12,6 +13,10 @@ export interface AgentItemJson {
   readonly mrTitle: string;
   readonly mrUrl: string;
   readonly text: string | null;
+  /** True when the Owner approved sending it, false when it went without approval, null when unknown. */
+  readonly approved: boolean | null;
+  /** True for a Review Notice saying you approved the MR in GitLab. */
+  readonly mrApproved: boolean;
   /** Epoch milliseconds. */
   readonly createdAt: number;
   readonly updatedAt: number;
@@ -23,6 +28,8 @@ export interface AgentStateJson {
   readonly baselineDone: boolean;
   readonly trackedAuthored: number;
   readonly reviewRequested: number;
+  /** What the agent is reviewing now; null from a caller that did not read it. */
+  readonly agentReview: ReviewActivityJson | null;
   /** Null when Teams is disabled. */
   readonly teams: {
     readonly counts: Readonly<Record<OutboxStatus, number>>;
@@ -37,6 +44,7 @@ export interface AgentStateInput {
   readonly baselineDone: boolean;
   readonly trackedAuthored: number;
   readonly reviewRequested: number;
+  readonly agentReview?: ReviewActivityJson;
   /** Undefined when Teams is disabled. */
   readonly rows: readonly OutboxRow[] | undefined;
 }
@@ -55,6 +63,8 @@ function toItem(row: OutboxRow): AgentItemJson {
     mrTitle: row.mrTitle,
     mrUrl: row.mrUrl,
     text: row.text,
+    approved: row.approved,
+    mrApproved: row.variant === "notice.approved",
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -92,6 +102,7 @@ export function buildAgentState(input: AgentStateInput): AgentStateJson {
     baselineDone: input.baselineDone,
     trackedAuthored: input.trackedAuthored,
     reviewRequested: input.reviewRequested,
+    agentReview: input.agentReview ?? null,
     teams,
   };
 }
