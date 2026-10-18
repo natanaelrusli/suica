@@ -2,7 +2,8 @@ import { z } from "zod";
 import { UNREVIEWED } from "./domain.ts";
 import type { Person, Reviewer, Snapshot } from "./domain.ts";
 import { FetchFailure } from "./gitlab.ts";
-import type { GraphqlRunner, RestRunner } from "./gitlab.ts";
+import type { GraphqlRunner, PostRunner, RestRunner } from "./gitlab.ts";
+import type { Logger } from "./log.ts";
 import type { AgentReviewRow, AgentReviewStatus } from "./store.ts";
 
 /** The newest Agent Review of an MR. */
@@ -171,6 +172,12 @@ export interface MrDetailJson {
   readonly deletions: number | null;
   readonly reviewers: readonly Reviewer[];
   readonly approvedBy: readonly Person[];
+  /** True when merging squashes the commits, with the project's squash setting applied. */
+  readonly squashOnMerge: boolean;
+  /** The commit the diff was taken at; an approval is tied to it. Null when GitLab has none. */
+  readonly headSha: string | null;
+  /** True when GitLab lets the Owner approve this MR now. */
+  readonly canApprove: boolean;
   readonly discussions: readonly DiscussionJson[];
   /** True when the MR has more discussions than were fetched. */
   readonly discussionsTruncated: boolean;
@@ -213,6 +220,9 @@ query SuicaMergeRequest($path: ID!, $iid: String!) {
       diffStatsSummary { additions deletions }
       reviewers { nodes { username name mergeRequestInteraction { reviewState } } }
       approvedBy { nodes { username name } }
+      squashOnMerge
+      diffHeadSha
+      userPermissions { canApprove }
       discussions(first: ${DISCUSSIONS_PAGE}) {
         pageInfo { hasNextPage }
         nodes {
@@ -285,6 +295,9 @@ const detailSchema = z.object({
                 ),
               }),
               approvedBy: z.object({ nodes: z.array(personSchema) }),
+              squashOnMerge: z.boolean(),
+              diffHeadSha: z.string().nullable(),
+              userPermissions: z.object({ canApprove: z.boolean() }),
               discussions: z.object({
                 pageInfo: z.object({ hasNextPage: z.boolean() }),
                 nodes: z.array(
@@ -379,6 +392,9 @@ export function parseMrDetail(
       state: reviewer.mergeRequestInteraction?.reviewState ?? UNREVIEWED,
     })),
     approvedBy: mr.approvedBy.nodes,
+    squashOnMerge: mr.squashOnMerge,
+    headSha: mr.diffHeadSha,
+    canApprove: mr.userPermissions.canApprove,
     discussions: mr.discussions.nodes.map((discussion) => ({
       id: discussion.id,
       resolvable: discussion.resolvable,
@@ -412,4 +428,34 @@ export async function fetchMrDetail(
     rest(`projects/${project}/merge_requests/${parts.iid}/diffs?per_page=${FILES_PAGE}`),
   ]);
   return parseMrDetail(key, raw, parseDiffs(diffs));
+}
+
+export type ApproveOutcome = "approved" | "head-changed" | "bad-request" | "failed";
+
+const SHA_PATTERN = /^[0-9a-f]{40}$/;
+const HTTP_CONFLICT = 409;
+
+/**
+ * Approves the MR as the Owner, only at `sha`: GitLab answers 409 when the source branch moved
+ * since the Owner loaded it, so a push the Owner has not seen is never approved.
+ */
+export async function approveMergeRequest(
+  deps: { readonly post: PostRunner; readonly log: Logger },
+  key: string,
+  sha: string,
+): Promise<ApproveOutcome> {
+  const parts = parseMrKey(key);
+  if (parts === undefined || !SHA_PATTERN.test(sha)) return "bad-request";
+  try {
+    await deps.post(
+      `projects/${encodeURIComponent(parts.projectPath)}/merge_requests/${parts.iid}/approve`,
+      { sha },
+    );
+  } catch (error) {
+    if (!(error instanceof FetchFailure)) throw error;
+    if (error.httpStatus === HTTP_CONFLICT) return "head-changed";
+    deps.log.warn("approve failed", { kind: error.kind, httpStatus: error.httpStatus ?? null });
+    return "failed";
+  }
+  return "approved";
 }

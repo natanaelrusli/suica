@@ -10,11 +10,14 @@ export type GitlabFailureKind =
 
 export class FetchFailure extends Error {
   readonly kind: GitlabFailureKind;
+  /** The HTTP status glab reported for a REST call, when it reported one. */
+  readonly httpStatus: number | undefined;
 
-  constructor(kind: GitlabFailureKind, message: string) {
+  constructor(kind: GitlabFailureKind, message: string, httpStatus?: number) {
     super(message);
     this.name = "FetchFailure";
     this.kind = kind;
+    this.httpStatus = httpStatus;
   }
 }
 
@@ -153,6 +156,13 @@ export function parseSnapshot(raw: unknown): Snapshot {
 const UNREACHABLE_PATTERN =
   /timed out|timeout|no such host|connection refused|dial tcp|network is unreachable|could not resolve/;
 const AUTH_PATTERN = /\b401\b|unauthorized|not logged in|authenticat/;
+/** glab ends an HTTP error with "(HTTP 404)". */
+const HTTP_STATUS_PATTERN = /\(HTTP (\d{3})\)/;
+
+export function httpStatusOf(failure: ExecFailure): number | undefined {
+  const match = HTTP_STATUS_PATTERN.exec(failure.stderr ?? "");
+  return match?.[1] === undefined ? undefined : Number(match[1]);
+}
 
 export function classifyFailure(failure: ExecFailure): GitlabFailureKind {
   if (failure.code === "ENOENT") return "glab-missing";
@@ -183,6 +193,7 @@ async function runGlab(
       failure.code === "ENOENT"
         ? "glab executable not found"
         : `glab failed with code ${String(failure.code ?? "unknown")}`,
+      httpStatusOf(failure),
     );
   }
   try {

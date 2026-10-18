@@ -202,6 +202,12 @@ public struct MergeRequestDetail: Codable, Equatable, Sendable {
     public let deletions: Int?
     public let reviewers: [ReviewerInfo]
     public let approvedBy: [Person]
+    /// True when merging squashes the commits; nil from an agent older than approving.
+    public let squashOnMerge: Bool?
+    /// The commit the diff was taken at; an approval is tied to it.
+    public let headSha: String?
+    /// True when GitLab lets you approve this MR now; nil from an agent older than approving.
+    public let canApprove: Bool?
     public let discussions: [MRDiscussion]
     public let discussionsTruncated: Bool
     public let files: [DiffFile]
@@ -282,6 +288,8 @@ public protocol ReviewsClient: Sendable {
     func postAgentReview(id: Int) async throws(AgentError) -> ActionResult
     /// discarded or nothing.
     func discardAgentReview(id: Int) async throws(AgentError) -> ActionResult
+    /// Approves the MR as you at `sha`: approved, head-changed, bad-request or failed.
+    func approve(key: String, sha: String) async throws(AgentError) -> ActionResult
 }
 
 // MARK: - Model
@@ -302,6 +310,10 @@ public final class ReviewsModel {
     public private(set) var agentBusyKeys: Set<String> = []
     /// The outcome of the last Agent Review action.
     public private(set) var agentBanner: String?
+    /// MRs with an approval in flight.
+    public private(set) var approvingKeys: Set<String> = []
+    /// The outcome of the last approval, per MR.
+    public private(set) var approvalNotices: [String: String] = [:]
 
     @ObservationIgnored private let client: any ReviewsClient
     @ObservationIgnored private var latestRefresh = 0
@@ -334,6 +346,33 @@ public final class ReviewsModel {
     public func discardAgentReview(_ key: String) async {
         guard let review = agentReview(for: key) else { return }
         await agentAction(key) { (client: any ReviewsClient) async throws(AgentError) -> ActionResult in try await client.discardAgentReview(id: review.id) }
+    }
+
+    /// True when you are among the MR's approvers.
+    public func isApprovedByMe(_ detail: MergeRequestDetail) -> Bool {
+        guard let me = list?.me else { return false }
+        return detail.approvedBy.contains { $0.username == me.username }
+    }
+
+    /// Shown when GitLab lets you approve, you have not yet, and the commit you saw is known.
+    public func canApprove(_ detail: MergeRequestDetail) -> Bool {
+        detail.canApprove == true && detail.headSha != nil && !isApprovedByMe(detail)
+    }
+
+    /// Approves at the commit on screen, then reads the MR and the list again.
+    public func approve(_ key: String) async {
+        guard let detail = details[key], canApprove(detail), let sha = detail.headSha,
+            !approvingKeys.contains(key)
+        else { return }
+        approvingKeys.insert(key)
+        do {
+            approvalNotices[key] = Copy.approveOutcome(try await client.approve(key: key, sha: sha).code)
+        } catch {
+            approvalNotices[key] = MenuModel.message(for: error)
+        }
+        await loadDetail(key)
+        approvingKeys.remove(key)
+        await refresh()
     }
 
     /// One action per MR at a time; the list is read again afterwards so the state is current.
@@ -381,6 +420,8 @@ public final class ReviewsModel {
 
     /// Fetches the MR again even when it is cached; the latest load per MR is the one stored.
     public func loadDetail(_ key: String) async {
+        // A reload of your own drops the last approval's outcome; the one after approving keeps it.
+        if !approvingKeys.contains(key) { approvalNotices[key] = nil }
         let mine = (latestDetail[key] ?? 0) + 1
         latestDetail[key] = mine
         loadingKeys.insert(key)

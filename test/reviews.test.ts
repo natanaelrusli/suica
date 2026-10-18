@@ -1,7 +1,9 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { FetchFailure } from "../src/gitlab.ts";
+import { createLogger } from "../src/log.ts";
 import {
+  approveMergeRequest,
   buildReviewList,
   fetchMrDetail,
   MR_DETAIL_QUERY,
@@ -50,6 +52,9 @@ function detailResponse(): unknown {
             nodes: [{ username: "me", name: "Nata", mergeRequestInteraction: null }],
           },
           approvedBy: { nodes: [bob] },
+          squashOnMerge: true,
+          diffHeadSha: "0123456789abcdef0123456789abcdef01234567",
+          userPermissions: { canApprove: true },
           discussions: {
             pageInfo: { hasNextPage: false },
             nodes: [
@@ -218,5 +223,45 @@ describe("fetchMrDetail", () => {
         "g/p!7",
       ),
     ).rejects.toThrow("not found");
+  });
+});
+
+describe("approveMergeRequest", () => {
+  const SHA = "0123456789abcdef0123456789abcdef01234567";
+  const log = createLogger({ write: () => undefined });
+  const rejecting = (httpStatus?: number) => (): Promise<unknown> =>
+    Promise.reject(new FetchFailure("gitlab-error", "glab failed", httpStatus));
+
+  it("approves at the commit the Owner saw, on an encoded path", async () => {
+    const calls: unknown[] = [];
+    const post = (path: string, fields: Readonly<Record<string, string>>): Promise<unknown> => {
+      calls.push([path, fields]);
+      return Promise.resolve({});
+    };
+    await expect(approveMergeRequest({ post, log }, "g/sub/p!7", SHA)).resolves.toBe("approved");
+    expect(calls).toEqual([["projects/g%2Fsub%2Fp/merge_requests/7/approve", { sha: SHA }]]);
+  });
+
+  it("reports a push the Owner has not seen", async () => {
+    await expect(approveMergeRequest({ post: rejecting(409), log }, "g/p!7", SHA)).resolves.toBe(
+      "head-changed",
+    );
+  });
+
+  it("reports any other GitLab failure as failed", async () => {
+    await expect(approveMergeRequest({ post: rejecting(401), log }, "g/p!7", SHA)).resolves.toBe(
+      "failed",
+    );
+    await expect(approveMergeRequest({ post: rejecting(), log }, "g/p!7", SHA)).resolves.toBe(
+      "failed",
+    );
+  });
+
+  it("refuses a malformed key or commit without calling GitLab", async () => {
+    const post = (): Promise<unknown> => Promise.reject(new Error("called"));
+    await expect(approveMergeRequest({ post, log }, "nope", SHA)).resolves.toBe("bad-request");
+    await expect(approveMergeRequest({ post, log }, "g/p!7", "-X DELETE")).resolves.toBe(
+      "bad-request",
+    );
   });
 });

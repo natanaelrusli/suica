@@ -19,11 +19,12 @@ private func list(_ keys: String...) -> ReviewListDocument {
     ReviewListDocument(version: 1, mergeRequests: keys.map(summary))
 }
 
-private func detail(_ key: String) throws -> MergeRequestDetail {
+private func detail(_ key: String, _ overrides: [String: Any] = [:]) throws -> MergeRequestDetail {
     let golden = try decodeDocument(MergeRequestDetail.self, from: contract("mr-detail.v1.json"))
     let json = try JSONEncoder().encode(golden)
     var object = try #require(try JSONSerialization.jsonObject(with: json) as? [String: Any])
     object["key"] = key
+    object.merge(overrides) { _, new in new }
     return try decodeDocument(
         MergeRequestDetail.self, from: JSONSerialization.data(withJSONObject: object))
 }
@@ -66,6 +67,11 @@ actor FakeReviewsClient: ReviewsClient {
         return try actionResult.get()
     }
 
+    func approve(key: String, sha: String) async throws(AgentError) -> ActionResult {
+        actions.append("approve \(key) \(sha)")
+        return try actionResult.get()
+    }
+
     func mergeRequest(key: String) async throws(AgentError) -> MergeRequestDetail {
         detailCalls.append(key)
         let gate = gates.removeValue(forKey: key)
@@ -96,6 +102,17 @@ actor FakeReviewsClient: ReviewsClient {
     #expect(mr.comments.first?.notes.first?.filePath == "src/a.ts")
     #expect(mr.comments.first?.notes.first?.date != nil)
     #expect(mr.updatedDate != nil)
+    #expect(mr.squashOnMerge == true && mr.canApprove == true)
+    #expect(mr.headSha == "0123456789abcdef0123456789abcdef01234567")
+}
+
+@MainActor @Test func anMRFromAnOlderAgentDecodesWithoutTheApproveFields() throws {
+    var object = try #require(
+        try JSONSerialization.jsonObject(with: contract("mr-detail.v1.json")) as? [String: Any])
+    for field in ["squashOnMerge", "headSha", "canApprove"] { object[field] = nil }
+    let mr = try decodeDocument(MergeRequestDetail.self, from: JSONSerialization.data(withJSONObject: object))
+    #expect(mr.squashOnMerge == nil && mr.headSha == nil && mr.canApprove == nil)
+    #expect(!ReviewsModel(client: FakeReviewsClient(lists: [])).canApprove(mr))
 }
 
 @Test func diffLinesAreNumberedPerSide() {
@@ -316,4 +333,48 @@ private func withAgent(_ status: String?) -> ReviewListDocument {
         == "By Claude Code (claude-opus-5-5) at commit 01234567")
     #expect(Copy.agentReviewBadge("queued") == "Agent review queued")
     #expect(Copy.agentReviewBadge("running") == "Agent reviewing now")
+}
+
+@MainActor @Test func approvingUsesTheCommitOnScreenKeepsTheOutcomeAndReadsTheMRAgain() async throws {
+    let sha = "0123456789abcdef0123456789abcdef01234567"
+    let client = FakeReviewsClient(lists: [.success(list("g/p!1"))])
+    await client.setDetail("g/p!1", .success(try detail("g/p!1")))
+    await client.setActionResult(.success(ActionResult(code: "approved")))
+    let model = ReviewsModel(client: client)
+    await model.refresh()
+    await model.approve("g/p!1")
+    #expect(await client.actions == ["approve g/p!1 \(sha)"])
+    #expect(await client.detailCalls == ["g/p!1", "g/p!1"])
+    #expect(model.approvalNotices["g/p!1"] == "Approved on GitLab.")
+    #expect(model.approvingKeys.isEmpty)
+    await model.loadDetail("g/p!1")
+    #expect(model.approvalNotices["g/p!1"] == nil)
+}
+
+@MainActor @Test func aPushSinceOpeningIsReported() async throws {
+    let client = FakeReviewsClient(lists: [.success(list("g/p!1"))])
+    await client.setDetail("g/p!1", .success(try detail("g/p!1")))
+    await client.setActionResult(.success(ActionResult(code: "head-changed")))
+    let model = ReviewsModel(client: client)
+    await model.refresh()
+    await model.approve("g/p!1")
+    #expect(model.approvalNotices["g/p!1"] == Copy.approveOutcome("head-changed"))
+}
+
+@MainActor @Test func approveIsNotOfferedWhenGitLabSaysNoOrYouAlreadyApproved() async throws {
+    let me = Person(username: "bob", name: "Bob")
+    let mine = ReviewListDocument(version: 1, me: me, mergeRequests: [summary("g/p!1"), summary("g/p!2")])
+    let client = FakeReviewsClient(lists: [.success(mine)])
+    await client.setDetail("g/p!1", .success(try detail("g/p!1")))
+    await client.setDetail("g/p!2", .success(try detail("g/p!2", ["approvedBy": [], "canApprove": false])))
+    let model = ReviewsModel(client: client)
+    await model.refresh()
+    await model.select("g/p!2")
+    let approved = try #require(model.details["g/p!1"])
+    let refused = try #require(model.details["g/p!2"])
+    #expect(model.isApprovedByMe(approved) && !model.canApprove(approved))
+    #expect(!model.isApprovedByMe(refused) && !model.canApprove(refused))
+    await model.approve("g/p!1")
+    await model.approve("g/p!2")
+    #expect(await client.actions.isEmpty)
 }

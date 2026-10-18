@@ -28,6 +28,7 @@ extension UnconfiguredClient: ReviewsClient {
     func queueAgentReview(key: String) async throws(AgentError) -> ActionResult { throw AgentError.launchFailed }
     func postAgentReview(id: Int) async throws(AgentError) -> ActionResult { throw AgentError.launchFailed }
     func discardAgentReview(id: Int) async throws(AgentError) -> ActionResult { throw AgentError.launchFailed }
+    func approve(key: String, sha: String) async throws(AgentError) -> ActionResult { throw AgentError.launchFailed }
 }
 
 private let refreshInterval: Duration = .seconds(30)

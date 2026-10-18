@@ -16,6 +16,9 @@
   "deletions": 1,
   "reviewers": [{ "username": "me", "name": "Nata", "state": "UNREVIEWED" }],
   "approvedBy": [{ "username": "bob", "name": "Bob" }],
+  "squashOnMerge": true,
+  "headSha": "0123456789abcdef0123456789abcdef01234567",
+  "canApprove": true,
   "discussions": [
     {
       "id": "gid://gitlab/Discussion/1",

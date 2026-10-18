@@ -194,6 +194,7 @@ private struct MergeRequestDetailView: View {
     let model: ReviewsModel
     let onReload: () -> Void
     @State private var tab: DetailTab = .description
+    @State private var confirmingApprove = false
 
     private var agentReview: AgentReviewInfo? { model.agentReview(for: detail.key) }
 
@@ -230,6 +231,12 @@ private struct MergeRequestDetailView: View {
         .environment(\.openURL, OpenURLAction { url in
             DisplayText.safeURL(url.absoluteString) == nil ? .discarded : .systemAction
         })
+        .confirmationDialog(Copy.approveConfirmTitle, isPresented: $confirmingApprove) {
+            Button(Copy.approveAction) { Task { await model.approve(detail.key) } }
+            Button(Copy.cancel, role: .cancel) {}
+        } message: {
+            Text(Copy.approveConfirmMessage(sha: detail.headSha ?? ""))
+        }
     }
 
     private var header: some View {
@@ -240,6 +247,15 @@ private struct MergeRequestDetailView: View {
                     .textSelection(.enabled)
                 Spacer()
                 if loading { ProgressView().controlSize(.small) }
+                if model.isApprovedByMe(detail) {
+                    Badge(text: Copy.approvedByYou, tint: .green)
+                } else if model.canApprove(detail) {
+                    Button { confirmingApprove = true } label: {
+                        Label(Copy.approve, systemImage: "checkmark.seal")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(model.approvingKeys.contains(detail.key) || loading)
+                }
                 let busy = model.agentBusyKeys.contains(detail.key)
                 if agentReview?.canRequeue ?? true {
                     Button {
@@ -259,6 +275,7 @@ private struct MergeRequestDetailView: View {
                 }
             }
             if let error { NoticeBox(text: error, tint: .red) }
+            if let notice = model.approvalNotices[detail.key] { NoticeBox(text: notice, tint: .secondary) }
             HStack(spacing: 6) {
                 if detail.draft { Badge(text: Copy.draft, tint: .gray) }
                 Text(DisplayText.clean(detail.key, max: 120)).textSelection(.enabled)
@@ -280,6 +297,9 @@ private struct MergeRequestDetailView: View {
                 .foregroundStyle(.secondary)
                 if let status = detail.pipelineStatus {
                     Badge(text: Copy.pipeline(status), tint: pipelineTint(status))
+                }
+                if let squash = detail.squashOnMerge {
+                    Badge(text: squash ? Copy.squashOnMerge : Copy.noSquash, tint: squash ? .purple : .gray)
                 }
                 if let additions = detail.additions, let deletions = detail.deletions {
                     Text("+\(additions)").font(.caption.monospacedDigit()).foregroundStyle(.green)

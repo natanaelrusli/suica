@@ -9,7 +9,13 @@ import type { SaveResultJson } from "./config-edit.ts";
 import { defaultExec } from "./exec.ts";
 import { fetchSnapshot, glabPost, glabRest, glabRunner } from "./gitlab.ts";
 import { detectModelClis } from "./model-cli.ts";
-import { buildReviewActivity, buildReviewList, fetchMrDetail, parseMrKey } from "./reviews.ts";
+import {
+  approveMergeRequest,
+  buildReviewActivity,
+  buildReviewList,
+  fetchMrDetail,
+  parseMrKey,
+} from "./reviews.ts";
 import { discardAgentReview, postAgentReview } from "./agent-review.ts";
 import { createLogger } from "./log.ts";
 import { createRuntime } from "./runtime.ts";
@@ -21,7 +27,7 @@ import { OUTBOX_STATUSES } from "./teams/types.ts";
 import { buildUsage } from "./usage.ts";
 
 const USAGE =
-  "usage: suica <once|status|state|stats|usage|pause|resume|pending [--all]|send <id> [--json]|skip <id> [--json]|retry <id> [--json]|selftest|reviews --json|mr <key> --json|review queue <key> --json|review post <id> --json|review discard <id> --json|config show --json|config set --json|agent install|agent uninstall|agent restart --json>\n";
+  "usage: suica <once|status|state|stats|usage|pause|resume|pending [--all]|send <id> [--json]|skip <id> [--json]|retry <id> [--json]|selftest|reviews --json|mr <key> --json|mr approve <key> <sha> --json|review queue <key> --json|review post <id> --json|review discard <id> --json|config show --json|config set --json|agent install|agent uninstall|agent restart --json>\n";
 const TEAMS_DISABLED = "teams is disabled: set teams.enabled to true in the config\n";
 const SHOWN_WITH_ALL = 50;
 
@@ -252,6 +258,18 @@ async function mrJson(key: string): Promise<number> {
   return 0;
 }
 
+/** `suica mr approve <key> <sha> --json`: approves as the Owner at that commit; prints `{"status": …}`. */
+async function approveCommand(key: string, sha: string): Promise<number> {
+  const { gitlab } = loadConfig(defaultConfigPath());
+  const outcome = await approveMergeRequest(
+    { post: glabPost(gitlab), log: createLogger() },
+    key,
+    sha,
+  );
+  process.stdout.write(`${actionJson(outcome)}\n`);
+  return outcome === "approved" ? 0 : 1;
+}
+
 async function installAgentCommand(): Promise<number> {
   const paths = {
     node: process.execPath,
@@ -332,6 +350,14 @@ async function main(argv: readonly string[]): Promise<number> {
   }
   if (command === "reviews" && argv.includes("--json")) return reviewsJson();
   if (command === "review" && argv.includes("--json")) return reviewCommand(argv);
+  if (command === "mr" && argv[1] === "approve" && argv.includes("--json")) {
+    const [key, sha] = [argv[2], argv[3]];
+    if (key === undefined || sha === undefined) {
+      process.stderr.write(USAGE);
+      return 2;
+    }
+    return approveCommand(key, sha);
+  }
   if (command === "mr" && argv.includes("--json")) {
     const key = argv[1];
     if (key === undefined || parseMrKey(key) === undefined) {

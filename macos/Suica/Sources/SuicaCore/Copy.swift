@@ -212,6 +212,24 @@ public enum Copy {
         default: "Nothing to do: the review changed in the meantime."
         }
     }
+    // Approving
+    public static let approve = "Approve…"
+    public static let approveConfirmTitle = "Approve this MR on GitLab as you?"
+    public static func approveConfirmMessage(sha: String) -> String {
+        "Your approval is tied to commit \(sha.prefix(8)). If the author pushed after you opened the MR, nothing is approved and you are asked to look again."
+    }
+    public static let approveAction = "Approve"
+    public static let approvedByYou = "Approved by you"
+    public static let squashOnMerge = "Squash on merge"
+    public static let noSquash = "No squash"
+    public static func approveOutcome(_ code: String) -> String {
+        switch code {
+        case "approved": "Approved on GitLab."
+        case "head-changed": "Not approved: the author pushed after you opened this MR. Look at the new changes, then approve again."
+        case "bad-request": "This merge request or commit cannot be approved."
+        default: "Approving failed. Check the MR in GitLab."
+        }
+    }
     public static func approvals(_ approved: Int, of total: Int) -> String { "\(approved)/\(total) approved" }
     public static func yourState(_ state: String) -> String { "You: \(reviewerState(state))" }
     public static let descriptionTab = "Description"

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Exec } from "../src/exec.ts";
-import { FetchFailure, glabRest, glabRunner, parseSnapshot } from "../src/gitlab.ts";
+import { FetchFailure, glabPost, glabRest, glabRunner, parseSnapshot } from "../src/gitlab.ts";
 
 const config = { hostname: "gitlab.example", glabPath: "glab", timeoutSeconds: 60 };
 
@@ -195,6 +195,34 @@ describe("glabRunner", () => {
       "gitlab-auth",
     );
     expect(await kindOfRun(failing({ code: 1, stderr: "something odd" }))).toBe("gitlab-error");
+  });
+
+  it("posts form fields and keeps the HTTP status glab reports", async () => {
+    const calls: string[][] = [];
+    await glabPost(config, (file, args) => {
+      calls.push([file, ...args]);
+      return Promise.resolve({ stdout: "{}", stderr: "" });
+    })("projects/g%2Fp/merge_requests/7/approve", { sha: "abc" });
+    expect(calls).toEqual([
+      [
+        "glab",
+        "api",
+        "projects/g%2Fp/merge_requests/7/approve",
+        "--hostname",
+        "gitlab.example",
+        "-X",
+        "POST",
+        "-f",
+        "sha=abc",
+      ],
+    ]);
+    const conflict = glabPost(
+      config,
+      failing({ code: 1, stderr: "glab: 409 Conflict (HTTP 409)" }),
+    )("x", {});
+    await expect(conflict).rejects.toMatchObject({ kind: "gitlab-error", httpStatus: 409 });
+    const unknown = glabPost(config, failing({ code: 1, stderr: "something odd" }))("x", {});
+    await expect(unknown).rejects.toMatchObject({ httpStatus: undefined });
   });
 
   it("treats non-JSON output as a GitLab error", async () => {
