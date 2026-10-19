@@ -30,6 +30,20 @@ const REVIEW = [
   "- `src/a.ts:12` — not a finding.",
 ].join("\n");
 
+const NESTED_PREVIOUS = [
+  "## Findings",
+  "### Previous review",
+  "1. `a.ts:3` old — not fixed",
+  "#### Evidence",
+  "- `a.ts:5` still there",
+  "### Minor",
+  "1. `b.ts:4` new",
+  "### Previous findings",
+  "- `c.ts:1` old too",
+  "## Notes",
+  "1. `d.ts:2` not a finding",
+].join("\n");
+
 describe("extractFindings", () => {
   it("takes the located items under Findings and its subheadings, with their continuation", () => {
     const findings = extractFindings(REVIEW);
@@ -54,6 +68,9 @@ describe("extractFindings", () => {
   it("never extracts an item under a Previous findings heading as a finding", () => {
     const body = "## Findings\n### Major\n1. `b.ts:4` new\n## Previous findings\n1. `a.ts:3` old\n";
     expect(extractFindings(body).map((f) => f.path)).toEqual(["b.ts"]);
+  });
+  it("never extracts an item under a Previous subheading inside Findings, up to its next sibling", () => {
+    expect(extractFindings(NESTED_PREVIOUS).map((f) => f.path)).toEqual(["b.ts"]);
   });
 });
 
@@ -117,6 +134,7 @@ describe("countFindings", () => {
     const body =
       "## Previous findings\n1. `a.ts:3` old — not fixed\n## Findings\n### Minor\n1. `b.ts:4` new\n";
     expect(countFindings(body)).toEqual([{ severity: "Minor", count: 1 }]);
+    expect(countFindings(NESTED_PREVIOUS)).toEqual([{ severity: "Minor", count: 1 }]);
   });
 });
 

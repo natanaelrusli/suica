@@ -23,19 +23,27 @@ const LIST_ITEM = /^ {0,3}(?:\d+[.)]|[-*+])\s/;
 const FINDING_ITEM =
   /^( {0,3}(?:(\d+)[.)]|[-*+])\s+)`([^`\s]+):(\d+)(?:[-–]\d+)?`[ \t]*(?:[—–:-][ \t]*)?(.*)$/;
 
-/** A Findings heading; a Previous one lists the earlier review's findings, which are not this review's. */
+/** A heading such as "Previous review": it lists the earlier review's items, which are not this review's. */
+function isPreviousHeading(title: string): boolean {
+  return /^\W*previous\b/i.test(title);
+}
+
+/** A Findings heading, not a Previous one. */
 function isFindingsHeading(title: string): boolean {
-  return /\bfindings\b/i.test(title) && !/^\W*previous\b/i.test(title);
+  return /\bfindings\b/i.test(title) && !isPreviousHeading(title);
 }
 
 /**
  * The findings a review lists under a heading named Findings (with its subheadings, such as one
- * per severity). A finding whose location is not its first code span is left in the summary.
+ * per severity). A subheading starting with Previous is left out up to its next sibling, and a
+ * finding whose location is not its first code span is left in the summary.
  */
 export function extractFindings(markdown: string): Finding[] {
   const lines = markdown.replace(/\r\n/g, "\n").split("\n");
   const findings: Finding[] = [];
   let sectionLevel: number | undefined;
+  /** The level of the Previous subheading the lines are under, if any. */
+  let previousLevel: number | undefined;
   let inFence = false;
   let index = 0;
   while (index < lines.length) {
@@ -44,12 +52,25 @@ export function extractFindings(markdown: string): Finding[] {
     const heading = inFence ? null : HEADING.exec(line);
     if (heading !== null) {
       const level = heading[1]?.length ?? 1;
-      if (isFindingsHeading(heading[2] ?? "")) sectionLevel = level;
-      else if (sectionLevel !== undefined && level <= sectionLevel) sectionLevel = undefined;
+      const title = heading[2] ?? "";
+      if (previousLevel !== undefined && level > previousLevel) {
+        // Still under the Previous subheading.
+      } else if (isFindingsHeading(title)) {
+        sectionLevel = level;
+        previousLevel = undefined;
+      } else if (sectionLevel !== undefined && level <= sectionLevel) {
+        sectionLevel = undefined;
+        previousLevel = undefined;
+      } else if (sectionLevel !== undefined) {
+        previousLevel = isPreviousHeading(title) ? level : undefined;
+      }
       index += 1;
       continue;
     }
-    const match = inFence || sectionLevel === undefined ? null : FINDING_ITEM.exec(line);
+    const match =
+      inFence || sectionLevel === undefined || previousLevel !== undefined
+        ? null
+        : FINDING_ITEM.exec(line);
     if (match === null) {
       index += 1;
       continue;
@@ -87,13 +108,15 @@ const SEVERITY_HEADING = /^\W*([A-Za-z]+)\s*(?:$|[^A-Za-z\s])/;
 /**
  * Every finding under a heading named Findings, located or not, counted per severity subheading
  * (one word, such as `### Minor`). Items under another subheading, such as `### Outside this
- * diff`, are not findings of the MR. Only items at the indent of the section's first item count,
+ * diff` or `### Previous review`, are not findings of the MR. Only items at the indent of the section's first item count,
  * so a finding's own Case and Fix bullets do not. Ordered Blocker, Major, Minor, Nit, then other
  * severities as they appear, then the findings without one.
  */
 export function countFindings(markdown: string): FindingCount[] {
   const counts = new Map<string, number>();
   let sectionLevel: number | undefined;
+  /** The level of the Previous subheading the lines are under, if any, as in `extractFindings`. */
+  let previousLevel: number | undefined;
   /** Undefined under a subheading that is not a severity. */
   let severity: string | undefined = "";
   let itemIndent: number | undefined;
@@ -105,13 +128,18 @@ export function countFindings(markdown: string): FindingCount[] {
     if (heading !== null) {
       const level = heading[1]?.length ?? 1;
       const title = heading[2] ?? "";
-      if (isFindingsHeading(title)) {
+      if (previousLevel !== undefined && level > previousLevel) {
+        // Still under the Previous subheading.
+      } else if (isFindingsHeading(title)) {
         sectionLevel = level;
+        previousLevel = undefined;
         severity = "";
         itemIndent = undefined;
       } else if (sectionLevel !== undefined && level <= sectionLevel) {
         sectionLevel = undefined;
+        previousLevel = undefined;
       } else if (sectionLevel !== undefined) {
+        previousLevel = isPreviousHeading(title) ? level : undefined;
         const word = SEVERITY_HEADING.exec(title)?.[1];
         severity =
           word === undefined
@@ -120,7 +148,8 @@ export function countFindings(markdown: string): FindingCount[] {
       }
       continue;
     }
-    const item = sectionLevel === undefined ? null : LIST_MARKER.exec(line);
+    const item =
+      sectionLevel === undefined || previousLevel !== undefined ? null : LIST_MARKER.exec(line);
     if (item === null) continue;
     const indent = item[1]?.length ?? 0;
     itemIndent ??= indent;
