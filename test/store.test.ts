@@ -6,6 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import { reviewerKey } from "../src/events.ts";
 import { openStore } from "../src/store.ts";
+import type { ReviewHead, Store } from "../src/store.ts";
 import { ME, mr, note, person, reviewer, snapshot } from "./builders.ts";
 
 const folders: string[] = [];
@@ -137,5 +138,105 @@ describe("opening a database another process holds", () => {
     } finally {
       await exited;
     }
+  });
+});
+
+describe("schema 10", () => {
+  const NOW = Date.UTC(2026, 9, 19, 12);
+
+  /** Queues, runs and moves a review of `mrKey` to `status`, reviewed at `headSha`. */
+  function review(
+    store: Store,
+    mrKey: string,
+    status: "posted" | "discarded" | "failed" | "skipped" | "ready",
+    headSha: string,
+  ): number {
+    const id = store.queueAgentReview(mrKey, "auto", NOW) ?? 0;
+    store.transitionAgentReview(id, ["queued"], "running", { headSha }, NOW);
+    if (status === "failed" || status === "skipped") {
+      store.transitionAgentReview(id, ["running"], status, {}, NOW);
+    } else {
+      store.transitionAgentReview(id, ["running"], "ready", { body: "b" }, NOW);
+      if (status !== "ready") {
+        store.transitionAgentReview(id, ["ready"], status, {}, NOW);
+      }
+    }
+    return id;
+  }
+
+  it("upgrades schema 9 to 10: agent_review gains previous_sha (null on old rows) and review_head starts empty", () => {
+    const path = tempDb();
+    const first = openStore(path);
+    const id = review(first, "g/p!1", "posted", "aaa1111");
+    first.close();
+    const raw = new DatabaseSync(path);
+    raw.exec(
+      "ALTER TABLE agent_review DROP COLUMN previous_sha; DROP TABLE review_head; PRAGMA user_version = 9;",
+    );
+    raw.close();
+
+    const store = openStore(path);
+    expect(store.getAgentReview(id)?.previousSha).toBeNull();
+    expect(store.loadReviewHeads()).toEqual(new Map());
+    const next = store.queueAgentReview("g/p!1", "manual", NOW) ?? 0;
+    store.transitionAgentReview(next, ["queued"], "running", { previousSha: "aaa1111" }, NOW);
+    expect(store.getAgentReview(next)?.previousSha).toBe("aaa1111");
+    store.close();
+    const check = new DatabaseSync(path);
+    expect(check.prepare("PRAGMA user_version").get()?.["user_version"]).toBe(10);
+    check.close();
+  });
+
+  it("rereviewBases returns the newest posted or discarded review per MR and ignores later failed and skipped rows", () => {
+    const store = openStore(":memory:");
+    review(store, "g/p!1", "posted", "aaa1111");
+    const newer = review(store, "g/p!1", "discarded", "bbb2222");
+    review(store, "g/p!1", "failed", "ccc3333");
+    review(store, "g/p!1", "skipped", "ddd4444");
+    review(store, "g/p!1", "ready", "eee5555");
+    const other = review(store, "g/p!2", "posted", "fff6666");
+    review(store, "g/p!3", "failed", "ggg7777");
+    const bases = store.rereviewBases();
+    expect([...bases.keys()].sort()).toEqual(["g/p!1", "g/p!2"]);
+    expect(bases.get("g/p!1")).toMatchObject({
+      id: newer,
+      status: "discarded",
+      headSha: "bbb2222",
+    });
+    expect(bases.get("g/p!2")?.id).toBe(other);
+    store.close();
+  });
+
+  it("rereviewBase only looks at rows before the given id", () => {
+    const store = openStore(":memory:");
+    const first = review(store, "g/p!1", "posted", "aaa1111");
+    const second = review(store, "g/p!1", "posted", "bbb2222");
+    expect(store.rereviewBase("g/p!1", second)?.id).toBe(first);
+    expect(store.rereviewBase("g/p!1", first)).toBeUndefined();
+    expect(store.rereviewBase("g/p!1", second + 1)?.id).toBe(second);
+    expect(store.rereviewBase("g/p!2", second)).toBeUndefined();
+    store.close();
+  });
+
+  it("saveReviewHeads replaces every row and loadReviewHeads reads them back", () => {
+    const path = tempDb();
+    const store = openStore(path);
+    const a: ReviewHead = { head: "aaa1111", changedAt: NOW, queuedHead: "" };
+    const b: ReviewHead = { head: "bbb2222", changedAt: NOW + 1, queuedHead: "bbb2222" };
+    store.saveReviewHeads(
+      new Map([
+        ["g/p!1", a],
+        ["g/p!2", b],
+      ]),
+    );
+    expect(store.loadReviewHeads()).toEqual(
+      new Map([
+        ["g/p!1", a],
+        ["g/p!2", b],
+      ]),
+    );
+    store.saveReviewHeads(new Map([["g/p!2", { ...b, queuedHead: "" }]]));
+    expect(store.loadReviewHeads()).toEqual(new Map([["g/p!2", { ...b, queuedHead: "" }]]));
+    store.close();
   });
 });

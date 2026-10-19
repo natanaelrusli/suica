@@ -87,6 +87,8 @@ export interface PostedReview {
   readonly id: number;
   readonly postedAt: number;
   readonly body: string;
+  /** True when it followed an earlier posted review of the same MR. */
+  readonly rereview: boolean;
 }
 
 /** What the ledger knows about one of the Owner's MRs, drafts included, for Re-review Nudges. */

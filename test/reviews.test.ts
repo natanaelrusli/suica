@@ -148,6 +148,7 @@ describe("buildReviewList", () => {
             startedAt: 1792148500000,
             cli: "claude",
             headSha: "0123456789abcdef0123456789abcdef01234567",
+            previousSha: null,
             body: "# Code review: g/p!7\n\n## Findings\n1. `src/a.ts:4`: Blocker.",
             detail: "",
             createdAt: 1792148400000,

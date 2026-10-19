@@ -70,7 +70,7 @@ describe("schema v2", () => {
     store.close();
 
     const raw = new DatabaseSync(path);
-    expect(raw.prepare("PRAGMA user_version").get()?.["user_version"]).toBe(9);
+    expect(raw.prepare("PRAGMA user_version").get()?.["user_version"]).toBe(10);
     raw.close();
   });
 });
@@ -235,7 +235,7 @@ describe("Re-review ledger (schema 8)", () => {
     expect(store.loadTeams().rereviewMrs.size).toBe(1);
     store.close();
     const check = new DatabaseSync(path);
-    expect(check.prepare("PRAGMA user_version").get()?.["user_version"]).toBe(9);
+    expect(check.prepare("PRAGMA user_version").get()?.["user_version"]).toBe(10);
     check.close();
   });
 
@@ -377,8 +377,22 @@ describe("findings notices (schema 9)", () => {
     // A newer review still waiting for the Owner is not posted yet.
     store.queueAgentReview("g/p!7", "manual", NOW + 20);
     expect(store.loadTeams().postedReviews).toEqual(
-      new Map([["g/p!7", { id: latest, postedAt: NOW + 11, body: BODY }]]),
+      new Map([["g/p!7", { id: latest, postedAt: NOW + 11, body: BODY, rereview: false }]]),
     );
+  });
+
+  it("loadTeams marks a posted review with a previousSha as a re-review", () => {
+    const store = openStore(":memory:");
+    const first = postReview(store, "g/p!7", NOW);
+    expect(store.loadTeams().postedReviews.get("g/p!7")).toMatchObject({
+      id: first,
+      rereview: false,
+    });
+    const id = store.queueAgentReview("g/p!7", "auto", NOW + 10) ?? 0;
+    store.transitionAgentReview(id, ["queued"], "running", { previousSha: "aaa1111" }, NOW + 10);
+    store.transitionAgentReview(id, ["running"], "ready", { body: BODY }, NOW + 10);
+    store.transitionAgentReview(id, ["ready"], "posted", {}, NOW + 11);
+    expect(store.loadTeams().postedReviews.get("g/p!7")).toMatchObject({ id, rereview: true });
   });
 
   it("keeps the announced review in the round and the findings text in the outbox", () => {

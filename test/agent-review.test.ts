@@ -88,6 +88,7 @@ function row(overrides: Partial<AgentReviewRow> = {}): AgentReviewRow {
     startedAt: NOW,
     cli: "claude",
     headSha: SHA,
+    previousSha: null,
     body: "# Review\n/close\nping @bob",
     detail: "",
     createdAt: NOW,
