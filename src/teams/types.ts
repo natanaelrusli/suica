@@ -6,6 +6,7 @@ export const TEMPLATE_NAMES = [
   "notice.approved",
   "notice.changes",
   "notice.comments",
+  "notice.findings",
   "rereview",
 ] as const;
 export type TemplateName = (typeof TEMPLATE_NAMES)[number];
@@ -58,6 +59,8 @@ export interface Intent {
   readonly variant: TemplateName;
   readonly mr: IntentMr;
   readonly recipient: Person;
+  /** The `review.findings` value of a `notice.findings` message. */
+  readonly findings?: string;
 }
 
 export interface NudgeRecord {
@@ -72,6 +75,18 @@ export interface Round {
   readonly changedAt: number;
   readonly noticedState: ReviewState;
   readonly noticedNotes: number;
+  /**
+   * The latest Agent Review of the MR whose findings were announced, or that was already posted
+   * when the round started; null when there was none.
+   */
+  readonly announcedReview: number | null;
+}
+
+/** The latest posted Agent Review of an MR, for the Review Notice that reports its findings. */
+export interface PostedReview {
+  readonly id: number;
+  readonly postedAt: number;
+  readonly body: string;
 }
 
 /** What the ledger knows about one of the Owner's MRs, drafts included, for Re-review Nudges. */
@@ -110,6 +125,8 @@ export interface TeamsState {
   readonly rereviewMrs: ReadonlyMap<string, RereviewMr>;
   /** Key is `reviewerKey(mrKey, username)`. */
   readonly rereviewReviewers: ReadonlyMap<string, RereviewReviewer>;
+  /** Key is the MR key. */
+  readonly postedReviews: ReadonlyMap<string, PostedReview>;
 }
 
 export interface TeamsPlan {
@@ -141,6 +158,8 @@ export interface OutboxRow {
   /** GitLab username of the person who receives the chat. */
   readonly recipient: string;
   readonly recipientName: string;
+  /** The `review.findings` value; null for every message but `notice.findings`. */
+  readonly findings: string | null;
   readonly status: OutboxStatus;
   readonly detail: string;
   /** Rendered text, once the row left `queued`. */

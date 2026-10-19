@@ -4,7 +4,7 @@ import Foundation
 
 /// One Teams message template, as `suica templates show --json` lists it.
 public struct MessageTemplate: Codable, Equatable, Identifiable, Sendable {
-    /// nudge, reminder, rereview, notice.approved, notice.changes or notice.comments.
+    /// nudge, reminder, rereview, notice.approved, notice.changes, notice.comments or notice.findings.
     public let name: String
     /// What the agent uses: the file's text when there is one, else the built-in text.
     public let text: String
@@ -74,6 +74,7 @@ public enum TemplatePreview {
             "mr.project": escapeMarkdown("group/project"),
             "person.name": escapeMarkdown(recipient),
             "owner.name": escapeMarkdown(owner),
+            "review.findings": "ada 3 findings (1 Major, 2 Minor)",
         ]
         return text.replacing(/\{\{\s*([\w.]+)\s*\}\}/) { match in
             values[String(match.1)] ?? String(match.0)

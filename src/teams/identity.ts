@@ -21,9 +21,11 @@ export function normalizeName(name: string): string {
 
 /**
  * GitLab gives a display name and an employee ID, never an email. Resolution order: the
- * `teams.people` map, the cache, then a Teams search accepted only when exactly one Teams user has
- * the same display name. A guess would send a message to the wrong person, so anything less
- * certain is "unresolved" and the Owner adds a line to `teams.people`.
+ * `teams.people` map, the cache, then a Teams search. From the search, the users with the same
+ * display name win; without one, the users whose display name is the GitLab name followed by more
+ * whole words ("Mufid Hadi" in GitLab, "Mufid Hadi Abdulhakim" in Teams). Exactly one person must
+ * be left: choosing between two would send a message to the wrong person, so that is "ambiguous"
+ * and the Owner adds a line to `teams.people`.
  */
 export async function resolveEmail(deps: IdentityDeps, person: Person): Promise<Resolution> {
   const mapped = deps.people[person.username];
@@ -34,10 +36,14 @@ export async function resolveEmail(deps: IdentityDeps, person: Person): Promise<
 
   const wanted = normalizeName(person.name);
   const found = await deps.api.searchUsers(person.name);
-  const matches = found.filter(
-    (candidate) =>
-      candidate.displayName !== null && normalizeName(candidate.displayName) === wanted,
+  const named = found.flatMap((candidate) =>
+    candidate.displayName === null
+      ? []
+      : [{ candidate, name: normalizeName(candidate.displayName) }],
   );
+  const exact = named.filter((each) => each.name === wanted);
+  const longer = named.filter((each) => each.name.startsWith(`${wanted} `));
+  const matches = (exact.length > 0 ? exact : longer).map((each) => each.candidate);
   const ids = new Set(matches.map((candidate) => candidate.id));
   const [only] = matches;
   if (ids.size === 0 || only === undefined) return { kind: "unresolved", reason: "no-match" };

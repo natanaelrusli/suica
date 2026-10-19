@@ -51,6 +51,7 @@ public enum Copy {
         case "notice.approved": "Review Notice: approved"
         case "notice.changes": "Review Notice: changes requested"
         case "notice.comments": "Review Notice: comments"
+        case "notice.findings": "Review Notice: Agent Review findings"
         default: name
         }
     }
@@ -62,6 +63,7 @@ public enum Copy {
         case "notice.approved": "To the Author, after you approve their MR."
         case "notice.changes": "To the Author, after you request changes."
         case "notice.comments": "To the Author, after you leave comments."
+        case "notice.findings": "To the Author, after an Agent Review is posted on their MR, with its findings per severity."
         default: ""
         }
     }
@@ -74,6 +76,7 @@ public enum Copy {
         case "mr.project": "The project path"
         case "person.name": "The recipient's name"
         case "owner.name": "Your name"
+        case "review.findings": "What the Agent Review found, per severity (findings notice only)"
         default: name
         }
     }

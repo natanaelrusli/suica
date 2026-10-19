@@ -35,6 +35,7 @@ function outbox(
     mrUrl: "https://gitlab.example/g/p/-/merge_requests/2",
     recipient: "bob",
     recipientName: "Bob",
+    findings: null,
     status,
     detail: "",
     approved: false,

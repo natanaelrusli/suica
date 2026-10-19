@@ -118,6 +118,13 @@ export const CONFIG_FIELDS: readonly ConfigField[] = [
     options: SEND_MODES,
   },
   {
+    path: ["teams", "modes", "findings"],
+    type: "enum",
+    label: "Findings notice mode",
+    help: "How the Review Notice with an Agent Review's findings sends: auto, approval or dry-run",
+    options: SEND_MODES,
+  },
+  {
     path: ["teams", "workingHours", "start"],
     type: "clock",
     label: "Working hours start",

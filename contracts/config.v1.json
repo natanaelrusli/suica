@@ -138,6 +138,15 @@
       "effective": "approval"
     },
     {
+      "path": ["teams", "modes", "findings"],
+      "type": "enum",
+      "label": "Findings notice mode",
+      "help": "How the Review Notice with an Agent Review's findings sends: auto, approval or dry-run",
+      "options": ["auto", "approval", "dry-run"],
+      "value": null,
+      "effective": "auto"
+    },
+    {
       "path": ["teams", "workingHours", "start"],
       "type": "clock",
       "label": "Working hours start",

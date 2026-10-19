@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   DEFAULT_TEMPLATES,
   TemplateError,
+  describeFindings,
   escapeMarkdown,
   loadTemplates,
   markdownLink,
@@ -31,6 +32,7 @@ const values = {
   "mr.project": "g/p",
   "person.name": "Alice",
   "owner.name": "Nata",
+  "review.findings": "",
 };
 
 describe("validateTemplate", () => {
@@ -90,6 +92,46 @@ describe("escapeMarkdown and markdownLink", () => {
 
   it("gives every built-in template the clickable MR link", () => {
     for (const name of TEMPLATE_NAMES) expect(DEFAULT_TEMPLATES[name]).toContain("{{mr.link}}");
+  });
+});
+
+describe("describeFindings", () => {
+  it("says there are none, or the total with each severity in order", () => {
+    expect(describeFindings([])).toBe("tidak ada findings");
+    expect(
+      describeFindings([
+        { severity: "Minor", count: 7 },
+        { severity: "Nit", count: 1 },
+      ]),
+    ).toBe("ada 8 findings (7 Minor, 1 Nit)");
+  });
+
+  it("names findings without a severity, and leaves out the brackets when none has one", () => {
+    expect(
+      describeFindings([
+        { severity: "Major", count: 1 },
+        { severity: "", count: 2 },
+      ]),
+    ).toBe("ada 3 findings (1 Major, 2 tanpa severity)");
+    expect(describeFindings([{ severity: "", count: 1 }])).toBe("ada 1 finding");
+  });
+
+  it("escapes a severity name that Markdown would format", () => {
+    expect(describeFindings([{ severity: "Nit_pick", count: 1 }])).toBe(
+      "ada 1 finding (1 Nit\\_pick)",
+    );
+  });
+});
+
+describe("the built-in findings notice", () => {
+  it("tells the Author what the Agent Review found and where to read it", () => {
+    const text = renderTemplate(DEFAULT_TEMPLATES["notice.findings"], {
+      ...values,
+      "review.findings": "ada 8 findings (7 Minor, 1 Nit)",
+    });
+    expect(text).toBe(
+      "Halo Alice, saya sudah review MR kamu: ada 8 findings (7 Minor, 1 Nit).\n[Add thing](https://gitlab.example/g/p/-/merge_requests/7)\nDetailnya ada di komentar MR.",
+    );
   });
 });
 

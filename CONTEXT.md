@@ -29,7 +29,7 @@ A Teams chat from the Owner to a Reviewer of the Owner's own MR who had already 
 _Avoid_: Re-request, follow-up
 
 **Review Notice**:
-A Teams chat from the Owner to the Author of someone else's MR, sent after the Owner has reviewed it.
+A Teams chat from the Owner to the Author of someone else's MR, sent after the Owner has reviewed it. After an Agent Review is posted, it says how many findings the review has per severity.
 _Avoid_: Review reply, feedback ping
 
 **Activity Alert**:

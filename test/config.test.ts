@@ -26,7 +26,7 @@ describe("parseConfig", () => {
         enabled: false,
         startTimeoutSeconds: 30,
         callTimeoutSeconds: 60,
-        modes: { nudge: "approval", notice: "approval", rereview: "approval" },
+        modes: { nudge: "approval", notice: "approval", rereview: "approval", findings: "auto" },
         workingHours: { start: "09:00", end: "17:00", days: [1, 2, 3, 4, 5] },
         reminderAfterHours: 24,
         noticeDebounceMinutes: 10,
@@ -81,7 +81,15 @@ describe("teams section", () => {
       `${MINIMAL}teams:\n  enabled: true\n  modes:\n    nudge: dry-run\n    notice: auto\n    rereview: auto\n`,
     );
     expect(config.teams.enabled).toBe(true);
-    expect(config.teams.modes).toEqual({ nudge: "dry-run", notice: "auto", rereview: "auto" });
+    expect(config.teams.modes).toEqual({
+      nudge: "dry-run",
+      notice: "auto",
+      rereview: "auto",
+      findings: "auto",
+    });
+    expect(
+      parseConfig(`${MINIMAL}teams:\n  modes:\n    findings: approval\n`).teams.modes.findings,
+    ).toBe("approval");
   });
 
   it("asks for approval before a Re-review Nudge unless the Owner says otherwise", () => {
@@ -90,7 +98,12 @@ describe("teams section", () => {
       "approval",
     );
     const config = parseConfig(`${MINIMAL}teams:\n  modes:\n    rereview: auto\n`);
-    expect(config.teams.modes).toEqual({ nudge: "approval", notice: "approval", rereview: "auto" });
+    expect(config.teams.modes).toEqual({
+      nudge: "approval",
+      notice: "approval",
+      rereview: "auto",
+      findings: "auto",
+    });
   });
 
   it("waits 10 minutes after a push by default, takes a positive whole number and rejects the rest", () => {

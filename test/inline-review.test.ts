@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { diffLines, extractFindings, placeFinding, summaryWithout } from "../src/inline-review.ts";
+import {
+  countFindings,
+  diffLines,
+  extractFindings,
+  placeFinding,
+  summaryWithout,
+} from "../src/inline-review.ts";
 
 const REVIEW = [
   "# Code review: g/p!7",
@@ -44,6 +50,64 @@ describe("extractFindings", () => {
       ["1", "2"],
     );
     expect(extractFindings("## Notes\n1. `a.ts:1` — x")).toEqual([]);
+  });
+});
+
+describe("countFindings", () => {
+  it("counts every top-level item per severity subheading, located or not, in severity order", () => {
+    expect(countFindings(REVIEW)).toEqual([
+      { severity: "Major", count: 2 },
+      { severity: "Minor", count: 2 },
+    ]);
+  });
+
+  it("skips nested bullets, code, none-items and anything outside Findings", () => {
+    const review = [
+      "## Findings — Blocker / Major / Minor / Nit",
+      "### Nit",
+      "1. `a.ts` — no line, still a finding.",
+      "   - Case: a nested bullet.",
+      "   - Fix: another one.",
+      "### Blocker",
+      "None.",
+      "### MAJOR (1)",
+      "- `b.ts:2` — x",
+      "  ```",
+      "  - not an item",
+      "  ```",
+      "### Minor",
+      "- None",
+      "## Done well",
+      "- `c.ts:1` — good.",
+    ].join("\n");
+    expect(countFindings(review)).toEqual([
+      { severity: "Major", count: 1 },
+      { severity: "Nit", count: 1 },
+    ]);
+  });
+
+  it("puts findings without a severity subheading under an empty severity, after the rest", () => {
+    expect(countFindings("## Findings\n1. `a.ts:1` x\n### Critical\n1. y")).toEqual([
+      { severity: "Critical", count: 1 },
+      { severity: "", count: 1 },
+    ]);
+    expect(countFindings("## Findings\nNone.\n## Done well\n- z")).toEqual([]);
+  });
+
+  it("leaves out a subsection that is not a severity, such as notes outside the diff", () => {
+    const review = [
+      "## Findings",
+      "### Major (1)",
+      "1. `a.ts:1` — x",
+      "### Outside this diff",
+      "- `b.ts:2` — an older problem.",
+      "### Minor — 1",
+      "2. `c.ts:3` — y",
+    ].join("\n");
+    expect(countFindings(review)).toEqual([
+      { severity: "Major", count: 1 },
+      { severity: "Minor", count: 1 },
+    ]);
   });
 });
 

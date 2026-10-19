@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import type { FindingCount } from "../inline-review.ts";
 import { TEMPLATE_NAMES } from "./types.ts";
 import type { TemplateName } from "./types.ts";
 
@@ -12,6 +13,8 @@ export const PLACEHOLDERS = [
   "mr.project",
   "person.name",
   "owner.name",
+  /** What an Agent Review found, such as "ada 8 findings (7 Minor, 1 Nit)"; empty elsewhere. */
+  "review.findings",
 ] as const;
 export type Placeholder = (typeof PLACEHOLDERS)[number];
 export type Templates = Readonly<Record<TemplateName, string>>;
@@ -26,6 +29,8 @@ export const DEFAULT_TEMPLATES: Templates = {
     "Halo {{person.name}}, saya sudah review MR kamu dan ada perubahan yang perlu dilihat:\n{{mr.link}}",
   "notice.comments":
     "Halo {{person.name}}, saya sudah review MR kamu dan meninggalkan beberapa komentar:\n{{mr.link}}",
+  "notice.findings":
+    "Halo {{person.name}}, saya sudah review MR kamu: {{review.findings}}.\n{{mr.link}}\nDetailnya ada di komentar MR.",
   rereview:
     "Halo {{person.name}}, MR ini sudah saya update sesuai review-mu. Boleh minta tolong dicek lagi?\n{{mr.link}}\nTerima kasih!",
 };
@@ -42,6 +47,19 @@ export function escapeMarkdown(text: string): string {
 export function markdownLink(title: string, url: string): string {
   const target = url.replace(/[ ()<>]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
   return `[${escapeMarkdown(title)}](${target})`;
+}
+
+/** The `review.findings` value: "tidak ada findings", or the total and each severity in order. */
+export function describeFindings(counts: readonly FindingCount[]): string {
+  const total = counts.reduce((sum, each) => sum + each.count, 0);
+  if (total === 0) return "tidak ada findings";
+  const head = `ada ${total} ${total === 1 ? "finding" : "findings"}`;
+  if (counts.every((each) => each.severity === "")) return head;
+  const parts = counts.map(
+    (each) =>
+      `${each.count} ${each.severity === "" ? "tanpa severity" : escapeMarkdown(each.severity)}`,
+  );
+  return `${head} (${parts.join(", ")})`;
 }
 
 export class TemplateError extends Error {

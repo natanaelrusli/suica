@@ -1,6 +1,7 @@
 import { UNREVIEWED } from "../domain.ts";
 import type { MergeRequest, ReviewState, Snapshot } from "../domain.ts";
 import { myReviewState, reviewerKey } from "../events.ts";
+import { countFindings } from "../inline-review.ts";
 import type { PreviousState } from "../events.ts";
 import type {
   Intent,
@@ -12,6 +13,7 @@ import type {
   TeamsState,
   TemplateName,
 } from "./types.ts";
+import { describeFindings } from "./templates.ts";
 
 export interface PlanConfig {
   readonly maxMessagesPerReviewer: number;
@@ -222,6 +224,8 @@ export function planTeams(input: PlanInput): TeamsPlan {
           changedAt: now,
           noticedState: seeded.state,
           noticedNotes: seeded.notes,
+          // An Agent Review posted before the round started is history, never announced.
+          announcedReview: state.postedReviews.get(mr.key)?.id ?? null,
         },
       });
       continue;
@@ -233,6 +237,25 @@ export function planTeams(input: PlanInput): TeamsPlan {
         // A new Review Request after an earlier review: do not announce the old comments again.
         round = { ...round, noticedState: UNREVIEWED, noticedNotes: myNotes };
       }
+    }
+    // An Agent Review is announced with its findings once its comments show (or, should they
+    // never be counted, after the debounce), and that announces those comments too.
+    const posted = state.postedReviews.get(mr.key);
+    if (
+      live &&
+      posted !== undefined &&
+      posted.id > (round.announcedReview ?? 0) &&
+      (round.myNotes > round.noticedNotes || now - posted.postedAt >= config.noticeDebounceMs)
+    ) {
+      intents.push({
+        dedupeKey: `findings:${posted.id}`,
+        kind: "notice",
+        variant: "notice.findings",
+        mr: intentMr(mr),
+        recipient: mr.author,
+        findings: describeFindings(countFindings(posted.body)),
+      });
+      round = { ...round, noticedNotes: round.myNotes, announcedReview: posted.id };
     }
     const variant = noticeVariant(round);
     if (live && variant !== undefined && now - round.changedAt >= config.noticeDebounceMs) {

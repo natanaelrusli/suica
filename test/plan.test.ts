@@ -3,7 +3,7 @@ import type { MergeRequest } from "../src/domain.ts";
 import { reviewerKey } from "../src/events.ts";
 import { planTeams } from "../src/teams/plan.ts";
 import type { PlanConfig } from "../src/teams/plan.ts";
-import type { Round, TeamsState } from "../src/teams/types.ts";
+import type { PostedReview, Round, TeamsState } from "../src/teams/types.ts";
 import { ME, mr, note, person, previous, reviewer, snapshot } from "./builders.ts";
 import { NOW, teamsState } from "./teams-builders.ts";
 
@@ -178,9 +178,20 @@ describe("review notices (flow C)", () => {
     changedAt: NOW - HOUR,
     noticedState: "UNREVIEWED",
     noticedNotes: 0,
+    announcedReview: null,
     ...overrides,
   });
-  const withRound = (value: Round) => teamsState({ rounds: new Map([[KEY, value]]) });
+  const withRound = (value: Round, posted?: PostedReview) =>
+    teamsState({
+      rounds: new Map([[KEY, value]]),
+      postedReviews: new Map(posted === undefined ? [] : [[KEY, posted]]),
+    });
+  const REVIEW_BODY = "## Findings\n### Minor\n1. `a.ts:1` — x\n2. `b.ts` — y\n### Nit\n3. z";
+  const posted = (id: number, postedAt = NOW - MINUTE): PostedReview => ({
+    id,
+    postedAt,
+    body: REVIEW_BODY,
+  });
 
   it("records the first sighting without any notice", () => {
     const result = plan({ snapshot: snapshot({ reviewRequested: [theirs("UNREVIEWED")] }) });
@@ -282,6 +293,86 @@ describe("review notices (flow C)", () => {
     ]);
   });
 
+  it("seeds a new round with the Agent Review already posted, so it is never announced", () => {
+    const result = plan({
+      snapshot: snapshot({ reviewRequested: [theirs("UNREVIEWED", [note("a", ME)])] }),
+      state: teamsState({ postedReviews: new Map([[KEY, posted(4)]]) }),
+    });
+    expect(result.intents).toEqual([]);
+    expect(result.roundUpdates).toEqual([
+      { mrKey: KEY, round: round({ myNotes: 1, changedAt: NOW, announcedReview: 4 }) },
+    ]);
+  });
+
+  it("announces a posted Agent Review's findings as soon as its comments show, without debounce", () => {
+    const result = plan({
+      snapshot: snapshot({
+        reviewRequested: [theirs("UNREVIEWED", [note("a", ME), note("b", ME)])],
+      }),
+      state: withRound(round({ announcedReview: 3 }), posted(4)),
+    });
+    expect(result.intents).toEqual([
+      {
+        dedupeKey: "findings:4",
+        kind: "notice",
+        variant: "notice.findings",
+        mr: {
+          key: KEY,
+          iid: 7,
+          projectPath: "g/p",
+          title: "MR 7",
+          url: "https://gitlab.example/g/p/-/merge_requests/7",
+        },
+        recipient: { username: "alice", name: "Alice" },
+        findings: "ada 3 findings (2 Minor, 1 Nit)",
+      },
+    ]);
+    // The comments are announced with it, so no plain 'comments' notice follows.
+    expect(result.roundUpdates).toEqual([
+      {
+        mrKey: KEY,
+        round: round({ myNotes: 2, changedAt: NOW, noticedNotes: 2, announcedReview: 4 }),
+      },
+    ]);
+  });
+
+  it("waits for the comments to show, but not longer than the notice debounce", () => {
+    const current = snapshot({ reviewRequested: [theirs("UNREVIEWED")] });
+    const early = plan({ snapshot: current, state: withRound(round(), posted(4)) });
+    expect(early.intents).toEqual([]);
+
+    const late = plan({
+      snapshot: current,
+      state: withRound(round(), posted(4, NOW - 11 * MINUTE)),
+    });
+    expect(late.intents.map((i) => i.dedupeKey)).toEqual(["findings:4"]);
+  });
+
+  it("announces each Agent Review once and still notices a later approval", () => {
+    const result = plan({
+      snapshot: snapshot({ reviewRequested: [theirs("APPROVED", [note("a", ME)])] }),
+      state: withRound(
+        round({
+          myState: "APPROVED",
+          myNotes: 1,
+          noticedNotes: 1,
+          changedAt: NOW - 11 * MINUTE,
+          announcedReview: 4,
+        }),
+        posted(4),
+      ),
+    });
+    expect(result.intents.map((i) => i.variant)).toEqual(["notice.approved"]);
+  });
+
+  it("does not announce findings before the Teams baseline", () => {
+    const result = plan({
+      snapshot: snapshot({ reviewRequested: [theirs("UNREVIEWED", [note("a", ME)])] }),
+      state: { ...withRound(round(), posted(4)), baselineDone: false },
+    });
+    expect(result.intents).toEqual([]);
+  });
+
   it("ignores draft MRs", () => {
     const draft = mr(7, { draft: true, reviewers: [reviewer("me", "APPROVED")] });
     const result = plan({ snapshot: snapshot({ reviewRequested: [draft] }) });
@@ -319,6 +410,7 @@ describe("Teams baseline", () => {
           changedAt: NOW,
           noticedState: "APPROVED",
           noticedNotes: 1,
+          announcedReview: null,
         },
       },
     ]);

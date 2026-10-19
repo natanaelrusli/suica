@@ -14,7 +14,7 @@ import { resolveEmail } from "./identity.ts";
 import type { Resolution } from "./identity.ts";
 import { escapeMarkdown, markdownLink, renderTemplate } from "./templates.ts";
 import type { Placeholder, Templates } from "./templates.ts";
-import type { HeldMessage, OutboxKind, OutboxRow } from "./types.ts";
+import type { HeldMessage, OutboxRow } from "./types.ts";
 
 type TeamsStore = Pick<
   Store,
@@ -60,9 +60,15 @@ const NAME_MAX = 60;
 /** A broken login fails every lookup the same way: stop early instead of parking the whole queue. */
 const MAX_LOOKUP_ERRORS_IN_A_ROW = 3;
 
-export function modeFor(kind: OutboxKind, config: Pick<Config["teams"], "modes">): SendMode {
-  if (kind === "notice") return config.modes.notice;
-  return kind === "rereview" ? config.modes.rereview : config.modes.nudge;
+export function modeFor(
+  row: Pick<OutboxRow, "kind" | "variant">,
+  config: Pick<Config["teams"], "modes">,
+): SendMode {
+  // The Review Notice with an Agent Review's findings has its own mode, so it can go out on its
+  // own while the other Review Notices still wait for approval.
+  if (row.variant === "notice.findings") return config.modes.findings;
+  if (row.kind === "notice") return config.modes.notice;
+  return row.kind === "rereview" ? config.modes.rereview : config.modes.nudge;
 }
 
 function failureKind(error: unknown): TeamsFailureKind {
@@ -120,6 +126,8 @@ function valuesFor(row: OutboxRow, ownerName: string): Record<Placeholder, strin
     "mr.project": escapeMarkdown(row.mrProject),
     "person.name": escapeMarkdown(clean(row.recipientName, NAME_MAX)),
     "owner.name": escapeMarkdown(clean(ownerName, NAME_MAX)),
+    // Built by describeFindings, which already escapes what it took from the review.
+    "review.findings": row.findings ?? "",
   };
 }
 
@@ -235,7 +243,7 @@ export async function dispatchQueued(
       deps.store.transitionOutbox(row.id, "queued", "failed", { detail: "template" }, nowMs);
       continue;
     }
-    const mode = modeFor(row.kind, deps.config);
+    const mode = modeFor(row, deps.config);
     if (mode === "dry-run") {
       deps.store.transitionOutbox(row.id, "queued", "dry-run", { text }, nowMs);
       deps.log.info("dry-run message recorded", { kind: row.kind });

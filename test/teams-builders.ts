@@ -42,6 +42,7 @@ export function teamsState(overrides: Partial<TeamsState> = {}): TeamsState {
     undelivered: new Set(),
     rereviewMrs: new Map(),
     rereviewReviewers: new Map(),
+    postedReviews: new Map(),
     ...overrides,
   };
 }

@@ -16,6 +16,7 @@ function row(id: number, status: OutboxStatus, overrides: Partial<OutboxRow> = {
     mrUrl: "https://gitlab.example/g/p/-/merge_requests/5",
     recipient: "bob",
     recipientName: "Bob",
+    findings: null,
     status,
     detail: "",
     approved: false,

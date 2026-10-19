@@ -14,6 +14,7 @@ const row = (overrides: Partial<OutboxRow> = {}): OutboxRow => ({
   mrUrl: "https://gitlab.example/g/p/-/merge_requests/5",
   recipient: "bob",
   recipientName: "Bob",
+  findings: null,
   status: "pending",
   detail: "",
   approved: false,

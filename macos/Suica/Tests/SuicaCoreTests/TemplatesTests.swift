@@ -44,7 +44,10 @@ actor FakeTemplatesClient: TemplatesClient {
     let document = try decodeDocument(TemplatesDocument.self, from: contract("templates.v1.json"))
     #expect(
         Set(document.templates.map(\.name))
-            == ["nudge", "reminder", "rereview", "notice.approved", "notice.changes", "notice.comments"])
+            == [
+                "nudge", "reminder", "rereview", "notice.approved", "notice.changes", "notice.comments",
+                "notice.findings",
+            ])
     // Every template the agent lists has its own title and description in the window.
     for name in document.templates.map(\.name) {
         #expect(Copy.templateTitle(name) != name && !Copy.templateWhen(name).isEmpty, "\(name)")

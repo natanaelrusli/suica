@@ -57,7 +57,7 @@ function setup(options: { mode?: SendMode; now?: number; api?: Partial<TeamsApi>
     gateway,
     templates: DEFAULT_TEMPLATES,
     config: {
-      modes: { nudge: mode, notice: mode, rereview: mode },
+      modes: { nudge: mode, notice: mode, rereview: mode, findings: mode },
       workingHours: hours,
       people: {},
     },
@@ -147,7 +147,7 @@ describe("dispatchQueued", () => {
       ...h.deps,
       config: {
         ...h.deps.config,
-        modes: { nudge: "approval", notice: "dry-run", rereview: "approval" },
+        modes: { nudge: "approval", notice: "dry-run", rereview: "approval", findings: "approval" },
       },
     };
     h.store.applyTeamsPlan(
@@ -177,6 +177,56 @@ describe("dispatchQueued", () => {
     await dispatchQueued(h.deps, both);
     expect(h.store.listOutbox(["pending"]).map((row) => row.kind)).toEqual(["nudge"]);
     expect(h.store.listOutbox(["dry-run"]).map((row) => row.kind)).toEqual(["notice"]);
+  });
+
+  it("sends the findings notice in its own mode while other notices are a dry run", async () => {
+    const h = setup();
+    h.deps = {
+      ...h.deps,
+      config: {
+        ...h.deps.config,
+        modes: { nudge: "approval", notice: "dry-run", rereview: "approval", findings: "auto" },
+      },
+    };
+    const theirs = {
+      key: "g/p!7",
+      iid: 7,
+      projectPath: "g/p",
+      title: "Fix it",
+      url: "https://gitlab.example/g/p/-/merge_requests/7",
+    };
+    h.store.applyTeamsPlan(
+      teamsPlan({
+        intents: [
+          intent(1, {
+            dedupeKey: "findings:4",
+            kind: "notice",
+            variant: "notice.findings",
+            mr: theirs,
+            findings: "ada 3 findings (2 Minor, 1 Nit)",
+          }),
+          intent(2, {
+            dedupeKey: "notice:g/p!7:APPROVED:0",
+            kind: "notice",
+            variant: "notice.approved",
+            mr: theirs,
+          }),
+        ],
+      }),
+      NOW,
+    );
+    const requested = snapshot({
+      reviewRequested: [mr(7, { reviewers: [reviewer("me", "APPROVED")] })],
+    });
+    const result = await dispatchQueued(h.deps, requested);
+    expect(result.sent).toBe(1);
+    expect(h.sent).toEqual([
+      {
+        chatId: "chat-bob@x.id",
+        text: "Halo Bob, saya sudah review MR kamu: ada 3 findings (2 Minor, 1 Nit).\n[Fix it](https://gitlab.example/g/p/-/merge_requests/7)\nDetailnya ada di komentar MR.",
+      },
+    ]);
+    expect(h.store.listOutbox(["dry-run"]).map((row) => row.variant)).toEqual(["notice.approved"]);
   });
 
   it("keeps rows queued outside working hours and sends them once the hours begin", async () => {
@@ -344,7 +394,10 @@ describe("at most once", () => {
     await dispatchQueued(h.deps, own());
     h.deps = {
       ...h.deps,
-      config: { ...h.deps.config, modes: { nudge: "auto", notice: "auto", rereview: "auto" } },
+      config: {
+        ...h.deps.config,
+        modes: { nudge: "auto", notice: "auto", rereview: "auto", findings: "auto" },
+      },
     };
     await dispatchQueued(h.deps, own());
     expect(h.sent).toEqual([]);
@@ -517,11 +570,11 @@ describe("Re-review Nudge", () => {
   }
 
   it("uses its own send mode", () => {
-    const modes = { nudge: "auto", notice: "auto", rereview: "dry-run" } as const;
-    expect(modeFor("rereview", { modes })).toBe("dry-run");
-    expect(modeFor("nudge", { modes })).toBe("auto");
-    expect(modeFor("reminder", { modes })).toBe("auto");
-    expect(modeFor("notice", { modes })).toBe("auto");
+    const modes = { nudge: "auto", notice: "auto", rereview: "dry-run", findings: "auto" } as const;
+    expect(modeFor({ kind: "rereview", variant: "rereview" }, { modes })).toBe("dry-run");
+    expect(modeFor({ kind: "nudge", variant: "nudge" }, { modes })).toBe("auto");
+    expect(modeFor({ kind: "reminder", variant: "reminder" }, { modes })).toBe("auto");
+    expect(modeFor({ kind: "notice", variant: "notice.comments" }, { modes })).toBe("auto");
   });
 
   it("holds it for approval, renders the re-review template and reports it as held", async () => {

@@ -74,13 +74,42 @@ describe("resolveEmail", () => {
     expect(store.loadIdentity("20435")).toBe("u1@x.id");
   });
 
-  it("does not accept a prefix match", async () => {
-    const { deps, store } = setup({ found: [user("Rayhan Aswiansyah", "u1")] });
-    await expect(resolveEmail(deps, person("20435", "Rayhan"))).resolves.toEqual({
+  it("accepts one Teams name that adds whole words after the GitLab name, and caches it", async () => {
+    const { deps, store } = setup({ found: [user("Mufid Hadi Abdulhakim", "u1")] });
+    await expect(resolveEmail(deps, person("20400", "Mufid Hadi"))).resolves.toEqual({
+      kind: "resolved",
+      email: "u1@x.id",
+    });
+    expect(store.loadIdentity("20400")).toBe("u1@x.id");
+  });
+
+  it("prefers the exact name over longer ones", async () => {
+    const { deps } = setup({
+      found: [user("Budi Santoso Putra", "u1"), user("Budi Santoso", "u2")],
+    });
+    await expect(resolveEmail(deps, person("1", "Budi Santoso"))).resolves.toEqual({
+      kind: "resolved",
+      email: "u2@x.id",
+    });
+  });
+
+  it("refuses two different people whose names both start with the GitLab name", async () => {
+    const { deps, store } = setup({
+      found: [user("Budi Santoso Putra", "u1"), user("Budi Santoso Wijaya", "u2")],
+    });
+    await expect(resolveEmail(deps, person("1", "Budi Santoso"))).resolves.toEqual({
+      kind: "unresolved",
+      reason: "ambiguous",
+    });
+    expect(store.loadIdentity("1")).toBeUndefined();
+  });
+
+  it("does not accept a name that only starts with the same letters", async () => {
+    const { deps } = setup({ found: [user("Adinda Putri", "u1")] });
+    await expect(resolveEmail(deps, person("1", "Adi"))).resolves.toEqual({
       kind: "unresolved",
       reason: "no-match",
     });
-    expect(store.loadIdentity("20435")).toBeUndefined();
   });
 
   it("refuses two different people with the same display name", async () => {

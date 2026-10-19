@@ -8,7 +8,8 @@
     "mr.iid",
     "mr.project",
     "person.name",
-    "owner.name"
+    "owner.name",
+    "review.findings"
   ],
   "templates": [
     {
@@ -40,6 +41,12 @@
       "text": "Halo {{person.name}}, saya sudah review MR kamu dan meninggalkan beberapa komentar:\n{{mr.link}}",
       "custom": false,
       "defaultText": "Halo {{person.name}}, saya sudah review MR kamu dan meninggalkan beberapa komentar:\n{{mr.link}}"
+    },
+    {
+      "name": "notice.findings",
+      "text": "Halo {{person.name}}, saya sudah review MR kamu: {{review.findings}}.\n{{mr.link}}\nDetailnya ada di komentar MR.",
+      "custom": false,
+      "defaultText": "Halo {{person.name}}, saya sudah review MR kamu: {{review.findings}}.\n{{mr.link}}\nDetailnya ada di komentar MR."
     },
     {
       "name": "rereview",

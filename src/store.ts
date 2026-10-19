@@ -9,6 +9,7 @@ import type {
   NudgeRecord,
   OutboxRow,
   OutboxStatus,
+  PostedReview,
   RereviewMr,
   RereviewReviewer,
   Round,
@@ -192,7 +193,21 @@ export interface Store {
   close(): void;
 }
 
-const SCHEMA_VERSION = 8;
+const SCHEMA_VERSION = 9;
+/**
+ * Columns for the Review Notice that reports an Agent Review's findings. Rounds that exist when
+ * the database upgrades count the reviews already posted as announced, so none goes out late.
+ */
+const SCHEMA_V9_COLUMNS: readonly (readonly [string, string, string])[] = [
+  ["review_round", "announced_review", "INTEGER"],
+  ["outbox", "findings", "TEXT"],
+];
+const SCHEMA_V9_SEED = `
+UPDATE review_round SET announced_review = (
+  SELECT MAX(id) FROM agent_review
+  WHERE agent_review.mr_key = review_round.mr_key AND status = 'posted'
+);
+`;
 const SCHEMA_V8 = `
 CREATE TABLE IF NOT EXISTS rereview_mr (
   mr_key TEXT PRIMARY KEY, head TEXT NOT NULL, changed_at INTEGER NOT NULL
@@ -344,6 +359,7 @@ function toOutboxRow(row: Row): OutboxRow {
     mrUrl: text(row, "mr_url"),
     recipient: text(row, "recipient"),
     recipientName: text(row, "recipient_name"),
+    findings: nullableText(row, "findings"),
     status,
     detail: text(row, "detail"),
     text: typeof stored === "string" ? stored : null,
@@ -443,6 +459,13 @@ function initSchema(db: DatabaseSync): void {
     }
   }
   if (version < 8) db.exec(SCHEMA_V8);
+  if (version < 9) {
+    for (const [table, column, type] of SCHEMA_V9_COLUMNS) {
+      if (!hasColumn(db, table, column))
+        db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+    }
+    db.exec(SCHEMA_V9_SEED);
+  }
   if (version !== SCHEMA_VERSION) db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 }
 
@@ -780,6 +803,8 @@ export function openStore(path: string): Store {
           changedAt: integer(row, "changed_at"),
           noticedState: text(row, "noticed_state"),
           noticedNotes: integer(row, "noticed_notes"),
+          announcedReview:
+            typeof row["announced_review"] === "number" ? row["announced_review"] : null,
         });
       }
       const rereviewMrs = new Map<string, RereviewMr>();
@@ -798,6 +823,17 @@ export function openStore(path: string): Store {
           nudged: integer(row, "nudged") === 1,
         });
       }
+      const postedReviews = new Map<string, PostedReview>();
+      for (const row of rows(
+        `SELECT id, mr_key, updated_at, body FROM agent_review WHERE id IN
+           (SELECT MAX(id) FROM agent_review WHERE status = 'posted' AND body IS NOT NULL GROUP BY mr_key)`,
+      )) {
+        postedReviews.set(text(row, "mr_key"), {
+          id: integer(row, "id"),
+          postedAt: integer(row, "updated_at"),
+          body: text(row, "body"),
+        });
+      }
       return {
         baselineDone: metaValue(META_TEAMS_BASELINE) === "1",
         nudges,
@@ -805,6 +841,7 @@ export function openStore(path: string): Store {
         undelivered,
         rereviewMrs,
         rereviewReviewers,
+        postedReviews,
       };
     },
 
@@ -826,8 +863,8 @@ export function openStore(path: string): Store {
       const insertOutbox = db.prepare(
         `INSERT OR IGNORE INTO outbox
            (dedupe_key, kind, variant, mr_key, mr_iid, mr_project, mr_title, mr_url,
-            recipient, recipient_name, status, detail, text, approved, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', '', NULL, 0, ?, ?)`,
+            recipient, recipient_name, findings, status, detail, text, approved, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', '', NULL, 0, ?, ?)`,
       );
       const upsertNudge = db.prepare(
         `INSERT INTO nudge_state (key, sent_count, last_sent_at) VALUES (?, ?, ?)
@@ -836,12 +873,12 @@ export function openStore(path: string): Store {
       );
       const upsertRound = db.prepare(
         `INSERT INTO review_round
-           (mr_key, my_state, my_notes, changed_at, noticed_state, noticed_notes)
-         VALUES (?, ?, ?, ?, ?, ?)
+           (mr_key, my_state, my_notes, changed_at, noticed_state, noticed_notes, announced_review)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(mr_key) DO UPDATE SET
            my_state = excluded.my_state, my_notes = excluded.my_notes,
            changed_at = excluded.changed_at, noticed_state = excluded.noticed_state,
-           noticed_notes = excluded.noticed_notes`,
+           noticed_notes = excluded.noticed_notes, announced_review = excluded.announced_review`,
       );
       db.exec("BEGIN IMMEDIATE");
       try {
@@ -858,6 +895,7 @@ export function openStore(path: string): Store {
             item.mr.url,
             item.recipient.username,
             item.recipient.name,
+            item.findings ?? null,
             now,
             now,
           );
@@ -874,6 +912,7 @@ export function openStore(path: string): Store {
             round.changedAt,
             round.noticedState,
             round.noticedNotes,
+            round.announcedReview,
           );
         }
         const keepNudges = new Set(plan.keepNudges);

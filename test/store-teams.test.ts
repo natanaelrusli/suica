@@ -24,6 +24,7 @@ const round: Round = {
   changedAt: NOW,
   noticedState: "UNREVIEWED",
   noticedNotes: 0,
+  announcedReview: null,
 };
 const DAY = 24 * 3_600_000;
 const rereviewMr: RereviewMr = { head: "h2", changedAt: NOW };
@@ -64,11 +65,12 @@ describe("schema v2", () => {
       undelivered: new Set(),
       rereviewMrs: new Map(),
       rereviewReviewers: new Map(),
+      postedReviews: new Map(),
     });
     store.close();
 
     const raw = new DatabaseSync(path);
-    expect(raw.prepare("PRAGMA user_version").get()?.["user_version"]).toBe(8);
+    expect(raw.prepare("PRAGMA user_version").get()?.["user_version"]).toBe(9);
     raw.close();
   });
 });
@@ -118,6 +120,7 @@ describe("applyTeamsPlan", () => {
       undelivered: new Set(["g/p!5|bob"]),
       rereviewMrs: new Map(),
       rereviewReviewers: new Map(),
+      postedReviews: new Map(),
     });
   });
 
@@ -232,7 +235,7 @@ describe("Re-review ledger (schema 8)", () => {
     expect(store.loadTeams().rereviewMrs.size).toBe(1);
     store.close();
     const check = new DatabaseSync(path);
-    expect(check.prepare("PRAGMA user_version").get()?.["user_version"]).toBe(8);
+    expect(check.prepare("PRAGMA user_version").get()?.["user_version"]).toBe(9);
     check.close();
   });
 
@@ -353,5 +356,83 @@ describe("identity cache", () => {
     store.saveIdentity("20435", "rayhan@madhani.id", NOW);
     store.saveIdentity("20435", "rayhan.new@madhani.id", NOW + 1);
     expect(store.loadIdentity("20435")).toBe("rayhan.new@madhani.id");
+  });
+});
+
+describe("findings notices (schema 9)", () => {
+  const BODY = "## Findings\n1. `a.ts:1` — x";
+
+  function postReview(store: ReturnType<typeof openStore>, mrKey: string, at: number): number {
+    const id = store.queueAgentReview(mrKey, "auto", at) ?? 0;
+    store.transitionAgentReview(id, ["queued"], "running", {}, at);
+    store.transitionAgentReview(id, ["running"], "ready", { body: BODY }, at);
+    store.transitionAgentReview(id, ["ready"], "posted", {}, at + 1);
+    return id;
+  }
+
+  it("loads the latest posted review of each MR, with when it was posted", () => {
+    const store = openStore(":memory:");
+    postReview(store, "g/p!7", NOW);
+    const latest = postReview(store, "g/p!7", NOW + 10);
+    // A newer review still waiting for the Owner is not posted yet.
+    store.queueAgentReview("g/p!7", "manual", NOW + 20);
+    expect(store.loadTeams().postedReviews).toEqual(
+      new Map([["g/p!7", { id: latest, postedAt: NOW + 11, body: BODY }]]),
+    );
+  });
+
+  it("keeps the announced review in the round and the findings text in the outbox", () => {
+    const store = openStore(":memory:");
+    store.applyTeamsPlan(
+      teamsPlan({
+        intents: [
+          intent(1, {
+            dedupeKey: "findings:4",
+            kind: "notice",
+            variant: "notice.findings",
+            findings: "ada 1 finding",
+          }),
+          intent(2),
+        ],
+        roundUpdates: [{ mrKey: "g/p!7", round: { ...round, announcedReview: 4 } }],
+        keepRounds: ["g/p!7"],
+      }),
+      NOW,
+    );
+    expect(store.loadTeams().rounds.get("g/p!7")?.announcedReview).toBe(4);
+    expect(store.listOutbox(["queued"]).map((row) => row.findings)).toEqual([
+      "ada 1 finding",
+      null,
+    ]);
+  });
+
+  it("upgrades a schema 8 database and counts reviews posted before it as announced", () => {
+    const path = tempDb();
+    const first = openStore(path);
+    const posted = postReview(first, "g/p!7", NOW);
+    first.applyTeamsPlan(
+      teamsPlan({
+        intents: [intent(1)],
+        roundUpdates: [
+          { mrKey: "g/p!7", round },
+          { mrKey: "g/p!8", round },
+        ],
+        keepRounds: ["g/p!7", "g/p!8"],
+      }),
+      NOW,
+    );
+    first.close();
+    const raw = new DatabaseSync(path);
+    raw.exec(
+      "ALTER TABLE review_round DROP COLUMN announced_review; ALTER TABLE outbox DROP COLUMN findings; PRAGMA user_version = 8;",
+    );
+    raw.close();
+
+    const store = openStore(path);
+    const rounds = store.loadTeams().rounds;
+    expect(rounds.get("g/p!7")?.announcedReview).toBe(posted);
+    expect(rounds.get("g/p!8")?.announcedReview).toBeNull();
+    expect(store.listOutbox(["queued"])[0]?.findings).toBeNull();
+    store.close();
   });
 });

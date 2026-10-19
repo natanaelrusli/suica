@@ -111,7 +111,7 @@ private func data(_ text: String) -> Data { Data(text.utf8) }
     let config = try decodeDocument(ConfigDocument.self, from: contract("config.v1.json"))
     #expect(config.path == "/tmp/config.yaml" && config.exists && config.sha256 == "0")
     #expect(config.issues.isEmpty)
-    #expect(config.fields.count == 35)
+    #expect(config.fields.count == 36)
     let first = try #require(config.fields.first)
     #expect(first.path == ["gitlab", "hostname"] && first.type == .string)
     #expect(first.value == .string("repo.example") && first.effective == .string("repo.example"))
@@ -129,6 +129,9 @@ private func data(_ text: String) -> Data { Data(text.utf8) }
     #expect(rereviewMode.effective == .string("approval"))
     let rereviewAfter = try #require(config.fields.first { $0.path == ["teams", "rereviewAfterMinutes"] })
     #expect(rereviewAfter.type == .int && rereviewAfter.effective == .int(10))
+    // The findings notice sends on its own by default.
+    let findingsMode = try #require(config.fields.first { $0.path == ["teams", "modes", "findings"] })
+    #expect(findingsMode.type == .enum && findingsMode.effective == .string("auto"))
 
     let days = try #require(config.fields.first { $0.path == ["teams", "workingHours", "days"] })
     #expect(days.type == .weekdays && days.effective == .array([1, 2, 3, 4, 5].map(JSONValue.int)))
