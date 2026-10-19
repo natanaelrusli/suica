@@ -6,7 +6,7 @@ import { createReviewWorker, queueAutomaticReviews } from "./agent-review.ts";
 import type { ReviewWorker } from "./agent-review.ts";
 import { defaultExec } from "./exec.ts";
 import { createFailureTracker } from "./failures.ts";
-import { fetchSnapshot, glabPost, glabRest, glabRunner } from "./gitlab.ts";
+import { fetchSnapshot, glabPost, glabPostJson, glabRest, glabRunner } from "./gitlab.ts";
 import { createLogger } from "./log.ts";
 import type { Logger } from "./log.ts";
 import { createNotifier } from "./notifier.ts";
@@ -71,6 +71,7 @@ export function createRuntime(configPath: string, signal?: AbortSignal): Runtime
     graphql: run,
     rest: glabRest(config.gitlab),
     post: glabPost(config.gitlab),
+    postJson: glabPostJson(config.gitlab),
     notifier,
     log,
     now: Date.now,

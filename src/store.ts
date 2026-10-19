@@ -9,6 +9,8 @@ import type {
   NudgeRecord,
   OutboxRow,
   OutboxStatus,
+  RereviewMr,
+  RereviewReviewer,
   Round,
   TeamsPlan,
   TeamsState,
@@ -190,7 +192,16 @@ export interface Store {
   close(): void;
 }
 
-const SCHEMA_VERSION = 7;
+const SCHEMA_VERSION = 8;
+const SCHEMA_V8 = `
+CREATE TABLE IF NOT EXISTS rereview_mr (
+  mr_key TEXT PRIMARY KEY, head TEXT NOT NULL, changed_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS rereview_reviewer (
+  key TEXT PRIMARY KEY, reviewed_head TEXT, state TEXT NOT NULL,
+  notes INTEGER NOT NULL, nudged INTEGER NOT NULL
+);
+`;
 /** Columns schema 6 lacked when it first shipped; schema 6 now creates the table with them. */
 const SCHEMA_V7_COLUMNS: readonly (readonly [string, string])[] = [
   ["mr_title", "TEXT"],
@@ -431,6 +442,7 @@ function initSchema(db: DatabaseSync): void {
       }
     }
   }
+  if (version < 8) db.exec(SCHEMA_V8);
   if (version !== SCHEMA_VERSION) db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 }
 
@@ -770,13 +782,38 @@ export function openStore(path: string): Store {
           noticedNotes: integer(row, "noticed_notes"),
         });
       }
-      return { baselineDone: metaValue(META_TEAMS_BASELINE) === "1", nudges, rounds, undelivered };
+      const rereviewMrs = new Map<string, RereviewMr>();
+      for (const row of rows("SELECT * FROM rereview_mr")) {
+        rereviewMrs.set(text(row, "mr_key"), {
+          head: text(row, "head"),
+          changedAt: integer(row, "changed_at"),
+        });
+      }
+      const rereviewReviewers = new Map<string, RereviewReviewer>();
+      for (const row of rows("SELECT * FROM rereview_reviewer")) {
+        rereviewReviewers.set(text(row, "key"), {
+          reviewedHead: nullableText(row, "reviewed_head"),
+          state: text(row, "state"),
+          notes: integer(row, "notes"),
+          nudged: integer(row, "nudged") === 1,
+        });
+      }
+      return {
+        baselineDone: metaValue(META_TEAMS_BASELINE) === "1",
+        nudges,
+        rounds,
+        undelivered,
+        rereviewMrs,
+        rereviewReviewers,
+      };
     },
 
     resetTeamsBaseline() {
       db.exec("BEGIN IMMEDIATE");
       try {
-        db.exec("DELETE FROM review_round");
+        db.exec(
+          "DELETE FROM review_round; DELETE FROM rereview_mr; DELETE FROM rereview_reviewer;",
+        );
         db.prepare("DELETE FROM meta WHERE key = ?").run(META_TEAMS_BASELINE);
         db.exec("COMMIT");
       } catch (error) {
@@ -854,6 +891,27 @@ export function openStore(path: string): Store {
         db.prepare(
           `DELETE FROM outbox WHERE updated_at < ? AND status IN (${FINISHED_STATUSES.map(() => "?").join(", ")})`,
         ).run(now - OUTBOX_RETENTION_MS, ...FINISHED_STATUSES);
+        // The ledger is small and each poll rebuilds it whole, so it is replaced, not patched.
+        db.exec("DELETE FROM rereview_mr; DELETE FROM rereview_reviewer;");
+        const insertRereviewMr = db.prepare(
+          "INSERT INTO rereview_mr (mr_key, head, changed_at) VALUES (?, ?, ?)",
+        );
+        for (const [mrKey, record] of plan.rereviewMrs) {
+          insertRereviewMr.run(mrKey, record.head, record.changedAt);
+        }
+        const insertRereviewReviewer = db.prepare(
+          `INSERT INTO rereview_reviewer (key, reviewed_head, state, notes, nudged)
+           VALUES (?, ?, ?, ?, ?)`,
+        );
+        for (const [key, record] of plan.rereviewReviewers) {
+          insertRereviewReviewer.run(
+            key,
+            record.reviewedHead,
+            record.state,
+            record.notes,
+            record.nudged ? 1 : 0,
+          );
+        }
         if (plan.baselineDone) setMeta(META_TEAMS_BASELINE, "1");
         db.exec("COMMIT");
         return created;

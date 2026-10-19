@@ -67,7 +67,9 @@ struct UsageView: View {
             (Copy.last7Days, usage.last7d, "calendar"),
             (Copy.last30Days, usage.last30d, "calendar.badge.clock"),
         ]
-        return LazyVGrid(columns: [GridItem(.adaptive(minimum: 190), spacing: 12, alignment: .top)], spacing: 12) {
+        // One column per period, so the row is filled at any width.
+        let columns = Array(repeating: GridItem(.flexible(), spacing: 12, alignment: .top), count: periods.count)
+        return LazyVGrid(columns: columns, spacing: 12) {
             ForEach(periods, id: \.0) { title, totals, symbol in
                 StatTile(
                     title: title, value: Copy.tokens(totals.allTokens), symbol: symbol, tint: .indigo,

@@ -370,6 +370,10 @@ function harness(
       posts.push(path);
       return Promise.resolve({});
     },
+    postJson: (path: string) => {
+      posts.push(path);
+      return Promise.resolve({});
+    },
   };
   const queue = (): AgentReviewRow => {
     const id = db.queueAgentReview("g/p!7", "manual", NOW) ?? 0;
@@ -671,41 +675,149 @@ describe("postAgentReview and discardAgentReview", () => {
     return { h, id: queued.id };
   }
 
-  it("posts the labelled, sanitised note once", async () => {
-    const { h, id } = await ready();
-    const posts: { path: string; fields: Readonly<Record<string, string>> }[] = [];
+  type Posted = { path: string; body: unknown };
+  /** Post deps that record each call; GitLab keeps one MR version at the reviewed commit. */
+  function postDeps(
+    h: ReturnType<typeof harness>,
+    options: { refuseThread?: boolean; failNote?: boolean; noVersion?: boolean } = {},
+  ) {
+    const notes: Posted[] = [];
+    const threads: Posted[] = [];
     const deps = {
       store: h.db,
       config: CONFIG,
       now: () => NOW,
       log: silent,
+      rest: (path: string) =>
+        Promise.resolve(
+          path.endsWith("/versions?per_page=100")
+            ? [
+                {
+                  id: 3,
+                  head_commit_sha: options.noVersion === true ? "f".repeat(40) : SHA,
+                  base_commit_sha: "base",
+                  start_commit_sha: "start",
+                },
+              ]
+            : {
+                diffs: [
+                  {
+                    old_path: "src/a.ts",
+                    new_path: "src/a.ts",
+                    diff: "@@ -1,2 +1,3 @@\n one\n+two\n+three",
+                  },
+                ],
+              },
+        ),
       post: (path: string, fields: Readonly<Record<string, string>>) => {
-        posts.push({ path, fields });
+        if (options.failNote === true) return Promise.reject(new Error("glab"));
+        notes.push({ path, body: fields["body"] });
+        return Promise.resolve();
+      },
+      postJson: (path: string, body: unknown) => {
+        if (options.refuseThread === true && threads.length === 0 && notes.length === 0) {
+          options.refuseThread = false;
+          return Promise.reject(new Error("400"));
+        }
+        threads.push({ path, body });
         return Promise.resolve();
       },
     };
+    return { deps, notes, threads };
+  }
+  const INLINE_REVIEW = [
+    "# Code review",
+    "## Findings",
+    "1. `src/a.ts:2` — ping @bob about this.",
+    "2. `src/a.ts:3` — second.",
+    "3. `src/a.ts:40` — outside the diff.",
+    "## Done well",
+  ].join("\n");
+  async function readyWith(body: string) {
+    const h = harness({
+      cliStdout: JSON.stringify({ is_error: false, result: body, modelUsage: {} }),
+    });
+    const queued = h.queue();
+    await runAgentReview(h.deps, queued);
+    return { h, id: queued.id };
+  }
+
+  it("posts the labelled, sanitised note once", async () => {
+    const { h, id } = await ready();
+    const { deps, notes, threads } = postDeps(h);
     expect(await postAgentReview(deps, id)).toBe("posted");
-    expect(posts).toHaveLength(1);
-    expect(posts[0]?.path).toBe("projects/g%2Fp/merge_requests/7/notes");
-    expect(posts[0]?.fields["body"]).toMatch(/^> \*\*Agent review\*\*/);
-    expect(h.db.getAgentReview(id)?.status).toBe("posted");
+    expect(notes).toHaveLength(1);
+    expect(threads).toHaveLength(0);
+    expect(notes[0]?.path).toBe("projects/g%2Fp/merge_requests/7/notes");
+    expect(notes[0]?.body).toMatch(/^> \*\*Agent review\*\*/);
+    expect(h.db.getAgentReview(id)).toMatchObject({ status: "posted", detail: "" });
     expect(await postAgentReview(deps, id)).toBe("nothing");
-    expect(posts).toHaveLength(1);
+    expect(notes).toHaveLength(1);
     expect(discardAgentReview(h.db, id, NOW)).toBe(false);
   });
 
   it("puts a failed post back as ready with a note to check GitLab first", async () => {
     const { h, id } = await ready();
-    const deps = {
-      store: h.db,
-      config: CONFIG,
-      now: () => NOW,
-      log: silent,
-      post: () => Promise.reject(new Error("glab")),
-    };
+    const { deps } = postDeps(h, { failNote: true });
     expect(await postAgentReview(deps, id)).toBe("failed");
     expect(h.db.getAgentReview(id)).toMatchObject({ status: "ready" });
     expect(h.db.getAgentReview(id)?.detail).toMatch(/Check the MR in GitLab before posting again/);
+  });
+
+  it("posts findings on a line of the reviewed diff as threads, and the rest as one note", async () => {
+    const { h, id } = await readyWith(INLINE_REVIEW);
+    const { deps, notes, threads } = postDeps(h);
+    expect(await postAgentReview(deps, id, "inline")).toBe("posted");
+    expect(threads.map((thread) => thread.path)).toEqual([
+      "projects/g%2Fp/merge_requests/7/discussions",
+      "projects/g%2Fp/merge_requests/7/discussions",
+    ]);
+    expect(threads[0]?.body).toMatchObject({
+      position: {
+        position_type: "text",
+        base_sha: "base",
+        start_sha: "start",
+        head_sha: SHA,
+        old_path: "src/a.ts",
+        new_path: "src/a.ts",
+        new_line: 2,
+      },
+    });
+    expect(JSON.stringify(threads[0]?.body)).toMatch(
+      /^\{"body":"> \*\*Agent review\*\*, finding 1: [^"]*\\n\\nping bob about this\."/,
+    );
+    expect(notes).toHaveLength(1);
+    expect(notes[0]?.body).toContain("1. `src/a.ts:2` — posted as an inline comment on that line.");
+    expect(notes[0]?.body).toContain("3. `src/a.ts:40` — outside the diff.");
+    expect(h.db.getAgentReview(id)).toMatchObject({ status: "posted" });
+    expect(h.db.getAgentReview(id)?.detail).toMatch(/^2 of 3 findings were posted as inline/);
+  });
+
+  it("keeps a refused thread in the note, and posts one note when GitLab lacks the commit", async () => {
+    const refused = await readyWith(INLINE_REVIEW);
+    const first = postDeps(refused.h, { refuseThread: true });
+    expect(await postAgentReview(first.deps, refused.id, "inline")).toBe("posted");
+    expect(first.threads).toHaveLength(1);
+    expect(first.notes[0]?.body).toContain("1. `src/a.ts:2` — ping bob about this.");
+    expect(first.notes[0]?.body).toContain("2. `src/a.ts:3` — posted as an inline comment");
+
+    const moved = await readyWith(INLINE_REVIEW);
+    const second = postDeps(moved.h, { noVersion: true });
+    expect(await postAgentReview(second.deps, moved.id, "inline")).toBe("posted");
+    expect(second.threads).toHaveLength(0);
+    expect(second.notes[0]?.body).toContain("2. `src/a.ts:3` — second.");
+  });
+
+  it("uses review.postAs by default, and warns when threads went out but the note did not", async () => {
+    const { h, id } = await readyWith(INLINE_REVIEW);
+    const { deps, threads } = postDeps(h, { failNote: true });
+    const inlineConfig = { ...CONFIG, review: { ...CONFIG.review, postAs: "inline" as const } };
+    expect(await postAgentReview({ ...deps, config: inlineConfig }, id)).toBe("failed");
+    expect(threads).toHaveLength(2);
+    expect(h.db.getAgentReview(id)).toMatchObject({ status: "ready" });
+    expect(h.db.getAgentReview(id)?.detail).toMatch(
+      /^2 inline comments were posted, but the summary comment was not\..*posting again repeats them/,
+    );
   });
 
   it("discards a ready review so the MR can be queued again", async () => {

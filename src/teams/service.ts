@@ -2,9 +2,8 @@ import type { Config } from "../config.ts";
 import type { Snapshot } from "../domain.ts";
 import type { PreviousState } from "../events.ts";
 import type { Logger } from "../log.ts";
-import type { TeamsHooks } from "../poller.ts";
+import type { DispatchOutcome, TeamsHooks } from "../poller.ts";
 import type { Store } from "../store.ts";
-import type { TeamsFailureKind } from "./api.ts";
 import { dispatchQueued, retryOutbox, sendPending, skipOutbox } from "./dispatch.ts";
 import type { DispatchDeps, SendPendingOutcome } from "./dispatch.ts";
 import type { TeamsGateway } from "./gateway.ts";
@@ -58,22 +57,23 @@ export function createTeamsService(deps: ServiceDeps): TeamsService {
           maxMessagesPerReviewer: deps.config.maxMessagesPerReviewer,
           reminderAfterMs: deps.config.reminderAfterHours * HOUR_MS,
           noticeDebounceMs: deps.config.noticeDebounceMinutes * MINUTE_MS,
+          rereviewAfterMs: deps.config.rereviewAfterMinutes * MINUTE_MS,
         },
       });
       const created = deps.store.applyTeamsPlan(plan, now);
       if (created > 0) deps.log.info("teams messages queued", { count: created });
     },
 
-    async dispatch(snapshot: Snapshot): Promise<{ failure: TeamsFailureKind | undefined }> {
+    async dispatch(snapshot: Snapshot): Promise<DispatchOutcome> {
       try {
         const result = await dispatchQueued(dispatchDeps, snapshot);
         if (result.sent > 0) deps.log.info("teams messages sent", { count: result.sent });
-        return { failure: result.failure };
+        return { failure: result.failure, held: result.held };
       } catch (error) {
         deps.log.error("teams dispatch crashed", {
           reason: error instanceof Error ? error.name : "unknown",
         });
-        return { failure: "error" };
+        return { failure: "error", held: [] };
       }
     },
 

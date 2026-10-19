@@ -13,7 +13,7 @@ export interface DayJson {
   readonly day: string;
   readonly reviewRequests: number;
   readonly activity: number;
-  /** Outbox rows of kind nudge or reminder that were sent. */
+  /** Outbox rows of kind nudge, reminder or rereview that were sent. */
   readonly nudgesSent: number;
   readonly noticesSent: number;
   readonly skipped: number;

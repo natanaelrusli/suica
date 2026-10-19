@@ -88,6 +88,19 @@ public final class ConfigEditorModel {
 
     public var isDirty: Bool { !dirtyFields.isEmpty }
 
+    /// Shown by a search that matches the field, and always while it has an unsaved edit, text the
+    /// drafts do not show, or an issue, so a search never hides something waiting to be fixed.
+    public func isShown(_ field: ConfigField, query: String) -> Bool {
+        let words = query.split(whereSeparator: \.isWhitespace)
+        if words.isEmpty || dirtyFields.contains(field) || invalidInputKeys.contains(Self.key(field))
+            || issue(of: field) != nil
+        {
+            return true
+        }
+        let haystack = [field.label, field.help, Self.key(field)].joined(separator: " ")
+        return words.allSatisfy { haystack.localizedStandardContains($0) }
+    }
+
     /// There is something to save and no box holds text the drafts do not show.
     public var canSave: Bool { !saving && invalidInputKeys.isEmpty && isDirty }
 

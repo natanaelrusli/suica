@@ -249,6 +249,9 @@ public struct CLIAgentClient: AgentClient {
     private static let restartTimeout: TimeInterval = 30
     // GitLab reads wait for glab, which the CLI stops after gitlab.timeoutSeconds (60 s by default).
     private static let gitlabTimeout: TimeInterval = 90
+    // An inline post makes one glab call per finding after two lookups; a typical review's dozen
+    // calls fit, and stopping the CLI mid-post would leave the review stuck as posting.
+    private static let inlinePostTimeout: TimeInterval = 600
     // The CLI's own worst case with the default config: Teams start (30 s) plus three calls
     // (lookup, open chat, send; 60 s each) is 210 s. Killing it later than that keeps a row from
     // being stranded in `sending`; a larger teams.callTimeoutSeconds needs a larger value here.
@@ -364,6 +367,42 @@ extension CLIAgentClient: DashboardClient {
         throw AgentError.badOutput
     }
 
+    public func templates() async throws(AgentError) -> TemplatesDocument {
+        try await document(TemplatesDocument.self, ["templates", "show", "--json"])
+    }
+
+    public func saveTemplate(name: String, text: String?) async throws(AgentError) -> TemplateSaveResult {
+        struct Body: Encodable {
+            let name: String
+            let text: String?
+
+            func encode(to encoder: any Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encode(name, forKey: .name)
+                // An explicit null resets the template; the key is never left out.
+                try container.encode(text, forKey: .text)
+            }
+
+            enum CodingKeys: String, CodingKey { case name, text }
+        }
+        let body: Data
+        do {
+            body = try JSONEncoder().encode(Body(name: name, text: text))
+        } catch {
+            throw AgentError.badOutput
+        }
+        let result = try await runner.run(
+            invocation(["templates", "set", "--json"], timeout: Self.shortTimeout, stdin: body))
+        // The CLI exits 1 for invalid and failed, with the reason in the JSON.
+        if let line = lastLine(of: result.stdout),
+            let parsed = try? JSONDecoder().decode(TemplateSaveResult.self, from: line)
+        {
+            return parsed
+        }
+        guard result.exitCode == 0 else { throw AgentError.failed(exitCode: result.exitCode) }
+        throw AgentError.badOutput
+    }
+
     public func restartAgent() async throws(AgentError) -> ActionResult {
         try await action(["agent", "restart", "--json"], timeout: Self.restartTimeout)
     }
@@ -384,8 +423,10 @@ extension CLIAgentClient: ReviewsClient {
         try await action(["review", "queue", key, "--json"], timeout: Self.shortTimeout)
     }
 
-    public func postAgentReview(id: Int) async throws(AgentError) -> ActionResult {
-        try await action(["review", "post", String(id), "--json"], timeout: Self.gitlabTimeout)
+    public func postAgentReview(id: Int, inline: Bool) async throws(AgentError) -> ActionResult {
+        try await action(
+            ["review", "post", String(id), inline ? "--inline" : "--comment", "--json"],
+            timeout: inline ? Self.inlinePostTimeout : Self.gitlabTimeout)
     }
 
     public func discardAgentReview(id: Int) async throws(AgentError) -> ActionResult {
@@ -396,3 +437,5 @@ extension CLIAgentClient: ReviewsClient {
         try await action(["mr", "approve", key, sha, "--json"], timeout: Self.gitlabTimeout)
     }
 }
+
+extension CLIAgentClient: TemplatesClient {}

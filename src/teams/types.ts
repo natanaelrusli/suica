@@ -6,10 +6,11 @@ export const TEMPLATE_NAMES = [
   "notice.approved",
   "notice.changes",
   "notice.comments",
+  "rereview",
 ] as const;
 export type TemplateName = (typeof TEMPLATE_NAMES)[number];
 
-export const OUTBOX_KINDS = ["nudge", "reminder", "notice"] as const;
+export const OUTBOX_KINDS = ["nudge", "reminder", "notice", "rereview"] as const;
 export type OutboxKind = (typeof OUTBOX_KINDS)[number];
 
 export const OUTBOX_STATUSES = [
@@ -73,6 +74,26 @@ export interface Round {
   readonly noticedNotes: number;
 }
 
+/** What the ledger knows about one of the Owner's MRs, drafts included, for Re-review Nudges. */
+export interface RereviewMr {
+  /** The head commit at the latest poll. */
+  readonly head: string;
+  /** When the head last changed, or the MR was last a draft or became ready. */
+  readonly changedAt: number;
+}
+
+/** What the ledger knows about one Reviewer of such an MR. */
+export interface RereviewReviewer {
+  /** The head commit at their latest review activity; null until they have reviewed. */
+  readonly reviewedHead: string | null;
+  /** The state seen at the latest poll, to tell a new review from a reset. */
+  readonly state: ReviewState;
+  /** Their non-system notes seen at the latest poll. */
+  readonly notes: number;
+  /** A Re-review Nudge was queued since their latest review activity. */
+  readonly nudged: boolean;
+}
+
 export interface TeamsState {
   /** False until the first plan has been applied: history is recorded, never announced. */
   readonly baselineDone: boolean;
@@ -85,6 +106,10 @@ export interface TeamsState {
   readonly undelivered: ReadonlySet<string>;
   /** Key is the MR key. */
   readonly rounds: ReadonlyMap<string, Round>;
+  /** Key is the MR key. */
+  readonly rereviewMrs: ReadonlyMap<string, RereviewMr>;
+  /** Key is `reviewerKey(mrKey, username)`. */
+  readonly rereviewReviewers: ReadonlyMap<string, RereviewReviewer>;
 }
 
 export interface TeamsPlan {
@@ -94,8 +119,14 @@ export interface TeamsPlan {
   /** Ledger rows not listed here are deleted (the MR or Reviewer is gone). */
   readonly keepNudges: readonly string[];
   readonly keepRounds: readonly string[];
+  /** The Re-review ledger as it stands after this poll: rows not listed here are deleted. */
+  readonly rereviewMrs: ReadonlyMap<string, RereviewMr>;
+  readonly rereviewReviewers: ReadonlyMap<string, RereviewReviewer>;
   readonly baselineDone: boolean;
 }
+
+/** An outbox row that moved to `pending` in one dispatch: all the app notification needs. */
+export type HeldMessage = Pick<OutboxRow, "id" | "kind" | "mrKey" | "mrTitle" | "recipientName">;
 
 export interface OutboxRow {
   readonly id: number;

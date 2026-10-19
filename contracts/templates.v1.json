@@ -1,0 +1,51 @@
+{
+  "version": 1,
+  "path": "/tmp/suica-no-such-templates",
+  "placeholders": [
+    "mr.title",
+    "mr.url",
+    "mr.link",
+    "mr.iid",
+    "mr.project",
+    "person.name",
+    "owner.name"
+  ],
+  "templates": [
+    {
+      "name": "nudge",
+      "text": "Halo {{person.name}}, boleh minta tolong review MR ini?\n{{mr.link}}\nTerima kasih!",
+      "custom": false,
+      "defaultText": "Halo {{person.name}}, boleh minta tolong review MR ini?\n{{mr.link}}\nTerima kasih!"
+    },
+    {
+      "name": "reminder",
+      "text": "Halo {{person.name}}, mengingatkan kembali soal review MR ini ya:\n{{mr.link}}\nTerima kasih!",
+      "custom": false,
+      "defaultText": "Halo {{person.name}}, mengingatkan kembali soal review MR ini ya:\n{{mr.link}}\nTerima kasih!"
+    },
+    {
+      "name": "notice.approved",
+      "text": "Halo {{person.name}}, MR kamu sudah saya review dan saya approve:\n{{mr.link}}",
+      "custom": false,
+      "defaultText": "Halo {{person.name}}, MR kamu sudah saya review dan saya approve:\n{{mr.link}}"
+    },
+    {
+      "name": "notice.changes",
+      "text": "Halo {{person.name}}, saya sudah review MR kamu dan ada perubahan yang perlu dilihat:\n{{mr.link}}",
+      "custom": false,
+      "defaultText": "Halo {{person.name}}, saya sudah review MR kamu dan ada perubahan yang perlu dilihat:\n{{mr.link}}"
+    },
+    {
+      "name": "notice.comments",
+      "text": "Halo {{person.name}}, saya sudah review MR kamu dan meninggalkan beberapa komentar:\n{{mr.link}}",
+      "custom": false,
+      "defaultText": "Halo {{person.name}}, saya sudah review MR kamu dan meninggalkan beberapa komentar:\n{{mr.link}}"
+    },
+    {
+      "name": "rereview",
+      "text": "Halo {{person.name}}, MR ini sudah saya update sesuai review-mu. Boleh minta tolong dicek lagi?\n{{mr.link}}\nTerima kasih!",
+      "custom": false,
+      "defaultText": "Halo {{person.name}}, MR ini sudah saya update sesuai review-mu. Boleh minta tolong dicek lagi?\n{{mr.link}}\nTerima kasih!"
+    }
+  ]
+}

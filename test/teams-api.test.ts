@@ -82,11 +82,14 @@ describe("openChat", () => {
 });
 
 describe("sendMessage", () => {
-  it("sends plain text and returns the message id", async () => {
+  it("sends Markdown, so links are clickable, and returns the message id", async () => {
     const { calls, call } = fakeCaller(ok("✅ Message sent successfully. Message ID: 1699"));
     await expect(createTeamsApi(call).sendMessage("19:abc", "halo")).resolves.toBe("1699");
     expect(calls).toEqual([
-      { name: "send_chat_message", args: { chatId: "19:abc", message: "halo", format: "text" } },
+      {
+        name: "send_chat_message",
+        args: { chatId: "19:abc", message: "halo", format: "markdown" },
+      },
     ]);
   });
 

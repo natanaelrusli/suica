@@ -9,7 +9,9 @@ import { myReviewState } from "./events.ts";
 import type { Exec } from "./exec.ts";
 import { execFailure } from "./exec.ts";
 import type { Notification } from "./format.ts";
-import type { GraphqlRunner, PostRunner, RestRunner } from "./gitlab.ts";
+import type { GraphqlRunner, PostJsonRunner, PostRunner, RestRunner } from "./gitlab.ts";
+import { extractFindings, placeFinding, summaryWithout } from "./inline-review.ts";
+import type { Finding, ThreadPosition } from "./inline-review.ts";
 import type { Logger } from "./log.ts";
 import { detectModelClis, resolveModelCli } from "./model-cli.ts";
 import type { DetectedCli, ModelCliId } from "./model-cli.ts";
@@ -83,17 +85,36 @@ const CLI_NAMES: Readonly<Record<string, string>> = {
   gemini: "Gemini CLI",
 };
 
-/** The note posted to GitLab: a visible agent label, then the sanitised review. */
-export function renderNote(row: AgentReviewRow, skill: string): string {
+function sanitizeAndCap(markdown: string): string {
+  const body = sanitizeForGitLab(markdown);
+  return body.length > MAX_NOTE_CHARS ? `${body.slice(0, MAX_NOTE_CHARS)}\n\n…(truncated)` : body;
+}
+
+/**
+ * The note posted to GitLab: a visible agent label, then the sanitised review (`body`, by
+ * default the whole review; the summary when findings went inline).
+ */
+export function renderNote(
+  row: AgentReviewRow,
+  skill: string,
+  body: string = row.body ?? "",
+): string {
   const cli = CLI_NAMES[row.cli ?? ""] ?? "a coding agent";
   const commit = row.headSha === null ? "" : ` on commit \`${row.headSha.slice(0, 8)}\``;
-  const body = sanitizeForGitLab(row.body ?? "");
-  const capped =
-    body.length > MAX_NOTE_CHARS ? `${body.slice(0, MAX_NOTE_CHARS)}\n\n…(truncated)` : body;
+  const capped = sanitizeAndCap(body);
   return [
     `> **Agent review**: written by a language model (${cli}, following \`${skill}\`)${commit}, and posted by the reviewer after reading it. Code reading only; nothing was executed.`,
     "",
     capped,
+  ].join("\n");
+}
+
+/** One finding as a diff thread, labelled like the note so nobody takes it for the reviewer's own. */
+export function renderThread(finding: Finding): string {
+  return [
+    `> **Agent review**, finding ${finding.number}: written by a language model and posted by the reviewer after reading it. The rest of the review is in its summary comment.`,
+    "",
+    sanitizeAndCap(finding.text),
   ].join("\n");
 }
 
@@ -237,8 +258,9 @@ export interface ReviewDeps {
   readonly home?: string;
   /** Stops a run in progress when the agent shuts down. */
   readonly signal?: AbortSignal;
-  /** Posts with `review.post: auto`; without it a ready review always waits for the Owner. */
+  /** Post with `review.post: auto`; without them a ready review always waits for the Owner. */
   readonly post?: PostRunner;
+  readonly postJson?: PostJsonRunner;
 }
 
 class Skip extends Error {
@@ -433,8 +455,15 @@ export async function runAgentReview(deps: ReviewDeps, row: AgentReviewRow): Pro
       cli: cliId,
       duration_ms: deps.now() - started,
     });
-    if (deps.config.review.post === "auto" && deps.post !== undefined) {
-      const outcome = await postAgentReview({ ...deps, post: deps.post }, row.id);
+    if (
+      deps.config.review.post === "auto" &&
+      deps.post !== undefined &&
+      deps.postJson !== undefined
+    ) {
+      const outcome = await postAgentReview(
+        { ...deps, post: deps.post, postJson: deps.postJson },
+        row.id,
+      );
       log.info("agent review posted automatically", { id: row.id, mr_key: row.mrKey, outcome });
       await notifyQuietly(
         deps,
@@ -549,47 +578,128 @@ export function createReviewWorker(deps: ReviewDeps): ReviewWorker {
 }
 
 export type PostOutcome = "posted" | "nothing" | "failed";
+export type PostMode = Config["review"]["postAs"];
+
+const versionsSchema = z.array(
+  z.object({
+    id: z.number(),
+    head_commit_sha: z.string(),
+    base_commit_sha: z.string(),
+    start_commit_sha: z.string(),
+  }),
+);
+const versionSchema = z.object({
+  diffs: z.array(z.object({ old_path: z.string(), new_path: z.string(), diff: z.string() })),
+});
+
+interface Thread {
+  readonly finding: Finding;
+  readonly position: ThreadPosition;
+}
 
 /**
- * Posts a ready review as one MR note. The row moves to posting first, so a second click cannot
- * post twice; a failed post goes back to ready with a note to check GitLab before trying again.
+ * The review's findings, and those that can be placed on the MR version GitLab keeps for the
+ * reviewed commit. Positions use that version's diff, so they stay right after later pushes.
+ */
+async function planThreads(
+  rest: RestRunner,
+  mrPath: string,
+  row: AgentReviewRow,
+): Promise<{ findings: Finding[]; threads: Thread[] }> {
+  const findings = extractFindings(row.body ?? "");
+  if (findings.length === 0 || row.headSha === null) return { findings, threads: [] };
+  const versions = versionsSchema.parse(await rest(`${mrPath}/versions?per_page=100`));
+  const version = versions.find((each) => each.head_commit_sha === row.headSha);
+  if (version === undefined) return { findings, threads: [] };
+  const { diffs } = versionSchema.parse(await rest(`${mrPath}/versions/${version.id}`));
+  const files = diffs.map((file) => ({
+    oldPath: file.old_path,
+    newPath: file.new_path,
+    diff: file.diff,
+  }));
+  const refs = {
+    baseSha: version.base_commit_sha,
+    startSha: version.start_commit_sha,
+    headSha: version.head_commit_sha,
+  };
+  const threads = findings.flatMap((finding) => {
+    const position = placeFinding(finding, files, refs);
+    return position === undefined ? [] : [{ finding, position }];
+  });
+  return { findings, threads };
+}
+
+function inlineDetail(posted: number, total: number): string {
+  if (total === 0)
+    return "No finding named a file and line, so the review was posted as one comment.";
+  if (posted === total) return `All ${total} findings were posted as inline comments.`;
+  return `${posted} of ${total} findings were posted as inline comments; the others are in the summary comment, because their line is not in the reviewed diff or GitLab refused the thread.`;
+}
+
+/**
+ * Posts a ready review: as one MR note, or `inline`, with each finding on a line of the reviewed
+ * diff as a thread there and the rest as one note. Threads go first, so a thread GitLab refuses
+ * stays in the note. The row moves to posting first, so a second click cannot post twice; a
+ * failed post goes back to ready with a note to check GitLab before trying again.
  */
 export async function postAgentReview(
-  deps: Pick<ReviewDeps, "store" | "now" | "log"> & {
+  deps: Pick<ReviewDeps, "store" | "now" | "log" | "rest"> & {
     readonly config: Pick<Config, "review">;
     readonly post: PostRunner;
+    readonly postJson: PostJsonRunner;
   },
   id: number,
+  mode: PostMode = deps.config.review.postAs,
 ): Promise<PostOutcome> {
-  const { store } = deps;
+  const { store, log } = deps;
   const row = store.getAgentReview(id);
   if (row?.status !== "ready" || row.body === null) return "nothing";
   const parts = parseMrKey(row.mrKey);
   if (parts === undefined) return "nothing";
   if (!store.transitionAgentReview(id, ["ready"], "posting", {}, deps.now())) return "nothing";
+  const mrPath = `projects/${encodeURIComponent(parts.projectPath)}/merge_requests/${parts.iid}`;
+
+  let plan: { findings: Finding[]; threads: Thread[] } = { findings: [], threads: [] };
+  if (mode === "inline") {
+    try {
+      plan = await planThreads(deps.rest, mrPath, row);
+    } catch (error) {
+      plan = { findings: extractFindings(row.body), threads: [] };
+      log.warn("agent review diff lookup failed", { id, reason: errorName(error) });
+    }
+  }
+  const posted: Finding[] = [];
+  for (const thread of plan.threads) {
+    try {
+      await deps.postJson(`${mrPath}/discussions`, {
+        body: renderThread(thread.finding),
+        position: thread.position,
+      });
+      posted.push(thread.finding);
+    } catch (error) {
+      log.warn("agent review thread refused", { id, reason: errorName(error) });
+    }
+  }
+
   try {
-    await deps.post(
-      `projects/${encodeURIComponent(parts.projectPath)}/merge_requests/${parts.iid}/notes`,
-      { body: renderNote(row, deps.config.review.skill) },
-    );
+    const body = posted.length === 0 ? row.body : summaryWithout(row.body, posted);
+    await deps.post(`${mrPath}/notes`, { body: renderNote(row, deps.config.review.skill, body) });
   } catch (error) {
-    store.transitionAgentReview(
-      id,
-      ["posting"],
-      "ready",
-      {
-        detail: "Posting failed. Check the MR in GitLab before posting again: it may have arrived.",
-      },
-      deps.now(),
-    );
-    deps.log.warn("agent review post failed", {
-      id,
-      reason: error instanceof Error ? error.name : "unknown",
-    });
+    const detail =
+      posted.length === 0
+        ? "Posting failed. Check the MR in GitLab before posting again: it may have arrived."
+        : `${posted.length} inline comments were posted, but the summary comment was not. Check the MR in GitLab before posting again: posting again repeats them.`;
+    store.transitionAgentReview(id, ["posting"], "ready", { detail }, deps.now());
+    log.warn("agent review post failed", { id, reason: errorName(error) });
     return "failed";
   }
-  store.transitionAgentReview(id, ["posting"], "posted", { detail: "" }, deps.now());
+  const detail = mode === "inline" ? inlineDetail(posted.length, plan.findings.length) : "";
+  store.transitionAgentReview(id, ["posting"], "posted", { detail }, deps.now());
   return "posted";
+}
+
+function errorName(error: unknown): string {
+  return error instanceof Error ? error.name : "unknown";
 }
 
 /** Drops a review that is waiting, failed or skipped, so the MR can be reviewed again. */

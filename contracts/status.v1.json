@@ -22,6 +22,7 @@
   "agentReview": {
     "auto": true,
     "post": "approval",
+    "postAs": "comment",
     "model": null,
     "running": null,
     "queued": []

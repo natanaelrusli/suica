@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import { openStore } from "../src/store.ts";
-import type { Round } from "../src/teams/types.ts";
+import type { RereviewMr, RereviewReviewer, Round } from "../src/teams/types.ts";
 import { mr, reviewer, snapshot } from "./builders.ts";
 import { NOW, intent, teamsPlan } from "./teams-builders.ts";
 
@@ -26,6 +26,19 @@ const round: Round = {
   noticedNotes: 0,
 };
 const DAY = 24 * 3_600_000;
+const rereviewMr: RereviewMr = { head: "h2", changedAt: NOW };
+const rereviewBob: RereviewReviewer = {
+  reviewedHead: "h1",
+  state: "APPROVED",
+  notes: 2,
+  nudged: true,
+};
+const rereviewCarol: RereviewReviewer = {
+  reviewedHead: null,
+  state: "UNREVIEWED",
+  notes: 0,
+  nudged: false,
+};
 
 describe("schema v2", () => {
   it("migrates a version 1 database in place and keeps its data", () => {
@@ -49,11 +62,13 @@ describe("schema v2", () => {
       nudges: new Map(),
       rounds: new Map(),
       undelivered: new Set(),
+      rereviewMrs: new Map(),
+      rereviewReviewers: new Map(),
     });
     store.close();
 
     const raw = new DatabaseSync(path);
-    expect(raw.prepare("PRAGMA user_version").get()?.["user_version"]).toBe(7);
+    expect(raw.prepare("PRAGMA user_version").get()?.["user_version"]).toBe(8);
     raw.close();
   });
 });
@@ -101,6 +116,8 @@ describe("applyTeamsPlan", () => {
       nudges: new Map([["g/p!5|bob", { sentCount: 1, lastSentAt: NOW }]]),
       rounds: new Map([["g/p!7", round]]),
       undelivered: new Set(["g/p!5|bob"]),
+      rereviewMrs: new Map(),
+      rereviewReviewers: new Map(),
     });
   });
 
@@ -150,6 +167,89 @@ describe("applyTeamsPlan", () => {
     );
     expect(store.listOutbox(["queued"])).toHaveLength(1);
     expect(store.loadTeams().rounds.size).toBe(1);
+  });
+});
+
+describe("Re-review ledger (schema 8)", () => {
+  const ledger = teamsPlan({
+    rereviewMrs: new Map([["g/p!5", rereviewMr]]),
+    rereviewReviewers: new Map([
+      ["g/p!5|bob", rereviewBob],
+      ["g/p!5|carol", rereviewCarol],
+    ]),
+  });
+
+  it("stores the head, a null reviewed head and the flags, and reads them back", () => {
+    const store = openStore(":memory:");
+    store.applyTeamsPlan(ledger, NOW);
+    const state = store.loadTeams();
+    expect(state.rereviewMrs).toEqual(new Map([["g/p!5", rereviewMr]]));
+    expect(state.rereviewReviewers).toEqual(
+      new Map([
+        ["g/p!5|bob", rereviewBob],
+        ["g/p!5|carol", rereviewCarol],
+      ]),
+    );
+  });
+
+  it("replaces the ledger with each plan, so MRs and Reviewers that are gone disappear", () => {
+    const store = openStore(":memory:");
+    store.applyTeamsPlan(ledger, NOW);
+    store.applyTeamsPlan(
+      teamsPlan({
+        rereviewMrs: new Map([["g/p!5", { head: "h3", changedAt: NOW + 1 }]]),
+        rereviewReviewers: new Map([["g/p!5|bob", { ...rereviewBob, nudged: false }]]),
+      }),
+      NOW + 1,
+    );
+    const state = store.loadTeams();
+    expect(state.rereviewMrs.get("g/p!5")).toEqual({ head: "h3", changedAt: NOW + 1 });
+    expect([...state.rereviewReviewers.keys()]).toEqual(["g/p!5|bob"]);
+    expect(state.rereviewReviewers.get("g/p!5|bob")?.nudged).toBe(false);
+  });
+
+  it("is forgotten with the Teams baseline, so switching Teams on later announces nothing", () => {
+    const store = openStore(":memory:");
+    store.applyTeamsPlan(ledger, NOW);
+    store.resetTeamsBaseline();
+    const state = store.loadTeams();
+    expect(state.rereviewMrs.size).toBe(0);
+    expect(state.rereviewReviewers.size).toBe(0);
+  });
+
+  it("is added to a schema 7 database in place, keeping the outbox", () => {
+    const path = tempDb();
+    const first = openStore(path);
+    first.applyTeamsPlan(teamsPlan({ intents: [intent(1)] }), NOW);
+    first.close();
+    const raw = new DatabaseSync(path);
+    raw.exec("DROP TABLE rereview_mr; DROP TABLE rereview_reviewer; PRAGMA user_version = 7;");
+    raw.close();
+
+    const store = openStore(path);
+    expect(store.listOutbox(["queued"])).toHaveLength(1);
+    store.applyTeamsPlan(ledger, NOW);
+    expect(store.loadTeams().rereviewMrs.size).toBe(1);
+    store.close();
+    const check = new DatabaseSync(path);
+    expect(check.prepare("PRAGMA user_version").get()?.["user_version"]).toBe(8);
+    check.close();
+  });
+
+  it("stores a Re-review Nudge in the outbox like any other message", () => {
+    const store = openStore(":memory:");
+    store.applyTeamsPlan(
+      teamsPlan({
+        intents: [
+          intent(1, { dedupeKey: "rereview:g/p!5|bob:h2", kind: "rereview", variant: "rereview" }),
+        ],
+      }),
+      NOW,
+    );
+    expect(store.listOutbox(["queued"])[0]).toMatchObject({
+      kind: "rereview",
+      variant: "rereview",
+    });
   });
 });
 

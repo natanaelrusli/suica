@@ -10,6 +10,7 @@
       "title": "MR 7",
       "url": "https://gitlab.example/g/p/-/merge_requests/7",
       "draft": true,
+      "createdAt": "2026-10-14T09:00:00Z",
       "author": {
         "username": "alice",
         "name": "Alice"

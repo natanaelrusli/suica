@@ -46,6 +46,7 @@ export const configSchema = z
           .object({
             nudge: sendModeSchema.default("approval"),
             notice: sendModeSchema.default("approval"),
+            rereview: sendModeSchema.default("approval"),
           })
           .strict()
           .default({}),
@@ -60,6 +61,7 @@ export const configSchema = z
           .default({}),
         reminderAfterHours: positiveInt.default(24),
         noticeDebounceMinutes: positiveInt.default(10),
+        rereviewAfterMinutes: positiveInt.default(10),
         maxMessagesPerReviewer: positiveInt.default(2),
         templatesPath: z.string().min(1).optional(),
         people: z.record(z.string(), z.string().email()).default({}),
@@ -77,6 +79,8 @@ export const configSchema = z
         auto: z.boolean().default(true),
         // approval: a ready review waits for the Owner; auto: it is posted as soon as it is ready.
         post: z.enum(["approval", "auto"]).default("approval"),
+        // comment: one MR note; inline: findings on a line of the diff become threads there.
+        postAs: z.enum(["comment", "inline"]).default("comment"),
         // A skill name only, as typed after the slash: it ends up in a prompt and a file path.
         skill: z
           .string()

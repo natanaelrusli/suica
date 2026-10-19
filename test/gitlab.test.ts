@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { Exec } from "../src/exec.ts";
-import { FetchFailure, glabPost, glabRest, glabRunner, parseSnapshot } from "../src/gitlab.ts";
+import {
+  FetchFailure,
+  SNAPSHOT_QUERY,
+  glabPost,
+  glabRest,
+  glabRunner,
+  parseSnapshot,
+} from "../src/gitlab.ts";
 
 const config = { hostname: "gitlab.example", glabPath: "glab", timeoutSeconds: 60 };
 
@@ -55,6 +62,30 @@ function kindOf(fn: () => unknown): string {
   }
   return "no-failure";
 }
+
+describe("the head commit", () => {
+  it("is fetched in the one snapshot query, for both lists", () => {
+    const fragment = SNAPSHOT_QUERY.slice(SNAPSHOT_QUERY.indexOf("fragment MrFields"));
+    expect(fragment).toContain("diffHeadSha");
+    expect(SNAPSHOT_QUERY.match(/diffHeadSha/g)).toHaveLength(1);
+    expect(SNAPSHOT_QUERY.match(/query /g)).toHaveLength(1);
+  });
+
+  it("becomes headSha, and is null while GitLab has not computed it or does not send it", () => {
+    const snapshot = parseSnapshot(
+      payload({
+        reviewRequested: [node({ iid: "1", diffHeadSha: "abc123" })],
+        authored: [
+          node({ iid: "2", diffHeadSha: "def456" }),
+          node({ iid: "3", diffHeadSha: null }),
+          node({ iid: "4" }),
+        ],
+      }),
+    );
+    expect(snapshot.reviewRequested.map((each) => each.headSha)).toEqual(["abc123"]);
+    expect(snapshot.authored.map((each) => each.headSha)).toEqual(["def456", null, null]);
+  });
+});
 
 describe("parseSnapshot", () => {
   it("maps review-requested and authored MRs", () => {

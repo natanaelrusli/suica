@@ -77,6 +77,8 @@ export interface StatusJson {
         readonly auto: boolean;
         /** `review.post`: approval or auto. */
         readonly post: string;
+        /** `review.postAs`: comment or inline. */
+        readonly postAs: string;
         /** `review.model`; null for the CLI's default. */
         readonly model: string | null;
       })
@@ -192,6 +194,7 @@ export function buildStatus(input: StatusInput): StatusJson {
       : {
           auto: config.review.auto,
           post: config.review.post,
+          postAs: config.review.postAs,
           model: config.review.model ?? null,
           ...buildReviewActivity(loaded.reviews, config.review.model),
         },

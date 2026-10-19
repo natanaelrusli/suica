@@ -1,4 +1,4 @@
-import type { Intent, TeamsPlan } from "../src/teams/types.ts";
+import type { Intent, TeamsPlan, TeamsState } from "../src/teams/types.ts";
 import { person } from "./builders.ts";
 
 export const NOW = Date.UTC(2026, 9, 14, 3, 0);
@@ -27,7 +27,21 @@ export function teamsPlan(overrides: Partial<TeamsPlan> = {}): TeamsPlan {
     roundUpdates: [],
     keepNudges: [],
     keepRounds: [],
+    rereviewMrs: new Map(),
+    rereviewReviewers: new Map(),
     baselineDone: true,
+    ...overrides,
+  };
+}
+
+export function teamsState(overrides: Partial<TeamsState> = {}): TeamsState {
+  return {
+    baselineDone: true,
+    nudges: new Map(),
+    rounds: new Map(),
+    undelivered: new Set(),
+    rereviewMrs: new Map(),
+    rereviewReviewers: new Map(),
     ...overrides,
   };
 }

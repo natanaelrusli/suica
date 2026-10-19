@@ -218,6 +218,31 @@ describe("buildStats", () => {
   });
 });
 
+describe("Re-review Nudges in the statistics", () => {
+  it("counts delivered Re-review Nudges with the nudges and reminders sent, not the notices", () => {
+    const stats = build(empty, [
+      outbox(1, "nudge", "sent", NOW - M),
+      outbox(2, "rereview", "sent", NOW - M),
+      outbox(3, "rereview", "skipped", NOW - M),
+      outbox(4, "rereview", "dry-run", NOW - M),
+      outbox(5, "notice", "sent", NOW - M),
+    ]);
+    const today = stats.days.at(-1);
+    expect(today?.nudgesSent).toBe(2);
+    expect(today?.noticesSent).toBe(1);
+    expect(today?.skipped).toBe(1);
+  });
+
+  it("does not measure the turnaround after a plain nudge from a Re-review Nudge", () => {
+    const history: HistoryRows = {
+      polls: [],
+      events: [event("reviewer-reviewed", "g/p!2", NOW - 30 * M, "bob")],
+    };
+    const stats = build(history, [outbox(1, "rereview", "sent", NOW - 60 * M)]);
+    expect(stats.reviewerAfterNudge.count).toBe(0);
+  });
+});
+
 describe("localDayKey", () => {
   it("formats a local YYYY-MM-DD", () => {
     const ms = new Date(2026, 0, 5, 23, 59).getTime();

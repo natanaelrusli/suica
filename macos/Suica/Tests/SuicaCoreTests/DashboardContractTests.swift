@@ -28,6 +28,7 @@ private func data(_ text: String) -> Data { Data(text.utf8) }
     #expect(status.modelCli?.clis.last == DetectedModelCli(id: "gemini", name: "Gemini CLI", path: nil))
     #expect(status.agentReview?.auto == true && status.agentReview?.model == nil)
     #expect(status.agentReview?.post == "approval")
+    #expect(status.agentReview?.postAs == "comment")
     #expect(status.agentReview?.running == nil && status.agentReview?.queued.isEmpty == true)
 }
 
@@ -110,7 +111,7 @@ private func data(_ text: String) -> Data { Data(text.utf8) }
     let config = try decodeDocument(ConfigDocument.self, from: contract("config.v1.json"))
     #expect(config.path == "/tmp/config.yaml" && config.exists && config.sha256 == "0")
     #expect(config.issues.isEmpty)
-    #expect(config.fields.count == 32)
+    #expect(config.fields.count == 35)
     let first = try #require(config.fields.first)
     #expect(first.path == ["gitlab", "hostname"] && first.type == .string)
     #expect(first.value == .string("repo.example") && first.effective == .string("repo.example"))
@@ -121,6 +122,13 @@ private func data(_ text: String) -> Data { Data(text.utf8) }
 
     let mode = try #require(config.fields.first { $0.path == ["teams", "modes", "nudge"] })
     #expect(mode.type == .enum && mode.options?.isEmpty == false)
+
+    // The Re-review Nudge settings come through the generated form like any other key.
+    let rereviewMode = try #require(config.fields.first { $0.path == ["teams", "modes", "rereview"] })
+    #expect(rereviewMode.type == .enum && rereviewMode.options == mode.options)
+    #expect(rereviewMode.effective == .string("approval"))
+    let rereviewAfter = try #require(config.fields.first { $0.path == ["teams", "rereviewAfterMinutes"] })
+    #expect(rereviewAfter.type == .int && rereviewAfter.effective == .int(10))
 
     let days = try #require(config.fields.first { $0.path == ["teams", "workingHours", "days"] })
     #expect(days.type == .weekdays && days.effective == .array([1, 2, 3, 4, 5].map(JSONValue.int)))
@@ -235,4 +243,13 @@ func documentGarbageIsBadOutput(text: String) {
     let result = try JSONDecoder().decode(
         SaveResult.self, from: data(#"{"status":"teleported","issues":[],"sha256":null}"#))
     #expect(result.status == "teleported" && result.issues.isEmpty && result.sha256 == nil)
+}
+
+@Test func theSidebarCategoriesAreTheConfigGroupsInTheAgentsOrder() throws {
+    let config = try decodeDocument(ConfigDocument.self, from: contract("config.v1.json"))
+    var seen: [ConfigCategory] = []
+    for field in config.fields where !seen.contains(ConfigCategory.of(field)) { seen.append(ConfigCategory.of(field)) }
+    #expect(seen == ConfigCategory.known)
+    #expect(ConfigCategory.known.map(\.title)
+        == ["GitLab", "Polling", "Notifications", "Teams", "Language model", "Agent Review", "Storage"])
 }

@@ -28,6 +28,7 @@ export function mr(
     url: `https://gitlab.example/${projectPath}/-/merge_requests/${iid}`,
     draft: false,
     createdAt: null,
+    headSha: `sha-${iid}-a`,
     author: person("author", "Author"),
     reviewers: [],
     notes: [],

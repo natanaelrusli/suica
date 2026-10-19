@@ -1,5 +1,12 @@
 import Observation
 
+/// The two lists of the Messages page.
+public enum MessageGroup: Hashable, Sendable {
+    case yours, others
+
+    public func contains(_ item: OutboxItem) -> Bool { item.isAboutYourMR == (self == .yours) }
+}
+
 @MainActor @Observable
 public final class WindowModel {
     /// The last good documents: a failed refresh does not clear them.
@@ -11,11 +18,21 @@ public final class WindowModel {
     public private(set) var restarting = false
     /// A one-key save from Overview is in flight.
     public private(set) var savingSetting = false
+    /// The list the Messages page shows. It lives here so a `suica://` link can switch it.
+    public var messageGroup: MessageGroup = .yours
+    /// The row a `suica://message/<id>` link points at; the page draws it highlighted.
+    public var selectedMessageId: Int?
+    /// A link the window has not acted on yet; the window takes it with `takePendingLink`.
+    public private(set) var pendingLink: DeepLink?
+    /// How many links have arrived. The app brings the window forward for each, also when the
+    /// window took the link first, so this is never reset.
+    public private(set) var linksReceived = 0
 
     /// The instance the popover uses, so an action started in one place blocks the other.
     @ObservationIgnored public let menu: MenuModel
     @ObservationIgnored private let client: any DashboardClient
     @ObservationIgnored private var latestRefresh = 0
+    @ObservationIgnored private var latestShow = 0
 
     public init(client: any DashboardClient, menu: MenuModel) {
         self.client = client
@@ -65,6 +82,31 @@ public final class WindowModel {
         }
     }
 
+    public func receive(_ link: DeepLink) {
+        pendingLink = link
+        linksReceived += 1
+    }
+
+    public func takePendingLink() -> DeepLink? {
+        defer { pendingLink = nil }
+        return pendingLink
+    }
+
+    /// Shows Your MRs and, for a message link, selects its row once a refresh confirms the agent still
+    /// lists it (waiting, or among the recent ones). Otherwise nothing is selected. The latest link wins.
+    public func show(_ link: DeepLink) async {
+        latestShow += 1
+        let mine = latestShow
+        messageGroup = .yours
+        selectedMessageId = nil
+        guard case .message(let id) = link else { return }
+        await menu.refresh()
+        guard mine == latestShow, let teams = menu.state?.teams else { return }
+        if (teams.attention + teams.recent).contains(where: { $0.id == id && MessageGroup.yours.contains($0) }) {
+            selectedMessageId = id
+        }
+    }
+
     public func switchModelCli(to choice: String) async {
         await saveSetting(["model", "cli"], .string(choice), saved: Copy.modelCliSwitched)
     }
@@ -72,6 +114,11 @@ public final class WindowModel {
     /// `approval` or `auto`.
     public func setReviewPosting(_ mode: String) async {
         await saveSetting(["review", "post"], .string(mode), saved: Copy.reviewSettingSaved)
+    }
+
+    /// `comment` or `inline`.
+    public func setReviewPostAs(_ mode: String) async {
+        await saveSetting(["review", "postAs"], .string(mode), saved: Copy.reviewSettingSaved)
     }
 
     /// Nil removes the key, so the CLI's default model applies.

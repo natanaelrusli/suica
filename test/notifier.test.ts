@@ -29,6 +29,14 @@ describe("createNotifier", () => {
     ]);
   });
 
+  it("passes a suica:// link through for the app to open", async () => {
+    const { calls, exec } = recordingExec();
+    await createNotifier(exec).notify({ title: "T", body: "B", url: "suica://message/12" });
+    expect(calls).toEqual([
+      ["terminal-notifier", "-title", "T", "-message", "B", "-open", "suica://message/12"],
+    ]);
+  });
+
   it("omits -open when there is no URL", async () => {
     const { calls, exec } = recordingExec();
     await createNotifier(exec).notify({ title: "T", body: "B" });

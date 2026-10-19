@@ -129,6 +129,15 @@
       "effective": "approval"
     },
     {
+      "path": ["teams", "modes", "rereview"],
+      "type": "enum",
+      "label": "Re-review mode",
+      "help": "How the Re-review Nudge flow sends: auto, approval or dry-run",
+      "options": ["auto", "approval", "dry-run"],
+      "value": null,
+      "effective": "approval"
+    },
+    {
       "path": ["teams", "workingHours", "start"],
       "type": "clock",
       "label": "Working hours start",
@@ -165,6 +174,14 @@
       "type": "int",
       "label": "Notice debounce (minutes)",
       "help": "Review Notice after this long without further change by you",
+      "value": null,
+      "effective": 10
+    },
+    {
+      "path": ["teams", "rereviewAfterMinutes"],
+      "type": "int",
+      "label": "Re-review after (minutes)",
+      "help": "Re-review Nudge after your latest push has stood this long without a newer one",
       "value": null,
       "effective": 10
     },
@@ -218,6 +235,15 @@
       "options": ["approval", "auto"],
       "value": null,
       "effective": "approval"
+    },
+    {
+      "path": ["review", "postAs"],
+      "type": "enum",
+      "label": "Post as",
+      "help": "comment: the review is one comment on the MR; inline: each finding that names a line of the reviewed diff becomes a thread on that line, and the rest is one comment. The app asks each time; automatic posting and suica review post use this",
+      "options": ["comment", "inline"],
+      "value": null,
+      "effective": "comment"
     },
     {
       "path": ["review", "skill"],

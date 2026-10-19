@@ -12,13 +12,19 @@ import type { TeamsGateway } from "./gateway.ts";
 import { isWithinWorkingHours } from "./hours.ts";
 import { resolveEmail } from "./identity.ts";
 import type { Resolution } from "./identity.ts";
-import { renderTemplate } from "./templates.ts";
+import { escapeMarkdown, markdownLink, renderTemplate } from "./templates.ts";
 import type { Placeholder, Templates } from "./templates.ts";
-import type { OutboxKind, OutboxRow } from "./types.ts";
+import type { HeldMessage, OutboxKind, OutboxRow } from "./types.ts";
 
 type TeamsStore = Pick<
   Store,
-  "load" | "listOutbox" | "getOutbox" | "transitionOutbox" | "loadIdentity" | "saveIdentity"
+  | "load"
+  | "loadTeams"
+  | "listOutbox"
+  | "getOutbox"
+  | "transitionOutbox"
+  | "loadIdentity"
+  | "saveIdentity"
 >;
 
 export type SendMode = Config["teams"]["modes"]["nudge"];
@@ -35,6 +41,8 @@ export interface DispatchDeps {
 export interface DispatchResult {
   readonly sent: number;
   readonly failure: TeamsFailureKind | undefined;
+  /** Rows this call moved from `queued` to `pending`, for the Owner notification. */
+  readonly held: readonly HeldMessage[];
 }
 
 export type DeliverOutcome =
@@ -53,42 +61,65 @@ const NAME_MAX = 60;
 const MAX_LOOKUP_ERRORS_IN_A_ROW = 3;
 
 export function modeFor(kind: OutboxKind, config: Pick<Config["teams"], "modes">): SendMode {
-  return kind === "notice" ? config.modes.notice : config.modes.nudge;
+  if (kind === "notice") return config.modes.notice;
+  return kind === "rereview" ? config.modes.rereview : config.modes.nudge;
 }
 
 function failureKind(error: unknown): TeamsFailureKind {
   return error instanceof TeamsFailure ? error.kind : "error";
 }
 
+/**
+ * A Re-review Nudge waits only while the ledger still holds its round open: the planner closes it
+ * when the Reviewer reviews again or the Owner re-requests them in GitLab, and drops the Reviewer's
+ * row when they are removed.
+ */
+function rereviewOpen(store: TeamsStore, row: OutboxRow): boolean {
+  const record = store.loadTeams().rereviewReviewers.get(reviewerKey(row.mrKey, row.recipient));
+  return record?.nudged === true;
+}
+
 /** Is the message still worth sending now? Re-checked at send time, not only when it was queued. */
-function stillNeeded(row: OutboxRow, snapshot: Snapshot): boolean {
+function stillNeeded(store: TeamsStore, row: OutboxRow, snapshot: Snapshot): boolean {
   if (row.kind === "notice") {
     return snapshot.reviewRequested.some((mr) => mr.key === row.mrKey && !mr.draft);
   }
   const mr = snapshot.authored.find((candidate) => candidate.key === row.mrKey);
   if (mr === undefined || mr.draft) return false;
+  if (row.kind === "rereview") {
+    return (
+      mr.reviewers.some((reviewer) => reviewer.username === row.recipient) &&
+      rereviewOpen(store, row)
+    );
+  }
   return mr.reviewers.some(
     (reviewer) => reviewer.username === row.recipient && reviewer.state === UNREVIEWED,
   );
 }
 
 /** The same question as `stillNeeded`, answered from the last committed poll (for `suica send`). */
-function stillNeededInState(row: OutboxRow, state: PreviousState): boolean {
+function stillNeededInState(store: TeamsStore, row: OutboxRow, state: PreviousState): boolean {
   if (row.kind === "notice") return state.myReviewStates.has(row.mrKey);
-  return (
-    state.trackedAuthored.has(row.mrKey) &&
-    state.reviewerStates.get(reviewerKey(row.mrKey, row.recipient)) === UNREVIEWED
-  );
+  const key = reviewerKey(row.mrKey, row.recipient);
+  if (row.kind === "rereview") {
+    return (
+      state.trackedAuthored.has(row.mrKey) &&
+      state.reviewerStates.has(key) &&
+      rereviewOpen(store, row)
+    );
+  }
+  return state.trackedAuthored.has(row.mrKey) && state.reviewerStates.get(key) === UNREVIEWED;
 }
 
 function valuesFor(row: OutboxRow, ownerName: string): Record<Placeholder, string> {
   return {
-    "mr.title": clean(row.mrTitle, TITLE_MAX),
+    "mr.title": escapeMarkdown(clean(row.mrTitle, TITLE_MAX)),
     "mr.url": row.mrUrl,
+    "mr.link": markdownLink(clean(row.mrTitle, TITLE_MAX), row.mrUrl),
     "mr.iid": String(row.mrIid),
-    "mr.project": row.mrProject,
-    "person.name": clean(row.recipientName, NAME_MAX),
-    "owner.name": clean(ownerName, NAME_MAX),
+    "mr.project": escapeMarkdown(row.mrProject),
+    "person.name": escapeMarkdown(clean(row.recipientName, NAME_MAX)),
+    "owner.name": escapeMarkdown(clean(ownerName, NAME_MAX)),
   };
 }
 
@@ -154,7 +185,7 @@ export async function deliver(
 async function sendBatch(
   deps: DispatchDeps,
   batch: readonly { readonly row: OutboxRow; readonly text: string }[],
-): Promise<DispatchResult> {
+): Promise<Omit<DispatchResult, "held">> {
   let sent = 0;
   let failure: TeamsFailureKind | undefined;
   let lookupErrors = 0;
@@ -188,9 +219,10 @@ export async function dispatchQueued(
   const nowMs = deps.now();
   const inHours = isWithinWorkingHours(new Date(nowMs), deps.config.workingHours);
   const automatic: { row: OutboxRow; text: string }[] = [];
+  const held: HeldMessage[] = [];
 
   for (const row of rows) {
-    if (!stillNeeded(row, snapshot)) {
+    if (!stillNeeded(deps.store, row, snapshot)) {
       deps.store.transitionOutbox(row.id, row.status, "skipped", { detail: "obsolete" }, nowMs);
       continue;
     }
@@ -208,13 +240,13 @@ export async function dispatchQueued(
       deps.store.transitionOutbox(row.id, "queued", "dry-run", { text }, nowMs);
       deps.log.info("dry-run message recorded", { kind: row.kind });
     } else if (mode === "approval") {
-      deps.store.transitionOutbox(row.id, "queued", "pending", { text }, nowMs);
+      if (deps.store.transitionOutbox(row.id, "queued", "pending", { text }, nowMs)) held.push(row);
     } else {
       automatic.push({ row, text });
     }
   }
-  if (automatic.length === 0) return { sent: 0, failure: undefined };
-  return sendBatch(deps, automatic);
+  if (automatic.length === 0) return { sent: 0, failure: undefined, held };
+  return { ...(await sendBatch(deps, automatic)), held };
 }
 
 /** `suica send <id>`: sends one row that is waiting for the Owner's approval. */
@@ -223,7 +255,7 @@ export async function sendPending(deps: DispatchDeps, id: number): Promise<SendP
   if (row === undefined) return { status: "not-found" };
   if (row.status !== "pending" || row.text === null) return { status: "not-pending" };
   const text = row.text;
-  if (!stillNeededInState(row, deps.store.load())) {
+  if (!stillNeededInState(deps.store, row, deps.store.load())) {
     deps.store.transitionOutbox(row.id, "pending", "skipped", { detail: "obsolete" }, deps.now());
     return { status: "obsolete" };
   }

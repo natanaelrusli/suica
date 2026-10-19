@@ -128,6 +128,7 @@ describe("buildReviewList", () => {
         reviewRequested: [
           mr(7, {
             draft: true,
+            createdAt: "2026-10-14T09:00:00Z",
             author: person("alice", "Alice"),
             reviewers: [reviewer("me", "UNREVIEWED")],
           }),

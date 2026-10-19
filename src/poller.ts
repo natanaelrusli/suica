@@ -11,7 +11,7 @@ import {
 } from "./failures.ts";
 import type { FailureKind, FailureTracker, TeamsFailureReportKind } from "./failures.ts";
 import type { Notification } from "./format.ts";
-import { baselineNotifications, buildNotifications } from "./format.ts";
+import { baselineNotifications, buildNotifications, rereviewNotifications } from "./format.ts";
 import { FetchFailure } from "./gitlab.ts";
 import type { GitlabFailureKind } from "./gitlab.ts";
 import { historyEvents } from "./history.ts";
@@ -19,13 +19,20 @@ import type { Logger } from "./log.ts";
 import type { Notifier } from "./notifier.ts";
 import type { Store } from "./store.ts";
 import type { TeamsFailureKind } from "./teams/api.ts";
+import type { HeldMessage } from "./teams/types.ts";
 
 /** What the poll cycle needs from the Teams feature; absent when `teams.enabled` is false. */
 export interface TeamsHooks {
   /** Queues messages for this snapshot. `previous` is the state from before the poll. May throw. */
   plan(snapshot: Snapshot, previous: PreviousState): void;
   /** Sends or holds queued messages. Never throws; reports what went wrong. */
-  dispatch(snapshot: Snapshot): Promise<{ readonly failure: TeamsFailureKind | undefined }>;
+  dispatch(snapshot: Snapshot): Promise<DispatchOutcome>;
+}
+
+export interface DispatchOutcome {
+  readonly failure: TeamsFailureKind | undefined;
+  /** Messages that started waiting for the Owner's approval in this dispatch. */
+  readonly held: readonly HeldMessage[];
 }
 
 export interface PollDeps {
@@ -103,6 +110,23 @@ function queueReviews(deps: PollDeps, snapshot: Snapshot, events: readonly Activ
   }
 }
 
+/**
+ * One notification per MR for the Re-review Nudges that just started waiting for the Owner. Each
+ * row moves to `pending` once, so a failed notification is never repeated and never touches the row.
+ */
+async function notifyHeldRereviews(deps: PollDeps, held: readonly HeldMessage[]): Promise<void> {
+  for (const notification of rereviewNotifications(held)) {
+    try {
+      await deps.notifier.notify(notification);
+    } catch (error) {
+      // Never log the error message: process errors embed the notification text.
+      deps.log.warn("re-review notification not delivered", {
+        code: String(execFailure(error).code ?? "unknown"),
+      });
+    }
+  }
+}
+
 /** Runs after the state commit; a Teams problem never changes the poll status. */
 async function runTeams(
   deps: PollDeps,
@@ -117,7 +141,8 @@ async function runTeams(
     await reportStateFailure(deps, error);
     return;
   }
-  const { failure } = await teams.dispatch(snapshot);
+  const { failure, held } = await teams.dispatch(snapshot);
+  await notifyHeldRereviews(deps, held);
   if (failure === undefined) {
     for (const kind of TEAMS_FAILURE_KINDS) deps.failures.recover(kind);
     return;

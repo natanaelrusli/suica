@@ -82,7 +82,7 @@ export function createTeamsApi(call: ToolCaller): TeamsApi {
     },
 
     async sendMessage(chatId, text) {
-      const result = await call("send_chat_message", { chatId, message: text, format: "text" });
+      const result = await call("send_chat_message", { chatId, message: text, format: "markdown" });
       if (failed(result) || !result.text.includes("sent successfully")) {
         throw new TeamsFailure("error", "send_chat_message failed");
       }

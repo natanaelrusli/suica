@@ -111,6 +111,13 @@ export const CONFIG_FIELDS: readonly ConfigField[] = [
     options: SEND_MODES,
   },
   {
+    path: ["teams", "modes", "rereview"],
+    type: "enum",
+    label: "Re-review mode",
+    help: "How the Re-review Nudge flow sends: auto, approval or dry-run",
+    options: SEND_MODES,
+  },
+  {
     path: ["teams", "workingHours", "start"],
     type: "clock",
     label: "Working hours start",
@@ -139,6 +146,12 @@ export const CONFIG_FIELDS: readonly ConfigField[] = [
     type: "int",
     label: "Notice debounce (minutes)",
     help: "Review Notice after this long without further change by you",
+  },
+  {
+    path: ["teams", "rereviewAfterMinutes"],
+    type: "int",
+    label: "Re-review after (minutes)",
+    help: "Re-review Nudge after your latest push has stood this long without a newer one",
   },
   {
     path: ["teams", "maxMessagesPerReviewer"],
@@ -178,6 +191,13 @@ export const CONFIG_FIELDS: readonly ConfigField[] = [
     label: "Posting",
     help: "approval: a ready review waits until you post it; auto: it is posted to GitLab as you as soon as it is ready",
     options: ["approval", "auto"],
+  },
+  {
+    path: ["review", "postAs"],
+    type: "enum",
+    label: "Post as",
+    help: "comment: the review is one comment on the MR; inline: each finding that names a line of the reviewed diff becomes a thread on that line, and the rest is one comment. The app asks each time; automatic posting and suica review post use this",
+    options: ["comment", "inline"],
   },
   {
     path: ["review", "skill"],

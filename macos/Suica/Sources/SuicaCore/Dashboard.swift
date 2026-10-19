@@ -108,6 +108,8 @@ public struct StatusAgentReview: Codable, Equatable, Sendable {
     public let auto: Bool
     /// `review.post`: approval or auto; nil from an agent without the setting.
     public let post: String?
+    /// `review.postAs`: comment or inline; nil from an agent without the setting.
+    public let postAs: String?
     /// `review.model`; nil for the CLI's default.
     public let model: String?
     public let running: RunningReview?
@@ -253,6 +255,27 @@ public struct ConfigField: Codable, Equatable, Sendable {
     public let value: JSONValue
     /// After defaults; `.null` when absent or when the config is invalid.
     public let effective: JSONValue
+}
+
+/// One part of the Configuration page: a field's first path component, or Storage for a
+/// top-level key such as `statePath`.
+public struct ConfigCategory: Hashable, Identifiable, Sendable {
+    public let key: String
+
+    public init(key: String) { self.key = key }
+
+    public var id: String { key }
+    public var title: String { key == Self.storageKey ? Copy.storage : Copy.groupHeading(key) }
+
+    static let storageKey = "storage"
+
+    /// In the order the agent lists its fields, so the sidebar can show them before the config loads.
+    public static let known = ["gitlab", "polling", "notifications", "teams", "model", "review", storageKey]
+        .map(ConfigCategory.init)
+
+    public static func of(_ field: ConfigField) -> ConfigCategory {
+        ConfigCategory(key: field.path.count > 1 ? field.path[0] : storageKey)
+    }
 }
 
 public struct ConfigIssue: Codable, Equatable, Sendable {

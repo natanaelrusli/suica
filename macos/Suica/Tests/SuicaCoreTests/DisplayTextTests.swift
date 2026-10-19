@@ -56,6 +56,19 @@ import Testing
     #expect(Copy.confirmTitle("Bob") == "Send this message to Bob?")
     #expect(Copy.kindLabel("nudge") == "Nudge")
     #expect(Copy.kindLabel("reminder") == "Reminder")
+    #expect(Copy.kindLabel("rereview") == "Re-review")
     #expect(Copy.kindLabel("notice") == "Review notice")
     #expect(Copy.kindLabel("other") == "other")
+}
+
+@Test func cleanLinesKeepsLineBreaksAndCleansEachLine() {
+    #expect(DisplayText.cleanLines("Halo  Adrian,\n[t](https://x.example)\u{7}\n\nTerima kasih!")
+        == "Halo Adrian,\n[t](https://x.example)\n\nTerima kasih!")
+}
+
+@Test func initialsAreTheFirstAndLastWordAsTeamsShowsThem() {
+    #expect(DisplayText.initials("Adrian Fahri Affandi") == "AA")
+    #expect(DisplayText.initials("bob") == "B")
+    #expect(DisplayText.initials("  ") == "?")
+    #expect(DisplayText.initials("Nata (ext) Nael") == "NN")
 }

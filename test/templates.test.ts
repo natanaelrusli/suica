@@ -5,7 +5,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   DEFAULT_TEMPLATES,
   TemplateError,
+  escapeMarkdown,
   loadTemplates,
+  markdownLink,
   renderTemplate,
   validateTemplate,
 } from "../src/teams/templates.ts";
@@ -24,6 +26,7 @@ function tempDir(): string {
 const values = {
   "mr.title": "Add thing",
   "mr.url": "https://gitlab.example/g/p/-/merge_requests/7",
+  "mr.link": "[Add thing](https://gitlab.example/g/p/-/merge_requests/7)",
   "mr.iid": "7",
   "mr.project": "g/p",
   "person.name": "Alice",
@@ -69,10 +72,49 @@ describe("renderTemplate", () => {
   });
 });
 
+describe("escapeMarkdown and markdownLink", () => {
+  it("escapes what Markdown would turn into formatting, and nothing else", () => {
+    expect(escapeMarkdown("[ESS-28] feat(x): a_b *c* `d` <e> ~f~ #1 | \\")).toBe(
+      "\\[ESS-28\\] feat(x): a\\_b \\*c\\* \\`d\\` \\<e\\> \\~f\\~ \\#1 \\| \\\\",
+    );
+  });
+
+  it("links the escaped title to the URL, encoding characters that would end the link", () => {
+    expect(markdownLink("[ESS-28] feat(x)", "https://gitlab.example/g/p/-/merge_requests/7")).toBe(
+      "[\\[ESS-28\\] feat(x)](https://gitlab.example/g/p/-/merge_requests/7)",
+    );
+    expect(markdownLink("t", "https://x.example/a (b)<c>")).toBe(
+      "[t](https://x.example/a%20%28b%29%3Cc%3E)",
+    );
+  });
+
+  it("gives every built-in template the clickable MR link", () => {
+    for (const name of TEMPLATE_NAMES) expect(DEFAULT_TEMPLATES[name]).toContain("{{mr.link}}");
+  });
+});
+
 describe("loadTemplates", () => {
   it("uses the built-in Indonesian defaults when the folder does not exist", () => {
     expect(loadTemplates(join(tempDir(), "missing"))).toEqual(DEFAULT_TEMPLATES);
     expect(DEFAULT_TEMPLATES.nudge).toContain("boleh minta tolong review");
+  });
+
+  it("has a built-in Indonesian re-review template that asks for another look", () => {
+    expect(TEMPLATE_NAMES).toContain("rereview");
+    expect(DEFAULT_TEMPLATES.rereview).toBe(
+      "Halo {{person.name}}, MR ini sudah saya update sesuai review-mu. Boleh minta tolong dicek lagi?\n{{mr.link}}\nTerima kasih!",
+    );
+    expect(renderTemplate(DEFAULT_TEMPLATES.rereview, { ...values, "person.name": "Bob" })).toBe(
+      "Halo Bob, MR ini sudah saya update sesuai review-mu. Boleh minta tolong dicek lagi?\n[Add thing](https://gitlab.example/g/p/-/merge_requests/7)\nTerima kasih!",
+    );
+  });
+
+  it("lets rereview.txt replace the re-review template", () => {
+    const directory = tempDir();
+    writeFileSync(join(directory, "rereview.txt"), "Cek lagi {{person.name}}: {{mr.url}}");
+    const loaded = loadTemplates(directory);
+    expect(loaded.rereview).toBe("Cek lagi {{person.name}}: {{mr.url}}");
+    expect(loaded.nudge).toBe(DEFAULT_TEMPLATES.nudge);
   });
 
   it("lets a file replace one template and keeps the others", () => {

@@ -25,6 +25,7 @@ actor FakeClient: AgentClient {
     private var otherResult: Result<ActionResult, AgentError> = .success(ActionResult(code: "skipped"))
     private var pauseResult: Result<Void, AgentError> = .success(())
     private var gate: Gate?
+    private var firstStateGate: Gate?
     private(set) var stateCalls = 0
     private(set) var sendCalls: [Int] = []
     private(set) var skipCalls: [Int] = []
@@ -41,9 +42,13 @@ actor FakeClient: AgentClient {
     func setPause(_ result: Result<Void, AgentError>) { pauseResult = result }
     func setStates(_ next: [Result<AgentState, AgentError>]) { states = next }
 
+    /// Holds the first `state()` call until the gate opens.
+    func holdFirstState(_ gate: Gate) { firstStateGate = gate }
+
     func state() async throws(AgentError) -> AgentState {
         stateCalls += 1
         let result = states.count > 1 ? states.removeFirst() : (states.first ?? .failure(.launchFailed))
+        if stateCalls == 1, let gate = firstStateGate { await gate.wait() }
         return try result.get()
     }
 

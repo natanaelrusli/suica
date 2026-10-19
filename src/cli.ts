@@ -7,7 +7,7 @@ import { defaultConfigPath, defaultStatePath, loadConfig } from "./config.ts";
 import { applyConfigEdits, parseSaveRequest, showConfig } from "./config-edit.ts";
 import type { SaveResultJson } from "./config-edit.ts";
 import { defaultExec } from "./exec.ts";
-import { fetchSnapshot, glabPost, glabRest, glabRunner } from "./gitlab.ts";
+import { fetchSnapshot, glabPost, glabPostJson, glabRest, glabRunner } from "./gitlab.ts";
 import { detectModelClis } from "./model-cli.ts";
 import {
   approveMergeRequest,
@@ -17,6 +17,9 @@ import {
   parseMrKey,
 } from "./reviews.ts";
 import { discardAgentReview, postAgentReview } from "./agent-review.ts";
+import { parseTemplateRequest, saveTemplate, showTemplates } from "./template-edit.ts";
+import { defaultTemplatesPath } from "./teams/templates.ts";
+import type { TemplateSaveJson } from "./template-edit.ts";
 import { createLogger } from "./log.ts";
 import { createRuntime } from "./runtime.ts";
 import type { Runtime } from "./runtime.ts";
@@ -27,7 +30,7 @@ import { OUTBOX_STATUSES } from "./teams/types.ts";
 import { buildUsage } from "./usage.ts";
 
 const USAGE =
-  "usage: suica <once|status|state|stats|usage|pause|resume|pending [--all]|send <id> [--json]|skip <id> [--json]|retry <id> [--json]|selftest|reviews --json|mr <key> --json|mr approve <key> <sha> --json|review queue <key> --json|review post <id> --json|review discard <id> --json|config show --json|config set --json|agent install|agent uninstall|agent restart --json>\n";
+  "usage: suica <once|status|state|stats|usage|pause|resume|pending [--all]|send <id> [--json]|skip <id> [--json]|retry <id> [--json]|selftest|reviews --json|mr <key> --json|mr approve <key> <sha> --json|review queue <key> --json|review post <id> [--inline|--comment] --json|review discard <id> --json|config show --json|config set --json|templates show --json|templates set --json|agent install|agent uninstall|agent restart --json>\n";
 const TEAMS_DISABLED = "teams is disabled: set teams.enabled to true in the config\n";
 const SHOWN_WITH_ALL = 50;
 
@@ -217,7 +220,8 @@ async function reviewsJson(): Promise<number> {
 
 /**
  * `suica review queue|post|discard`: the background agent runs queued reviews after its next poll;
- * post and discard act on a review that waits for the Owner. Each prints `{"status": …}`.
+ * post and discard act on a review that waits for the Owner. `post` takes `--inline` or
+ * `--comment`, else `review.postAs`. Each prints `{"status": …}`.
  */
 async function reviewCommand(argv: readonly string[]): Promise<number> {
   const [action, target] = [argv[1], argv[2]];
@@ -242,9 +246,23 @@ async function reviewCommand(argv: readonly string[]): Promise<number> {
       const done = discardAgentReview(store, id, Date.now());
       return reply(done ? "discarded" : "nothing", done);
     }
+    const mode = argv.includes("--inline")
+      ? "inline"
+      : argv.includes("--comment")
+        ? "comment"
+        : config.review.postAs;
     const outcome = await postAgentReview(
-      { store, config, now: Date.now, log: createLogger(), post: glabPost(config.gitlab) },
+      {
+        store,
+        config,
+        now: Date.now,
+        log: createLogger(),
+        rest: glabRest(config.gitlab),
+        post: glabPost(config.gitlab),
+        postJson: glabPostJson(config.gitlab),
+      },
       id,
+      mode,
     );
     return reply(outcome, outcome === "posted");
   } finally {
@@ -338,8 +356,47 @@ async function setConfig(): Promise<number> {
   return result.status === "saved" ? 0 : 1;
 }
 
+/** The templates folder the agent loads; undefined when the config does not load. */
+function templatesDirectory(): string | undefined {
+  try {
+    return loadConfig(defaultConfigPath()).teams.templatesPath ?? defaultTemplatesPath();
+  } catch {
+    return undefined;
+  }
+}
+
+/** `suica templates show|set --json`: no runtime, so it works while the agent is stopped. */
+async function templatesCommand(action: string | undefined): Promise<number> {
+  const directory = templatesDirectory();
+  const reply = (result: TemplateSaveJson): number => {
+    process.stdout.write(`${JSON.stringify(result)}\n`);
+    return result.status === "saved" || result.status === "reset" ? 0 : 1;
+  };
+  if (directory === undefined) {
+    return reply({
+      status: "failed",
+      message: "the config does not load; fix it in Configuration",
+    });
+  }
+  if (action === "show") {
+    process.stdout.write(`${JSON.stringify(showTemplates(directory))}\n`);
+    return 0;
+  }
+  const text = await readLimitedStdin(MAX_REQUEST_BYTES);
+  const request = text === undefined ? undefined : parseTemplateRequest(text);
+  if (request === undefined) return reply({ status: "bad-request", message: "malformed request" });
+  return reply(saveTemplate(directory, request));
+}
+
 async function main(argv: readonly string[]): Promise<number> {
   const command = argv[0];
+  if (
+    command === "templates" &&
+    (argv[1] === "show" || argv[1] === "set") &&
+    argv.includes("--json")
+  ) {
+    return templatesCommand(argv[1]);
+  }
   if (command === "config") {
     if (argv[1] === "show" && argv.includes("--json")) {
       process.stdout.write(`${JSON.stringify(showConfig(defaultConfigPath()))}\n`);

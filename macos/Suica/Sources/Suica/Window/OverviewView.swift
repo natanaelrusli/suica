@@ -77,7 +77,8 @@ struct OverviewView: View {
         return LazyVGrid(columns: [GridItem(.adaptive(minimum: 190), spacing: 12, alignment: .top)], spacing: 12) {
             StatTile(
                 title: Copy.agentHeading,
-                value: agent.running ? Copy.running : (agent.loaded ? Copy.agentStoppedShort : Copy.agentMissingShort),
+                value: agent.running
+                    ? Copy.agentRunningShort : (agent.loaded ? Copy.agentStoppedShort : Copy.agentMissingShort),
                 symbol: "cpu", tint: agent.running ? .green : .orange,
                 caption: agent.pid.map(Copy.pid))
             StatTile(
@@ -168,6 +169,9 @@ struct OverviewView: View {
         let claude = window.status?.modelCli?.active == "claude"
         let aliases = claude ? ["opus", "sonnet", "haiku"] : []
         let options = aliases + (review.model.map { aliases.contains($0) ? [] : [$0] } ?? [])
+        let postAs = Binding<String>(
+            get: { review.postAs ?? "comment" },
+            set: { mode in Task { await window.setReviewPostAs(mode) } })
         let model = Binding<String>(
             get: { review.model ?? "" },
             set: { name in Task { await window.setReviewModel(name.isEmpty ? nil : name) } })
@@ -180,6 +184,18 @@ struct OverviewView: View {
                 }
                 .labelsHidden()
                 .fixedSize()
+            }
+            if review.postAs != nil {
+                GridRow {
+                    Text(Copy.postAsPicker).foregroundStyle(.secondary)
+                    Picker(Copy.postAsPicker, selection: postAs) {
+                        Text(Copy.postAsCommentOption).tag("comment")
+                        Text(Copy.postAsInlineOption).tag("inline")
+                    }
+                    .labelsHidden()
+                    .fixedSize()
+                    .help(Copy.postAsHint)
+                }
             }
             GridRow {
                 Text(Copy.reviewModelPicker).foregroundStyle(.secondary)
@@ -251,6 +267,7 @@ struct OverviewView: View {
                 Text(Copy.pollIntervals(active: polling.activeSeconds, idle: polling.idleSeconds))
                     .font(.caption).foregroundStyle(.secondary)
             }
+            Divider()
             lastPollLine(status.lastPoll)
             if let state = menu.state {
                 Text("\(Copy.tracked(state.trackedAuthored)) · \(Copy.waitingForYou(state.reviewRequested))")
@@ -264,6 +281,7 @@ struct OverviewView: View {
                 .foregroundStyle(.secondary)
             }
         }
+        .font(.callout)
     }
 
     @ViewBuilder private func lastPollLine(_ poll: PollEntry?) -> some View {

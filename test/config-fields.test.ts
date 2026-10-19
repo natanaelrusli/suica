@@ -23,7 +23,7 @@ describe("CONFIG_FIELDS", () => {
     const fromFields = CONFIG_FIELDS.map((field) => field.path.join(".")).sort();
     expect(fromFields).toEqual(fromSchema);
     expect(new Set(fromFields).size).toBe(fromFields.length);
-    expect(fromFields).toHaveLength(32);
+    expect(fromFields).toHaveLength(35);
   });
 
   it("gives enum fields the schema's options", () => {
@@ -32,9 +32,19 @@ describe("CONFIG_FIELDS", () => {
     expect(nudge?.options).toEqual(["auto", "approval", "dry-run"]);
     const notice = CONFIG_FIELDS.find((field) => field.path.join(".") === "teams.modes.notice");
     expect(notice?.options).toEqual(["auto", "approval", "dry-run"]);
+    const rereview = CONFIG_FIELDS.find((field) => field.path.join(".") === "teams.modes.rereview");
+    expect(rereview?.type).toBe("enum");
+    expect(rereview?.options).toEqual(["auto", "approval", "dry-run"]);
     for (const field of CONFIG_FIELDS) {
       expect(field.options !== undefined).toBe(field.type === "enum");
     }
+  });
+
+  it("lists the re-review wait as a whole number of minutes", () => {
+    const wait = CONFIG_FIELDS.find(
+      (field) => field.path.join(".") === "teams.rereviewAfterMinutes",
+    );
+    expect(wait?.type).toBe("int");
   });
 
   it("has a label and help for every field", () => {

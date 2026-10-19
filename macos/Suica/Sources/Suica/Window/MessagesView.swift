@@ -1,22 +1,33 @@
 import SuicaCore
 import SwiftUI
 
-private enum MessageGroup: Hashable {
-    case yours, others
-
-    func contains(_ item: OutboxItem) -> Bool { item.isAboutYourMR == (self == .yours) }
-}
-
 /// The popover's lists, on the same `MenuModel`, split into messages about your MRs and about
 /// MRs you reviewed for others.
 struct MessagesView: View {
-    let model: MenuModel
-    @State private var group: MessageGroup = .yours
+    @Bindable var window: WindowModel
+
+    private var model: MenuModel { window.menu }
+    private var group: MessageGroup { window.messageGroup }
 
     var body: some View {
+        ScrollViewReader { proxy in
+            list
+                // A `suica://message/<id>` link selects a row: bring it into view.
+                .onChange(of: window.selectedMessageId, initial: true) { _, id in
+                    if let id { withAnimation(Motion.content) { proxy.scrollTo(id, anchor: .center) } }
+                }
+        }
+        // Back to Your MRs, with nothing selected, the next time the page opens.
+        .onDisappear {
+            window.messageGroup = .yours
+            window.selectedMessageId = nil
+        }
+    }
+
+    private var list: some View {
         List {
             if let teams = model.state?.teams {
-                Picker("", selection: $group.animation(Motion.content)) {
+                Picker("", selection: $window.messageGroup.animation(Motion.content)) {
                     Text(label(Copy.yourMRs, .yours, teams)).tag(MessageGroup.yours)
                     Text(label(Copy.othersMRs, .others, teams)).tag(MessageGroup.others)
                 }
@@ -41,14 +52,14 @@ struct MessagesView: View {
                     if attention.isEmpty {
                         Label(Copy.attentionEmpty, systemImage: "checkmark.circle").foregroundStyle(.secondary)
                     }
-                    ForEach(attention) { OutboxItemRow(model: model, item: $0).listRowSeparator(.hidden) }
+                    ForEach(attention) { row($0) }
                     if teams.attentionHidden > 0 {
                         Text(Copy.moreHidden(teams.attentionHidden)).font(.caption).foregroundStyle(.secondary)
                     }
                 }
                 if !recent.isEmpty {
                     Section(Copy.recentHeading(recent.count)) {
-                        ForEach(recent) { OutboxItemRow(model: model, item: $0).listRowSeparator(.hidden) }
+                        ForEach(recent) { row($0) }
                     }
                 }
             } else if model.state != nil {
@@ -66,8 +77,15 @@ struct MessagesView: View {
             Button { Task { await model.refresh() } } label: {
                 Label(Copy.refresh, systemImage: "arrow.clockwise")
             }
-            .help(Copy.refresh)
+            .help("\(Copy.refresh) (⌘R)")
+            .keyboardShortcut("r")
         }
+    }
+
+    private func row(_ item: OutboxItem) -> some View {
+        OutboxItemRow(model: model, item: item, highlighted: window.selectedMessageId == item.id)
+            .id(item.id)
+            .listRowSeparator(.hidden)
     }
 
     /// The tab name, with the number of its messages that need you.

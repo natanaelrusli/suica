@@ -24,6 +24,61 @@ public enum Copy {
     public static let quit = "Quit"
     public static func confirmTitle(_ name: String) -> String { "Send this message to \(name)?" }
     public static let confirmSend = "Send"
+    public static let teamsPreviewHeading = "As it will look in Teams"
+    // Message templates
+    public static let messageTemplates = "Message templates"
+    public static let templateSaved = "Template saved. Restart the agent to use it for new messages."
+    public static let templateReset = "Built-in template restored. Restart the agent to use it for new messages."
+    public static let templateNotSaved = "The template was not saved."
+    public static let templateCustom = "Custom"
+    public static let templateBuiltIn = "Built-in"
+    public static let templateResetToDefault = "Use built-in"
+    public static let templateRevert = "Revert"
+    public static let templateInsert = "Insert placeholder"
+    public static let templateHint =
+        "Sent to Teams as Markdown: **bold**, [text](url) and line breaks work. Messages already waiting keep the text they were written with."
+    public static func templatePreviewNote(_ recipient: String) -> String {
+        "Preview with a sample MR and \(recipient) as the recipient."
+    }
+    public static func templateUnknown(_ names: [String]) -> String {
+        "Unknown placeholder\(names.count == 1 ? "" : "s"): \(names.map { "{{\($0)}}" }.joined(separator: ", ")). The agent would refuse to start with it."
+    }
+    public static func templateTitle(_ name: String) -> String {
+        switch name {
+        case "nudge": "Nudge"
+        case "reminder": "Reminder"
+        case "rereview": "Re-review Nudge"
+        case "notice.approved": "Review Notice: approved"
+        case "notice.changes": "Review Notice: changes requested"
+        case "notice.comments": "Review Notice: comments"
+        default: name
+        }
+    }
+    public static func templateWhen(_ name: String) -> String {
+        switch name {
+        case "nudge": "To a Reviewer of your MR, asking them to review it."
+        case "reminder": "To a Reviewer who has not reviewed yet, teams.reminderAfterHours after the nudge."
+        case "rereview": "To a Reviewer who already reviewed, after you push new commits."
+        case "notice.approved": "To the Author, after you approve their MR."
+        case "notice.changes": "To the Author, after you request changes."
+        case "notice.comments": "To the Author, after you leave comments."
+        default: ""
+        }
+    }
+    public static func placeholderHelp(_ name: String) -> String {
+        switch name {
+        case "mr.link": "The MR title as a link to the MR"
+        case "mr.title": "The MR title"
+        case "mr.url": "The MR's address"
+        case "mr.iid": "The MR number"
+        case "mr.project": "The project path"
+        case "person.name": "The recipient's name"
+        case "owner.name": "Your name"
+        default: name
+        }
+    }
+    public static let teamsChatSubtitle = "Chat"
+    public static let teamsNow = "Now"
     public static let confirmCancel = "Cancel"
     public static let maybeSent = "May have been delivered: check Teams"
     public static let notRetried = "Not retried automatically"
@@ -105,11 +160,19 @@ public enum Copy {
     public static let chartSeries = "Series"
     public static let loading = "Loading…"
     public static let agentStoppedShort = "Stopped"
+    public static let agentRunningShort = "Running"
     public static let agentMissingShort = "Not installed"
     public static let teamsOffShort = "Off"
     // Review requests
     public static let noReviewRequests = "No open merge requests are waiting for your review."
-    public static let selectMergeRequest = "Select a merge request."
+    public static let selectMergeRequest = "Select a merge request"
+    public static let selectMergeRequestHint = "Its description, changes, comments and agent review show here."
+    public static let allCaughtUp = "All caught up"
+    public static func opened(_ relative: String) -> String { "opened \(relative)" }
+    public static func updated(_ relative: String) -> String { "updated \(relative)" }
+    public static let searchSettings = "Search settings"
+    public static func noSettingsMatch(_ query: String) -> String { "No settings match “\(query)”" }
+    public static let noSettingsMatchHint = "Search looks at each setting's name, help and key."
     public static func reviewGroup(_ group: ReviewGroup) -> String {
         switch group {
         case .waiting: "Waiting for you"
@@ -127,8 +190,9 @@ public enum Copy {
     public static let discardReview = "Discard"
     public static let postConfirmTitle = "Post this review to GitLab as you?"
     public static let postConfirmMessage =
-        "It is posted as one comment on the MR, with a label saying an agent wrote it. Lines starting with / are escaped, and mentions and links are removed."
-    public static let post = "Post"
+        "Inline: each finding that names a line of the reviewed diff becomes a thread on that line, and the rest is one comment. As one comment: the whole review is one comment on the MR. Each is labelled as written by an agent; lines starting with / are escaped, and mentions and links are removed."
+    public static let postInline = "Post inline"
+    public static let postAsComment = "Post as one comment"
     public static let cancel = "Cancel"
     public static let noAgentReview =
         "The agent has not reviewed this MR. It reviews with the skill set in review.skill, read-only, on a temporary checkout, and nothing is posted until you approve it."
@@ -181,6 +245,10 @@ public enum Copy {
     public static let postingPicker = "Posting"
     public static let postWait = "Wait for me to post"
     public static let postAuto = "Post automatically"
+    public static let postAsPicker = "Post as"
+    public static let postAsCommentOption = "One comment"
+    public static let postAsInlineOption = "Inline threads"
+    public static let postAsHint = "Applies to automatic posting; Post to GitLab… asks each time."
     public static let reviewModelPicker = "Model"
     public static let cliDefaultModel = "CLI default"
     public static let autoPostConfirmTitle = "Post reviews to GitLab automatically?"
@@ -197,7 +265,7 @@ public enum Copy {
         if let model { parts.append(DisplayText.clean(model, max: 60)) }
         if let startedAt {
             let minutes = max(0, Int(now.timeIntervalSince1970 * 1000 - Double(startedAt)) / 60_000)
-            parts.append(minutes < 1 ? "just started" : "for \(minutes) min")
+            parts.append(minutes < 1 ? "just started" : "for \(Self.minutes(minutes))")
         }
         return parts.joined(separator: " · ")
     }
@@ -265,7 +333,7 @@ public enum Copy {
     // Messages
     public static let yourMRs = "Your MRs"
     public static let othersMRs = "Others' MRs"
-    public static let yourMRsHint = "Nudges and reminders to the reviewers of your merge requests."
+    public static let yourMRsHint = "Nudges, reminders and re-review nudges to the reviewers of your merge requests."
     public static let othersMRsHint = "Review notices to the authors of merge requests you reviewed."
     public static func groupHeading(_ key: String) -> String {
         switch key {
@@ -293,7 +361,7 @@ public enum Copy {
     public static let reviewerTurnaround = "Reviewers' time after a nudge"
     public static let noData = "Not enough data yet"
     public static func minutes(_ m: Int) -> String {
-        m < 60 ? "\(m) min" : "\(m / 60) h \(m % 60) min"
+        m < 60 ? "\(m) min" : m % 60 == 0 ? "\(m / 60) h" : "\(m / 60) h \(m % 60) min"
     }
 
     // MARK: Model CLI
@@ -308,7 +376,7 @@ public enum Copy {
         "\(name) is not installed, so nothing runs. Install it or pick another."
     }
     public static let modelCliSwitched = "Model CLI switched. Restart the agent to apply it."
-    public static let modelCliNote = "Used by Agent Review, which is not built yet."
+    public static let modelCliNote = "Agent Review runs with Claude Code or Codex; Gemini CLI is not supported there."
 
     // MARK: Token usage
 
@@ -378,6 +446,7 @@ public enum Copy {
         switch kind {
         case "nudge": "Nudge"
         case "reminder": "Reminder"
+        case "rereview": "Re-review"
         case "notice": "Review notice"
         default: kind
         }

@@ -5,8 +5,11 @@ import SwiftUI
 struct ConfigurationView: View {
     let window: WindowModel
     let editor: ConfigEditorModel
+    /// One category from the sidebar, or nil for every setting. A search looks through all of them.
+    var category: ConfigCategory?
     /// Bumped by Discard so fields that hold text the model never saw start over too.
     @State private var generation = 0
+    @State private var query = ""
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -50,15 +53,27 @@ struct ConfigurationView: View {
                 Label(Copy.configMissing, systemImage: "doc.badge.plus").foregroundStyle(.secondary)
             }
             if !document.issues.isEmpty { issues(document.issues) }
-            ForEach(groups(document.fields), id: \.key) { group in
+            let searching = !query.trimmingCharacters(in: .whitespaces).isEmpty
+            let inScope = document.fields.filter { searching || category == nil || ConfigCategory.of($0) == category }
+            let shown = groups(inScope.filter { editor.isShown($0, query: query) })
+            if shown.isEmpty {
+                ContentUnavailableView(
+                    Copy.noSettingsMatch(DisplayText.clean(query, max: 60)), systemImage: "magnifyingglass",
+                    description: Text(Copy.noSettingsMatchHint)
+                )
+                .frame(maxWidth: .infinity)
+            }
+            ForEach(shown, id: \.key) { group in
                 Section {
                     ForEach(group.fields, id: \.path) { FieldEditor(field: $0, editor: editor) }
                 } header: {
-                    Label(group.title, systemImage: Self.symbol(for: group.key)).font(.headline)
+                    Label(group.title, systemImage: ConfigCategory(key: group.key).symbol).font(.headline)
                 }
             }
         }
         .formStyle(.grouped)
+        .searchable(text: $query, placement: .toolbar, prompt: Copy.searchSettings)
+        .motion(value: query)
         .safeAreaInset(edge: .bottom) {
             if hasUnsavedInput {
                 unsavedBar.transition(Motion.slide(from: .bottom, reduceMotion: reduceMotion))
@@ -98,18 +113,6 @@ struct ConfigurationView: View {
         generation += 1
     }
 
-    private static func symbol(for group: String) -> String {
-        switch group {
-        case "gitlab": "server.rack"
-        case "polling": "arrow.triangle.2.circlepath"
-        case "notifications": "bell"
-        case "teams": "bubble.left.and.bubble.right"
-        case "model": "sparkles"
-        case "review": "checkmark.bubble"
-        default: "internaldrive"
-        }
-    }
-
     private func issues(_ issues: [ConfigIssue]) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Label(Copy.configIssuesHeading, systemImage: "exclamationmark.triangle.fill")
@@ -134,18 +137,14 @@ struct ConfigurationView: View {
     /// By the first path component, in the order the field list gives them; a top-level key
     /// (`statePath`) is Storage.
     private func groups(_ fields: [ConfigField]) -> [FieldGroup] {
-        var order: [String] = []
-        var byKey: [String: [ConfigField]] = [:]
+        var order: [ConfigCategory] = []
+        var byCategory: [ConfigCategory: [ConfigField]] = [:]
         for field in fields {
-            let key = field.path.count > 1 ? field.path[0] : "\u{0}storage"
-            if byKey[key] == nil { order.append(key) }
-            byKey[key, default: []].append(field)
+            let category = ConfigCategory.of(field)
+            if byCategory[category] == nil { order.append(category) }
+            byCategory[category, default: []].append(field)
         }
-        return order.map { key in
-            FieldGroup(
-                key: key, title: key == "\u{0}storage" ? Copy.storage : Copy.groupHeading(key),
-                fields: byKey[key] ?? [])
-        }
+        return order.map { FieldGroup(key: $0.key, title: $0.title, fields: byCategory[$0] ?? []) }
     }
 
     private func restart() {

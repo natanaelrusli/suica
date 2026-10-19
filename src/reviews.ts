@@ -73,6 +73,8 @@ export interface ReviewSummaryJson {
   readonly title: string;
   readonly url: string;
   readonly draft: boolean;
+  /** ISO 8601, when the MR was opened; null when GitLab did not say. */
+  readonly createdAt: string | null;
   readonly author: Person;
   readonly reviewers: readonly Reviewer[];
   /** Null when the agent never reviewed it. */
@@ -114,6 +116,7 @@ export function buildReviewList(
       title: mr.title,
       url: mr.url,
       draft: mr.draft,
+      createdAt: mr.createdAt,
       author: mr.author,
       reviewers: mr.reviewers,
       agentReview: ((row) => (row === undefined ? null : toAgentReviewJson(row)))(

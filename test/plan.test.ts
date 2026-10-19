@@ -5,7 +5,7 @@ import { planTeams } from "../src/teams/plan.ts";
 import type { PlanConfig } from "../src/teams/plan.ts";
 import type { Round, TeamsState } from "../src/teams/types.ts";
 import { ME, mr, note, person, previous, reviewer, snapshot } from "./builders.ts";
-import { NOW } from "./teams-builders.ts";
+import { NOW, teamsState } from "./teams-builders.ts";
 
 const HOUR = 3_600_000;
 const MINUTE = 60_000;
@@ -13,17 +13,8 @@ const config: PlanConfig = {
   maxMessagesPerReviewer: 2,
   reminderAfterMs: 24 * HOUR,
   noticeDebounceMs: 10 * MINUTE,
+  rereviewAfterMs: 10 * MINUTE,
 };
-
-function teamsState(overrides: Partial<TeamsState> = {}): TeamsState {
-  return {
-    baselineDone: true,
-    nudges: new Map(),
-    rounds: new Map(),
-    undelivered: new Set(),
-    ...overrides,
-  };
-}
 
 function plan(input: {
   snapshot: ReturnType<typeof snapshot>;

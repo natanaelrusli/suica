@@ -57,8 +57,8 @@ actor FakeReviewsClient: ReviewsClient {
         return try actionResult.get()
     }
 
-    func postAgentReview(id: Int) async throws(AgentError) -> ActionResult {
-        actions.append("post \(id)")
+    func postAgentReview(id: Int, inline: Bool) async throws(AgentError) -> ActionResult {
+        actions.append("post \(id)\(inline ? " inline" : "")")
         return try actionResult.get()
     }
 
@@ -137,6 +137,7 @@ actor FakeReviewsClient: ReviewsClient {
     }
     #expect(item("nudge").isAboutYourMR)
     #expect(item("reminder").isAboutYourMR)
+    #expect(item("rereview").isAboutYourMR)
     #expect(!item("notice").isAboutYourMR)
     #expect(!item("something-new").isAboutYourMR)
 }
@@ -293,17 +294,18 @@ private func withAgent(_ status: String?) -> ReviewListDocument {
     let client = FakeReviewsClient(lists: [.success(withAgent("running"))])
     let model = ReviewsModel(client: client)
     await model.refresh()
-    await model.postAgentReview("g/p!1")
+    await model.postAgentReview("g/p!1", inline: false)
     #expect(await client.actions.isEmpty)
 
     await client.setLists([.success(withAgent("ready"))])
     await model.refresh()
     await client.setActionResult(.success(ActionResult(code: "posted")))
-    await model.postAgentReview("g/p!1")
+    await model.postAgentReview("g/p!1", inline: false)
     #expect(await client.actions == ["post 9"])
     #expect(model.agentBanner == "Review posted to GitLab.")
+    await model.postAgentReview("g/p!1", inline: true)
     await model.discardAgentReview("g/p!1")
-    #expect(await client.actions == ["post 9", "discard 9"])
+    #expect(await client.actions == ["post 9", "post 9 inline", "discard 9"])
 }
 
 @MainActor @Test func aFailedAgentActionShowsTheError() async {
@@ -311,7 +313,7 @@ private func withAgent(_ status: String?) -> ReviewListDocument {
     await client.setActionResult(.failure(.timedOut))
     let model = ReviewsModel(client: client)
     await model.refresh()
-    await model.postAgentReview("g/p!1")
+    await model.postAgentReview("g/p!1", inline: true)
     #expect(model.agentBanner == Copy.agentTimedOut)
 }
 
@@ -329,6 +331,8 @@ private func withAgent(_ status: String?) -> ReviewListDocument {
     #expect(Copy.runningLine(cli: "claude", model: "opus", since: 1_000_000 - 3 * 60_000 - 5_000, now: now)
         == "Claude Code · opus · for 3 min")
     #expect(Copy.runningLine(cli: "codex", model: nil, since: 999_000, now: now) == "Codex · just started")
+    #expect(Copy.runningLine(cli: "codex", model: nil, since: 1_000_000 - 75 * 60_000, now: now)
+        == "Codex · for 1 h 15 min")
     #expect(Copy.agentReviewMeta(cli: "claude", model: "claude-opus-5-5", sha: "0123456789")
         == "By Claude Code (claude-opus-5-5) at commit 01234567")
     #expect(Copy.agentReviewBadge("queued") == "Agent review queued")
@@ -377,4 +381,18 @@ private func withAgent(_ status: String?) -> ReviewListDocument {
     await model.approve("g/p!1")
     await model.approve("g/p!2")
     #expect(await client.actions.isEmpty)
+}
+
+@Test func theProjectURLIsTheMergeRequestURLBeforeItsDashPath() throws {
+    #expect(try detail("g/p!7", ["url": "https://gitlab.example/g/sub/p/-/merge_requests/7"]).projectURL
+        == "https://gitlab.example/g/sub/p")
+    #expect(try detail("g/p!7", ["url": "https://gitlab.example/odd"]).projectURL == nil)
+}
+
+@Test func aSummaryReadsWhenTheMergeRequestWasOpened() throws {
+    let list = try decodeDocument(ReviewListDocument.self, from: contract("reviews.v1.json"))
+    #expect(list.mergeRequests.first?.createdDate == Date(timeIntervalSince1970: 1_791_968_400))
+    #expect(ReviewSummary(
+        key: "g/p!1", title: "t", url: "https://x", draft: false, author: Person(username: "a", name: "A"),
+        reviewers: []).createdDate == nil)
 }

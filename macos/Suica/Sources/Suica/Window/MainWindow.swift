@@ -125,29 +125,88 @@ extension View {
     }
 }
 
+/// A row of the sidebar: a section, or one category of Configuration under it.
+enum SidebarItem: Hashable {
+    case section(WindowSection)
+    case settings(ConfigCategory)
+    /// The Teams message templates, the last row under Configuration.
+    case templates
+
+    var section: WindowSection {
+        switch self {
+        case .section(let section): section
+        case .settings, .templates: .configuration
+        }
+    }
+
+    var category: ConfigCategory? {
+        if case .settings(let category) = self { category } else { nil }
+    }
+}
+
+private struct SidebarNode: Identifiable {
+    let item: SidebarItem
+    let title: String
+    let symbol: String
+    var children: [SidebarNode]?
+
+    var id: SidebarItem { item }
+
+    /// Every section, with Configuration's categories nested under it.
+    static let all: [SidebarNode] = WindowSection.allCases.map { section in
+        SidebarNode(
+            item: .section(section), title: section.title, symbol: section.symbol,
+            children: section == .configuration
+                ? ConfigCategory.known.map {
+                    SidebarNode(item: .settings($0), title: $0.title, symbol: $0.symbol)
+                } + [SidebarNode(item: .templates, title: Copy.messageTemplates, symbol: "text.bubble")]
+                : nil)
+    }
+}
+
+extension ConfigCategory {
+    var symbol: String {
+        switch key {
+        case "gitlab": "server.rack"
+        case "polling": "arrow.triangle.2.circlepath"
+        case "notifications": "bell"
+        case "teams": "bubble.left.and.bubble.right"
+        case "model": "sparkles"
+        case "review": "checkmark.bubble"
+        default: "internaldrive"
+        }
+    }
+}
+
 struct MainWindow: View {
     let window: WindowModel
     let editor: ConfigEditorModel
     let reviews: ReviewsModel
-    @State private var selection: WindowSection? = .overview
+    let templates: TemplateEditorModel
+    @State private var selection: SidebarItem? = .section(.overview)
     @State private var columns: NavigationSplitViewVisibility = .all
-    /// Bumped for a section each time it is picked, so only its icon bounces.
-    @State private var picks: [WindowSection: Int] = [:]
+    /// Bumped for a row each time it is picked, so only its icon bounces.
+    @State private var picks: [SidebarItem: Int] = [:]
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private var current: WindowSection { selection ?? .overview }
+    private var current: SidebarItem { selection ?? .section(.overview) }
+
+    private var title: String {
+        let base = "\(Copy.appName) · \(current.section.title)"
+        if current == .templates { return "\(base) · \(Copy.messageTemplates)" }
+        return current.category.map { "\(base) · \($0.title)" } ?? base
+    }
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columns) {
-            List(WindowSection.allCases, selection: $selection) { section in
+            List(SidebarNode.all, children: \.children, selection: $selection) { node in
                 Label {
-                    Text(section.title)
+                    Text(node.title)
                 } icon: {
-                    Image(systemName: section.symbol)
-                        .symbolEffect(.bounce, value: reduceMotion ? 0 : picks[section, default: 0])
+                    Image(systemName: node.symbol)
+                        .symbolEffect(.bounce, value: reduceMotion ? 0 : picks[node.item, default: 0])
                 }
-                .tag(section)
-                .accessibilityLabel(section.title)
+                .accessibilityLabel(node.title)
             }
             .onChange(of: selection) { _, picked in
                 if let picked { picks[picked, default: 0] += 1 }
@@ -176,7 +235,7 @@ struct MainWindow: View {
         // The detail column follows the sidebar with the same curve, so pages resize smoothly
         // rather than snapping to their new width at the end.
         .motion(Motion.sidebar, value: columns)
-        .navigationTitle("\(Copy.appName) · \(current.title)")
+        .navigationTitle(title)
         .frame(minWidth: 760, minHeight: 480)
         // The Dock icon exists only while the window does.
         .onAppear {
@@ -184,18 +243,32 @@ struct MainWindow: View {
             NSApp.activate()
         }
         .onDisappear { NSApp.setActivationPolicy(.accessory) }
+        // A `suica://` link: also runs for one that opened this window.
+        .onChange(of: window.pendingLink, initial: true) { _, _ in
+            guard let link = window.takePendingLink() else { return }
+            selection = .section(.messages)
+            Task { await window.show(link) }
+        }
         // Cancelled when the window closes.
         .task { await window.runRefreshLoop(every: .seconds(30)) }
     }
 
-    @ViewBuilder private func page(_ section: WindowSection) -> some View {
-        switch section {
+    @ViewBuilder private func page(_ item: SidebarItem) -> some View {
+        if item == .templates {
+            TemplatesView(model: templates, window: window)
+        } else {
+            sectionPage(item)
+        }
+    }
+
+    @ViewBuilder private func sectionPage(_ item: SidebarItem) -> some View {
+        switch item.section {
         case .overview: OverviewView(window: window, editor: editor)
         case .reviews: ReviewsView(model: reviews)
-        case .messages: MessagesView(model: window.menu)
+        case .messages: MessagesView(window: window)
         case .statistics: StatisticsView(window: window)
         case .usage: UsageView(window: window)
-        case .configuration: ConfigurationView(window: window, editor: editor)
+        case .configuration: ConfigurationView(window: window, editor: editor, category: item.category)
         }
     }
 }

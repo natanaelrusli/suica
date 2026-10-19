@@ -26,40 +26,85 @@ extension UnconfiguredClient: ReviewsClient {
     func reviews() async throws(AgentError) -> ReviewListDocument { throw AgentError.launchFailed }
     func mergeRequest(key: String) async throws(AgentError) -> MergeRequestDetail { throw AgentError.launchFailed }
     func queueAgentReview(key: String) async throws(AgentError) -> ActionResult { throw AgentError.launchFailed }
-    func postAgentReview(id: Int) async throws(AgentError) -> ActionResult { throw AgentError.launchFailed }
+    func postAgentReview(id: Int, inline: Bool) async throws(AgentError) -> ActionResult { throw AgentError.launchFailed }
     func discardAgentReview(id: Int) async throws(AgentError) -> ActionResult { throw AgentError.launchFailed }
     func approve(key: String, sha: String) async throws(AgentError) -> ActionResult { throw AgentError.launchFailed }
 }
 
+extension UnconfiguredClient: TemplatesClient {
+    func templates() async throws(AgentError) -> TemplatesDocument { throw AgentError.launchFailed }
+    func saveTemplate(name: String, text: String?) async throws(AgentError) -> TemplateSaveResult {
+        throw AgentError.launchFailed
+    }
+}
+
 private let refreshInterval: Duration = .seconds(30)
+
+/// Receives `suica://` links. SwiftUI would open them by building the window's content again, so the
+/// window scene turns that off (`handlesExternalEvents`) and the links come here instead.
+@MainActor
+final class LinkDelegate: NSObject, NSApplicationDelegate {
+    /// Set when the app starts, before the system can deliver the link that launched it.
+    static var window: WindowModel?
+
+    func application(_ application: NSApplication, open urls: [URL]) {
+        if let link = urls.compactMap(DeepLink.init(url:)).last { Self.window?.receive(link) }
+    }
+}
+
+/// Opens the window for each link received. It sits on the menu bar label, the one view that exists
+/// from launch to quit: the window's own scene is gone while the window is closed.
+private struct OpenWindowOnLink: ViewModifier {
+    let window: WindowModel
+    @Environment(\.openWindow) private var openWindow
+    @State private var handled = 0
+
+    func body(content: Content) -> some View {
+        content.onChange(of: window.linksReceived, initial: true) { _, count in
+            guard count > handled else { return }
+            handled = count
+            // As Open Suica… does: the window sets the Dock icon up when it appears.
+            openWindow(id: "main")
+            NSApp.activate()
+        }
+    }
+}
 
 @main
 struct SuicaApp: App {
+    @NSApplicationDelegateAdaptor(LinkDelegate.self) private var linkDelegate
     @State private var model: MenuModel
     @State private var window: WindowModel
     @State private var editor: ConfigEditorModel
     @State private var reviews: ReviewsModel
+    @State private var templates: TemplateEditorModel
 
     init() {
         let agent: any AgentClient
         let dashboard: any DashboardClient
         let reviewsClient: any ReviewsClient
+        let templatesClient: any TemplatesClient
         if let config = AgentConfig.fromBundle(.main) {
             let client = CLIAgentClient(config: config, runner: ProcessRunner())
             agent = client
             dashboard = client
             reviewsClient = client
+            templatesClient = client
         } else {
             agent = UnconfiguredClient()
             dashboard = UnconfiguredClient()
             reviewsClient = UnconfiguredClient()
+            templatesClient = UnconfiguredClient()
         }
         let model = MenuModel(client: agent)
         _model = State(initialValue: model)
         // The window reuses the popover's model, so an action started in one blocks the other.
-        _window = State(initialValue: WindowModel(client: dashboard, menu: model))
+        let window = WindowModel(client: dashboard, menu: model)
+        _window = State(initialValue: window)
+        LinkDelegate.window = window
         _editor = State(initialValue: ConfigEditorModel(client: dashboard))
         _reviews = State(initialValue: ReviewsModel(client: reviewsClient))
+        _templates = State(initialValue: TemplateEditorModel(client: templatesClient))
         Task { @MainActor in await model.runRefreshLoop(every: refreshInterval) }
     }
 
@@ -68,14 +113,16 @@ struct SuicaApp: App {
             MenuView(model: model)
         } label: {
             Image(nsImage: PenguinGlyph.image)
+                .modifier(OpenWindowOnLink(window: window))
             if model.badgeCount > 0 { Text("\(model.badgeCount)") }
         }
         .menuBarExtraStyle(.window)
 
         Window(Copy.appName, id: "main") {
-            MainWindow(window: window, editor: editor, reviews: reviews)
+            MainWindow(window: window, editor: editor, reviews: reviews, templates: templates)
         }
         .defaultSize(width: 1100, height: 720)
+        .handlesExternalEvents(matching: [])
         .commands { SidebarCommands() }
     }
 }

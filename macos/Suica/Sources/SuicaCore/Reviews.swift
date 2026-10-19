@@ -72,6 +72,8 @@ public struct ReviewSummary: Codable, Equatable, Identifiable, Sendable {
     public let title: String
     public let url: String
     public let draft: Bool
+    /// ISO 8601; nil when GitLab did not say, or from an older agent.
+    public let createdAt: String?
     public let author: Person
     public let reviewers: [ReviewerInfo]
     /// Nil when the agent never reviewed it, or from an agent without Agent Review.
@@ -79,14 +81,17 @@ public struct ReviewSummary: Codable, Equatable, Identifiable, Sendable {
 
     public var id: String { key }
 
+    public var createdDate: Date? { createdAt.flatMap(MRNote.parse) }
+
     public init(
-        key: String, title: String, url: String, draft: Bool, author: Person, reviewers: [ReviewerInfo],
-        agentReview: AgentReviewInfo? = nil
+        key: String, title: String, url: String, draft: Bool, createdAt: String? = nil, author: Person,
+        reviewers: [ReviewerInfo], agentReview: AgentReviewInfo? = nil
     ) {
         self.key = key
         self.title = title
         self.url = url
         self.draft = draft
+        self.createdAt = createdAt
         self.author = author
         self.reviewers = reviewers
         self.agentReview = agentReview
@@ -215,6 +220,11 @@ public struct MergeRequestDetail: Codable, Equatable, Sendable {
 
     public var updatedDate: Date? { MRNote.parse(updatedAt) }
 
+    /// The project's web address, from the MR's (`…/group/project/-/merge_requests/7`).
+    public var projectURL: String? {
+        url.range(of: "/-/merge_requests/").map { String(url[..<$0.lowerBound]) }
+    }
+
     /// Discussions people wrote, without GitLab's activity notes.
     public var comments: [MRDiscussion] { discussions.filter { !$0.isSystem } }
 }
@@ -284,8 +294,8 @@ public protocol ReviewsClient: Sendable {
     func mergeRequest(key: String) async throws(AgentError) -> MergeRequestDetail
     /// queued, already-queued or bad-key.
     func queueAgentReview(key: String) async throws(AgentError) -> ActionResult
-    /// posted, nothing or failed.
-    func postAgentReview(id: Int) async throws(AgentError) -> ActionResult
+    /// posted, nothing or failed. `inline` puts findings on their diff lines as threads.
+    func postAgentReview(id: Int, inline: Bool) async throws(AgentError) -> ActionResult
     /// discarded or nothing.
     func discardAgentReview(id: Int) async throws(AgentError) -> ActionResult
     /// Approves the MR as you at `sha`: approved, head-changed, bad-request or failed.
@@ -338,9 +348,11 @@ public final class ReviewsModel {
         await agentAction(key) { (client: any ReviewsClient) async throws(AgentError) -> ActionResult in try await client.queueAgentReview(key: key) }
     }
 
-    public func postAgentReview(_ key: String) async {
+    public func postAgentReview(_ key: String, inline: Bool) async {
         guard let review = agentReview(for: key), review.isReady else { return }
-        await agentAction(key) { (client: any ReviewsClient) async throws(AgentError) -> ActionResult in try await client.postAgentReview(id: review.id) }
+        await agentAction(key) { (client: any ReviewsClient) async throws(AgentError) -> ActionResult in
+            try await client.postAgentReview(id: review.id, inline: inline)
+        }
     }
 
     public func discardAgentReview(_ key: String) async {

@@ -94,9 +94,9 @@ public struct OutboxItem: Codable, Equatable, Identifiable, Sendable {
         }
     }
 
-    /// Nudges and reminders go to Reviewers of your own MRs; Review Notices go to the Authors of
-    /// MRs you reviewed. An unknown kind counts as someone else's MR.
-    public var isAboutYourMR: Bool { kind == "nudge" || kind == "reminder" }
+    /// Nudges, reminders and Re-review Nudges go to Reviewers of your own MRs; Review Notices go to
+    /// the Authors of MRs you reviewed. An unknown kind counts as someone else's MR.
+    public var isAboutYourMR: Bool { ["nudge", "reminder", "rereview"].contains(kind) }
 
     public var actions: [ItemAction] {
         switch state {

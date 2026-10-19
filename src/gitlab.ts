@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { z } from "zod";
 import type { Config } from "./config.ts";
 import { UNREVIEWED } from "./domain.ts";
@@ -50,6 +53,7 @@ fragment MrFields on MergeRequest {
   webUrl
   draft
   createdAt
+  diffHeadSha
   project { fullPath }
   author { username name }
   reviewers { nodes { username name mergeRequestInteraction { reviewState } } }
@@ -77,6 +81,7 @@ const mrSchema = z.object({
   webUrl: httpUrlSchema,
   draft: z.boolean(),
   createdAt: z.string().nullable().optional(),
+  diffHeadSha: z.string().nullable().optional(),
   project: z.object({ fullPath: z.string() }),
   author: personSchema.nullable(),
   reviewers: z.object({ nodes: z.array(reviewerSchema) }),
@@ -112,6 +117,7 @@ function toMergeRequest(node: z.infer<typeof mrSchema>): MergeRequest {
     url: node.webUrl,
     draft: node.draft,
     createdAt: node.createdAt ?? null,
+    headSha: node.diffHeadSha ?? null,
     author: node.author ?? GHOST,
     reviewers: node.reviewers.nodes.map((reviewer) => ({
       username: reviewer.username,
@@ -234,6 +240,33 @@ export function glabPost(config: Config["gitlab"], exec: Exec = defaultExec): Po
       "POST",
       ...Object.entries(fields).flatMap(([name, value]) => ["-f", `${name}=${value}`]),
     ]);
+}
+
+/** A REST POST with a JSON body, for nested fields such as a diff thread's `position`. */
+export type PostJsonRunner = (path: string, body: unknown) => Promise<unknown>;
+
+/**
+ * The body travels in a private temporary file through `--input`: `-F` would rewrite `:branch` and
+ * the like inside JSON values, and `-f` cannot nest.
+ */
+export function glabPostJson(config: Config["gitlab"], exec: Exec = defaultExec): PostJsonRunner {
+  return async (path, body) => {
+    const dir = mkdtempSync(join(tmpdir(), "suica-post-"));
+    const file = join(dir, "body.json");
+    try {
+      writeFileSync(file, JSON.stringify(body), { mode: 0o600 });
+      return await runGlab(config, exec, path, [
+        "-X",
+        "POST",
+        "-H",
+        "Content-Type: application/json",
+        "--input",
+        file,
+      ]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
 }
 
 export async function fetchSnapshot(run: GraphqlRunner): Promise<Snapshot> {

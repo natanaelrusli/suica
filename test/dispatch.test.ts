@@ -4,10 +4,17 @@ import { openStore } from "../src/store.ts";
 import type { Store } from "../src/store.ts";
 import { TeamsFailure } from "../src/teams/api.ts";
 import type { TeamsApi } from "../src/teams/api.ts";
-import { dispatchQueued, retryOutbox, sendPending, skipOutbox } from "../src/teams/dispatch.ts";
+import {
+  dispatchQueued,
+  modeFor,
+  retryOutbox,
+  sendPending,
+  skipOutbox,
+} from "../src/teams/dispatch.ts";
 import type { DispatchDeps, SendMode } from "../src/teams/dispatch.ts";
 import type { TeamsGateway } from "../src/teams/gateway.ts";
 import { DEFAULT_TEMPLATES } from "../src/teams/templates.ts";
+import type { RereviewReviewer } from "../src/teams/types.ts";
 import { ME, mr, person, reviewer, snapshot } from "./builders.ts";
 import { NOW, intent, teamsPlan } from "./teams-builders.ts";
 
@@ -49,7 +56,11 @@ function setup(options: { mode?: SendMode; now?: number; api?: Partial<TeamsApi>
     store,
     gateway,
     templates: DEFAULT_TEMPLATES,
-    config: { modes: { nudge: mode, notice: mode }, workingHours: hours, people: {} },
+    config: {
+      modes: { nudge: mode, notice: mode, rereview: mode },
+      workingHours: hours,
+      people: {},
+    },
     log: createLogger({ write: () => undefined }),
     now: () => now,
   };
@@ -81,13 +92,13 @@ describe("dispatchQueued", () => {
     const h = setup();
     const [id] = enqueue(h.store, 1);
     const result = await dispatchQueued(h.deps, own());
-    expect(result).toEqual({ sent: 1, failure: undefined });
+    expect(result).toEqual({ sent: 1, failure: undefined, held: [] });
     expect(h.sessions()).toBe(1);
     expect(h.opened).toEqual(["bob@x.id"]);
     expect(h.sent).toEqual([
       {
         chatId: "chat-bob@x.id",
-        text: "Halo Bob, boleh minta tolong review MR ini? Add thing\nhttps://gitlab.example/g/p/-/merge_requests/5\nTerima kasih!",
+        text: "Halo Bob, boleh minta tolong review MR ini?\n[Add thing](https://gitlab.example/g/p/-/merge_requests/5)\nTerima kasih!",
       },
     ]);
     expect(h.store.getOutbox(id ?? 0)).toMatchObject({ status: "sent", approved: false });
@@ -134,7 +145,10 @@ describe("dispatchQueued", () => {
     const h = setup();
     h.deps = {
       ...h.deps,
-      config: { ...h.deps.config, modes: { nudge: "approval", notice: "dry-run" } },
+      config: {
+        ...h.deps.config,
+        modes: { nudge: "approval", notice: "dry-run", rereview: "approval" },
+      },
     };
     h.store.applyTeamsPlan(
       teamsPlan({
@@ -256,7 +270,7 @@ describe("failures", () => {
     });
     const [id] = enqueue(h.store, 1);
     const result = await dispatchQueued(h.deps, own());
-    expect(result).toEqual({ sent: 0, failure: "unavailable" });
+    expect(result).toEqual({ sent: 0, failure: "unavailable", held: [] });
     expect(h.store.getOutbox(id ?? 0)).toMatchObject({ status: "queued" });
   });
 
@@ -267,7 +281,11 @@ describe("failures", () => {
       gateway: { session: () => Promise.reject(new TeamsFailure("unavailable", "no server")) },
     };
     const [id] = enqueue(h.store, 1);
-    expect(await dispatchQueued(h.deps, own())).toEqual({ sent: 0, failure: "unavailable" });
+    expect(await dispatchQueued(h.deps, own())).toEqual({
+      sent: 0,
+      failure: "unavailable",
+      held: [],
+    });
     expect(h.store.getOutbox(id ?? 0)).toMatchObject({ status: "queued" });
   });
 });
@@ -287,12 +305,12 @@ describe("at most once", () => {
     });
     const [first, second] = enqueue(h.store, 1, 2);
     const firstPass = await dispatchQueued(h.deps, own());
-    expect(firstPass).toEqual({ sent: 0, failure: "error" });
+    expect(firstPass).toEqual({ sent: 0, failure: "error", held: [] });
     expect(h.store.getOutbox(first ?? 0)).toMatchObject({ status: "failed", detail: "error" });
     expect(h.store.getOutbox(second ?? 0)).toMatchObject({ status: "queued" });
 
     const secondPass = await dispatchQueued(h.deps, own());
-    expect(secondPass).toEqual({ sent: 1, failure: undefined });
+    expect(secondPass).toEqual({ sent: 1, failure: undefined, held: [] });
     expect(calls).toBe(2);
     expect(h.store.getOutbox(first ?? 0)).toMatchObject({ status: "failed" });
     expect(h.store.getOutbox(second ?? 0)).toMatchObject({ status: "sent" });
@@ -324,7 +342,10 @@ describe("at most once", () => {
     const h = setup({ mode: "approval" });
     enqueue(h.store, 1);
     await dispatchQueued(h.deps, own());
-    h.deps = { ...h.deps, config: { ...h.deps.config, modes: { nudge: "auto", notice: "auto" } } };
+    h.deps = {
+      ...h.deps,
+      config: { ...h.deps.config, modes: { nudge: "auto", notice: "auto", rereview: "auto" } },
+    };
     await dispatchQueued(h.deps, own());
     expect(h.sent).toEqual([]);
     expect(h.store.listOutbox(["pending"])).toHaveLength(1);
@@ -405,7 +426,7 @@ describe("lookup errors", () => {
       reviewer("carol", "UNREVIEWED", "Carol"),
     ]);
     const result = await dispatchQueued(h.deps, snap);
-    expect(result).toEqual({ sent: 1, failure: "error" });
+    expect(result).toEqual({ sent: 1, failure: "error", held: [] });
     expect(h.store.listOutbox(["unresolved"])).toHaveLength(1);
     expect(h.store.listOutbox(["unresolved"])[0]).toMatchObject({
       recipient: "bob",
@@ -425,7 +446,7 @@ describe("lookup errors", () => {
       NOW,
     );
     const result = await dispatchQueued(h.deps, own());
-    expect(result).toEqual({ sent: 0, failure: "error" });
+    expect(result).toEqual({ sent: 0, failure: "error", held: [] });
     expect(h.store.listOutbox(["unresolved"])).toHaveLength(3);
     expect(h.store.listOutbox(["queued"])).toHaveLength(2);
   });
@@ -468,5 +489,140 @@ describe("owner actions", () => {
     expect(retryOutbox(h.store, id ?? 0, NOW)).toBe(false);
     expect(skipOutbox(h.store, id ?? 0, NOW)).toBe(true);
     expect(skipOutbox(h.store, id ?? 0, NOW)).toBe(false);
+  });
+});
+
+describe("Re-review Nudge", () => {
+  const BOB_KEY = "g/p!5|bob";
+  const open: RereviewReviewer = { reviewedHead: "h1", state: "APPROVED", notes: 0, nudged: true };
+  const closed: RereviewReviewer = { ...open, nudged: false };
+  const reviewed = (state = "APPROVED") => own([reviewer("bob", state, "Bob")]);
+
+  /** Queues one Re-review Nudge for bob, with the ledger holding `ledger` for him. */
+  function queue(h: ReturnType<typeof setup>, ledger: RereviewReviewer | undefined): number {
+    h.store.applyTeamsPlan(
+      teamsPlan({
+        intents: [
+          intent(1, {
+            dedupeKey: "rereview:g/p!5|bob:h2",
+            kind: "rereview",
+            variant: "rereview",
+          }),
+        ],
+        rereviewReviewers: ledger === undefined ? new Map() : new Map([[BOB_KEY, ledger]]),
+      }),
+      NOW,
+    );
+    return h.store.listOutbox(["queued"])[0]?.id ?? 0;
+  }
+
+  it("uses its own send mode", () => {
+    const modes = { nudge: "auto", notice: "auto", rereview: "dry-run" } as const;
+    expect(modeFor("rereview", { modes })).toBe("dry-run");
+    expect(modeFor("nudge", { modes })).toBe("auto");
+    expect(modeFor("reminder", { modes })).toBe("auto");
+    expect(modeFor("notice", { modes })).toBe("auto");
+  });
+
+  it("holds it for approval, renders the re-review template and reports it as held", async () => {
+    const h = setup({ mode: "approval" });
+    const id = queue(h, open);
+    const result = await dispatchQueued(h.deps, reviewed());
+    expect(h.sessions()).toBe(0);
+    expect(h.store.getOutbox(id)).toMatchObject({ status: "pending" });
+    expect(h.store.getOutbox(id)?.text).toBe(
+      "Halo Bob, MR ini sudah saya update sesuai review-mu. Boleh minta tolong dicek lagi?\n[Add thing](https://gitlab.example/g/p/-/merge_requests/5)\nTerima kasih!",
+    );
+    expect(result.held).toEqual([
+      expect.objectContaining({ id, kind: "rereview", mrKey: "g/p!5", recipientName: "Bob" }),
+    ]);
+  });
+
+  it("reports a message as held once, not on every later poll while it waits", async () => {
+    const h = setup({ mode: "approval" });
+    queue(h, open);
+    expect((await dispatchQueued(h.deps, reviewed())).held).toHaveLength(1);
+    expect((await dispatchQueued(h.deps, reviewed())).held).toEqual([]);
+  });
+
+  it("reports nothing as held in auto and dry-run mode, where nothing waits for the Owner", async () => {
+    for (const mode of ["auto", "dry-run"] as const) {
+      const h = setup({ mode });
+      queue(h, open);
+      expect((await dispatchQueued(h.deps, reviewed())).held).toEqual([]);
+    }
+  });
+
+  it("reports nothing as held outside working hours, and reports it once the hours begin", async () => {
+    const h = setup({ mode: "approval", now: EVENING });
+    queue(h, open);
+    expect((await dispatchQueued(h.deps, reviewed())).held).toEqual([]);
+    h.setNow(WORKING + 24 * 3_600_000);
+    expect((await dispatchQueued(h.deps, reviewed())).held).toHaveLength(1);
+  });
+
+  it("sends it when the Reviewer is still listed and the round is open, whatever their state", async () => {
+    const h = setup();
+    const id = queue(h, open);
+    expect(await dispatchQueued(h.deps, reviewed("REQUESTED_CHANGES"))).toMatchObject({ sent: 1 });
+    expect(h.store.getOutbox(id)).toMatchObject({ status: "sent" });
+  });
+
+  it("is obsolete once the planner closed the round: the Reviewer reviewed again or was re-requested", async () => {
+    const h = setup({ mode: "approval" });
+    const id = queue(h, closed);
+    await dispatchQueued(h.deps, reviewed());
+    expect(h.store.getOutbox(id)).toMatchObject({ status: "skipped", detail: "obsolete" });
+    expect(h.sent).toEqual([]);
+  });
+
+  it("is obsolete while pending too, and stops being held", async () => {
+    const h = setup({ mode: "approval" });
+    const id = queue(h, open);
+    await dispatchQueued(h.deps, reviewed());
+    expect(h.store.getOutbox(id)).toMatchObject({ status: "pending" });
+    h.store.applyTeamsPlan(teamsPlan({ rereviewReviewers: new Map([[BOB_KEY, closed]]) }), NOW);
+    await dispatchQueued(h.deps, reviewed());
+    expect(h.store.getOutbox(id)).toMatchObject({ status: "skipped", detail: "obsolete" });
+  });
+
+  it("is obsolete when the MR is gone or a draft, the Reviewer was removed, or the ledger lost them", async () => {
+    const cases = [
+      snapshot(),
+      snapshot({
+        authored: [mr(5, { author: ME, draft: true, reviewers: [reviewer("bob", "APPROVED")] })],
+      }),
+      own([reviewer("carol", "APPROVED")]),
+    ];
+    for (const current of cases) {
+      const h = setup();
+      const id = queue(h, open);
+      await dispatchQueued(h.deps, current);
+      expect(h.store.getOutbox(id)).toMatchObject({ status: "skipped", detail: "obsolete" });
+    }
+    const forgotten = setup();
+    const id = queue(forgotten, undefined);
+    await dispatchQueued(forgotten.deps, reviewed());
+    expect(forgotten.store.getOutbox(id)).toMatchObject({ status: "skipped", detail: "obsolete" });
+  });
+
+  it("is sent on `suica send` while the round is open, and refused as obsolete once it is closed", async () => {
+    const stillOpen = setup({ mode: "approval" });
+    const id = queue(stillOpen, open);
+    stillOpen.store.commit(reviewed());
+    await dispatchQueued(stillOpen.deps, reviewed());
+    expect(await sendPending(stillOpen.deps, id)).toEqual({ status: "sent" });
+
+    const reviewedAgain = setup({ mode: "approval" });
+    const second = queue(reviewedAgain, open);
+    reviewedAgain.store.commit(reviewed());
+    await dispatchQueued(reviewedAgain.deps, reviewed());
+    reviewedAgain.store.applyTeamsPlan(
+      teamsPlan({ rereviewReviewers: new Map([[BOB_KEY, closed]]) }),
+      NOW,
+    );
+    expect(await sendPending(reviewedAgain.deps, second)).toEqual({ status: "obsolete" });
+    expect(reviewedAgain.store.getOutbox(second)).toMatchObject({ status: "skipped" });
+    expect(reviewedAgain.sent).toEqual([]);
   });
 });

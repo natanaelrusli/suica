@@ -291,7 +291,7 @@ func makeBrokenConfigStatus() -> StatusDocument {
 @Test func minutesFormatting() {
     #expect(Copy.minutes(45) == "45 min")
     #expect(Copy.minutes(0) == "0 min")
-    #expect(Copy.minutes(60) == "1 h 0 min")
+    #expect(Copy.minutes(60) == "1 h")
     #expect(Copy.minutes(135) == "2 h 15 min")
 }
 

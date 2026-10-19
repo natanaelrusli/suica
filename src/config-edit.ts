@@ -322,7 +322,12 @@ export function applyConfigEdits(path: string, request: SaveRequest): SaveResult
   return { status: "saved", issues: [], sha256: sha256Of(text) };
 }
 
-function writeAtomically(path: string, text: string): void {
+/** Writes `text` to `path` through a private temporary file and a rename; throws `failure`. */
+export function writeAtomically(
+  path: string,
+  text: string,
+  failure = "cannot write the config file",
+): void {
   let target = path;
   try {
     target = realpathSync(path); // keep a symlinked config a symlink
@@ -348,6 +353,6 @@ function writeAtomically(path: string, text: string): void {
     } catch {
       // the fixed message below is what surfaces, never a path
     }
-    throw new Error("cannot write the config file");
+    throw new Error(failure);
   }
 }

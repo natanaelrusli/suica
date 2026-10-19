@@ -28,6 +28,8 @@ export interface MergeRequest {
   readonly draft: boolean;
   /** ISO 8601 as GitLab sends it; null when it was not fetched. */
   readonly createdAt: string | null;
+  /** The head commit of the source branch; null while GitLab has not computed it. */
+  readonly headSha: string | null;
   readonly author: Person;
   readonly reviewers: readonly Reviewer[];
   /** Most recent notes only; empty for MRs fetched without notes. */

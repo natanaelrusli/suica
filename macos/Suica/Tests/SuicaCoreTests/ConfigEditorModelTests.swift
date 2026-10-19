@@ -383,3 +383,19 @@ func makeConfig(sha: String? = "abc", fields: [ConfigField]? = nil, issues: [Con
     await model.save()
     #expect(model.issue(of: active) == "too big")
 }
+
+@MainActor @Test func searchMatchesEveryWordAndKeepsFieldsThatNeedAttention() async {
+    let model = await loadedEditor()
+    let active = makeConfig().fields[0]
+    let idle = makeConfig().fields[1]
+    let enabled = makeConfig().fields[2]
+    #expect(model.isShown(enabled, query: "  "))
+    #expect(model.isShown(enabled, query: "TEAMS enab"))
+    #expect(!model.isShown(enabled, query: "teams polling"))
+    #expect(model.isShown(idle, query: "polling.idle"))
+    #expect(!model.isShown(active, query: "teams"))
+    model.set(active, .int(45))
+    #expect(model.isShown(active, query: "teams"))
+    model.setInputInvalid(idle, true)
+    #expect(model.isShown(idle, query: "teams"))
+}

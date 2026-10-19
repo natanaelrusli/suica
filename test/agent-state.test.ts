@@ -49,6 +49,12 @@ describe("buildAgentState", () => {
     expect(buildAgentState({ ...base, rows, agentReview })).toEqual(golden);
   });
 
+  it("lists a Re-review Nudge under its own kind, and never marks it as an approval notice", () => {
+    const rows = [row(1, "pending", { kind: "rereview", variant: "rereview" })];
+    const attention = buildAgentState({ ...base, rows }).teams?.attention;
+    expect(attention?.map((item) => [item.kind, item.mrApproved])).toEqual([["rereview", false]]);
+  });
+
   it("reports teams as null when Teams is disabled", () => {
     expect(buildAgentState({ ...base, rows: undefined }).teams).toBeNull();
     expect(buildAgentState({ ...base, rows: undefined }).agentReview).toBeNull();

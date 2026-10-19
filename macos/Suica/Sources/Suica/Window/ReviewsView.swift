@@ -25,7 +25,8 @@ struct ReviewsView: View {
             Button { Task { await model.refresh() } } label: {
                 Label(Copy.refresh, systemImage: "arrow.clockwise")
             }
-            .help(Copy.refresh)
+            .help("\(Copy.refresh) (⌘R)")
+            .keyboardShortcut("r")
             .disabled(model.loadingList)
         }
     }
@@ -44,9 +45,11 @@ struct ReviewsView: View {
                 if list.mergeRequests.isEmpty {
                     Label(Copy.noReviewRequests, systemImage: "checkmark.circle")
                         .foregroundStyle(.secondary)
+                        .listRowSeparator(.hidden)
                 } else if list.me != nil, sections.first?.group != .waiting {
                     Label(Copy.nothingWaiting, systemImage: "checkmark.circle")
                         .foregroundStyle(.secondary)
+                        .listRowSeparator(.hidden)
                 }
                 ForEach(sections, id: \.group) { section in
                     if section.group == .all {
@@ -106,8 +109,11 @@ struct ReviewsView: View {
             } else {
                 ProgressView(Copy.loading)
             }
+        } else if model.list?.mergeRequests.isEmpty == true {
+            ContentUnavailableView(Copy.allCaughtUp, systemImage: "checkmark.circle", description: Text(Copy.noReviewRequests))
         } else {
-            Text(Copy.selectMergeRequest).foregroundStyle(.secondary)
+            ContentUnavailableView(
+                Copy.selectMergeRequest, systemImage: "sidebar.left", description: Text(Copy.selectMergeRequestHint))
         }
     }
 }
@@ -125,12 +131,21 @@ private struct ReviewRow: View {
             HStack(spacing: 4) {
                 // Inside the Drafts group the heading already says it.
                 if mr.draft && group != .drafts { Badge(text: Copy.draft, tint: .gray) }
-                Text(DisplayText.clean(mr.author.name, max: 60))
+                Text(DisplayText.clean(mr.author.name, max: 60)).lineLimit(1)
                 Text("·").foregroundStyle(.tertiary)
-                Text(Self.shortKey(mr.key)).lineLimit(1).truncationMode(.head)
+                // The key gives way first: the author and the project's own name stay readable.
+                Text(Self.shortKey(mr.key)).lineLimit(1).truncationMode(.head).layoutPriority(-1)
             }
             .font(.caption)
             .foregroundStyle(.secondary)
+            // On its own line, so a long name or key never cuts it off.
+            if let opened = mr.createdDate {
+                Text(Copy.opened(opened.formatted(.relative(presentation: .named))))
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .help(opened.formatted(date: .abbreviated, time: .shortened))
+            }
             if let review = mr.agentReview, let badge = Copy.agentReviewBadge(review.status) {
                 Label(badge, systemImage: review.status == "queued" ? "hourglass" : "sparkles")
                     .font(.caption2.weight(.semibold))
@@ -283,7 +298,8 @@ private struct MergeRequestDetailView: View {
                 Text(Copy.byAuthor(DisplayText.clean(detail.author.name, max: 60)))
                 if let date = detail.updatedDate {
                     Text("·").foregroundStyle(.tertiary)
-                    Text(date.formatted(.relative(presentation: .named)))
+                    Text(Copy.updated(date.formatted(.relative(presentation: .named))))
+                        .help(date.formatted(date: .abbreviated, time: .shortened))
                 }
             }
             .font(.callout)
@@ -412,7 +428,7 @@ private struct DescriptionTab: View {
                 if detail.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     Text(Copy.noDescription).foregroundStyle(.secondary)
                 } else {
-                    MarkdownText(source: detail.description)
+                    MarkdownText(source: detail.description, projectURL: detail.projectURL)
                 }
             }
             .padding(20)
@@ -567,7 +583,7 @@ private struct CommentsTab: View {
                     if discussion.isSystem {
                         ForEach(discussion.notes) { ActivityLine(note: $0) }
                     } else {
-                        DiscussionCard(discussion: discussion)
+                        DiscussionCard(discussion: discussion, projectURL: detail.projectURL)
                     }
                 }
             }
@@ -580,6 +596,7 @@ private struct CommentsTab: View {
 
 private struct DiscussionCard: View {
     let discussion: MRDiscussion
+    let projectURL: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -616,7 +633,7 @@ private struct DiscussionCard: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
-                    MarkdownText(source: note.body)
+                    MarkdownText(source: note.body, projectURL: projectURL)
                 }
             }
         }
@@ -700,7 +717,8 @@ private struct AgentReviewTab: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .confirmationDialog(Copy.postConfirmTitle, isPresented: $confirmingPost) {
-            Button(Copy.post) { Task { await model.postAgentReview(key) } }
+            Button(Copy.postInline) { Task { await model.postAgentReview(key, inline: true) } }
+            Button(Copy.postAsComment) { Task { await model.postAgentReview(key, inline: false) } }
             Button(Copy.cancel, role: .cancel) {}
         } message: {
             Text(Copy.postConfirmMessage)
@@ -710,35 +728,31 @@ private struct AgentReviewTab: View {
 
 // MARK: - Markdown
 
-/// GitLab Markdown, block by block: headings, lists, quotes, fenced code and paragraphs, with
-/// inline styling and links from Foundation's parser. Anything else is shown as written.
+/// GitLab Markdown, block by block (`parseMarkdownBlocks`): headings, lists and task lists,
+/// quotes, fenced code, tables, rules and paragraphs, with inline styling and links from
+/// Foundation's parser. Images show as links. Anything else is shown as written.
 struct MarkdownText: View {
     let source: String
-
-    private enum Block {
-        case heading(Int, String)
-        /// `marker` is "•" for an unordered item and the number with its dot for an ordered one.
-        case bullet(String, marker: String, indent: Int)
-        case quote(String)
-        case code(String)
-        case paragraph(String)
-    }
+    /// Makes GitLab's `/uploads/…` links absolute; nil for text that is not from a project.
+    var projectURL: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            ForEach(Array(Self.blocks(source).enumerated()), id: \.offset) { _, block in
+            ForEach(Array(parseMarkdownBlocks(source).enumerated()), id: \.offset) { _, block in
                 view(for: block)
             }
         }
         .textSelection(.enabled)
     }
 
-    @ViewBuilder private func view(for block: Block) -> some View {
+    private func inline(_ text: String) -> Text { Self.inline(text, projectURL: projectURL) }
+
+    @ViewBuilder private func view(for block: MarkdownBlock) -> some View {
         switch block {
         case .heading(let level, let text):
             inline(text).font(level <= 1 ? .title2.bold() : level == 2 ? .title3.bold() : .headline)
                 .padding(.top, 4)
-        case .bullet(let text, let marker, let indent):
+        case .listItem(let text, let marker, let indent):
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Text(marker).foregroundStyle(.secondary).monospacedDigit()
                 inline(text)
@@ -755,65 +769,68 @@ struct MarkdownText: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
+        case .table(let table):
+            MarkdownTableView(table: table, projectURL: projectURL)
+        case .rule:
+            Divider().padding(.vertical, 4)
         case .paragraph(let text):
             inline(text)
         }
     }
 
-    private func inline(_ text: String) -> Text {
+    static func inline(_ text: String, projectURL: String?) -> Text {
         let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-        if let attributed = try? AttributedString(markdown: text, options: options) {
+        let source = inlineMarkdownSource(text, projectURL: projectURL)
+        if let attributed = try? AttributedString(markdown: source, options: options) {
             return Text(attributed)
         }
         return Text(text)
     }
+}
 
-    private static func blocks(_ source: String) -> [Block] {
-        var blocks: [Block] = []
-        var paragraph: [String] = []
-        var code: [String]?
+/// A GFM table: bold header, a rule under it and between rows, cells wrapping within the width.
+private struct MarkdownTableView: View {
+    let table: MarkdownTable
+    let projectURL: String?
 
-        func flush() {
-            if !paragraph.isEmpty { blocks.append(.paragraph(paragraph.joined(separator: "\n"))) }
-            paragraph = []
-        }
-
-        for raw in source.replacingOccurrences(of: "\r\n", with: "\n").split(separator: "\n", omittingEmptySubsequences: false) {
-            let line = String(raw)
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.hasPrefix("```") {
-                if let lines = code {
-                    blocks.append(.code(lines.joined(separator: "\n")))
-                    code = nil
-                } else {
-                    flush()
-                    code = []
-                }
-                continue
-            }
-            if code != nil {
-                code?.append(line)
-                continue
-            }
-            if trimmed.isEmpty {
-                flush()
-            } else if let match = trimmed.firstMatch(of: /^(#{1,6})\s+(.*)$/) {
-                flush()
-                blocks.append(.heading(match.1.count, String(match.2)))
-            } else if let match = line.firstMatch(of: /^(\s*)([-*+]|\d+[.)])\s+(.*)$/) {
-                flush()
-                // Numbers stay: a review's findings are answered by number ("fix 2 and 5").
-                let marker = match.2.first?.isNumber == true ? String(match.2) : "•"
-                blocks.append(.bullet(String(match.3), marker: marker, indent: match.1.count / 2))
-            } else if trimmed.hasPrefix(">") {
-                flush()
-                blocks.append(.quote(String(trimmed.dropFirst()).trimmingCharacters(in: .whitespaces)))
-            } else {
-                paragraph.append(line)
+    var body: some View {
+        Grid(alignment: .topLeading, horizontalSpacing: 12, verticalSpacing: 6) {
+            row(table.header).font(.callout.weight(.semibold))
+            Divider()
+            ForEach(Array(table.rows.enumerated()), id: \.offset) { index, cells in
+                if index > 0 { Divider().opacity(0.5) }
+                row(cells).font(.callout)
             }
         }
-        if let lines = code { blocks.append(.code(lines.joined(separator: "\n"))) }
-        flush()
-        return blocks
+        .padding(10)
+        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.separator.opacity(0.6)))
+    }
+
+    private func row(_ cells: [String]) -> some View {
+        GridRow {
+            ForEach(Array(cells.enumerated()), id: \.offset) { column, cell in
+                let alignment = table.alignments[column]
+                MarkdownText.inline(cell, projectURL: projectURL)
+                    .multilineTextAlignment(Self.textAlignment(alignment))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .gridColumnAlignment(Self.horizontalAlignment(alignment))
+            }
+        }
+    }
+
+    private static func textAlignment(_ alignment: MarkdownTable.Alignment) -> TextAlignment {
+        switch alignment {
+        case .leading: .leading
+        case .center: .center
+        case .trailing: .trailing
+        }
+    }
+
+    private static func horizontalAlignment(_ alignment: MarkdownTable.Alignment) -> HorizontalAlignment {
+        switch alignment {
+        case .leading: .leading
+        case .center: .center
+        case .trailing: .trailing
+        }
     }
 }

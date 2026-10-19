@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { ActivityEvent } from "../src/events.ts";
-import { baselineNotifications, buildNotifications, clean } from "../src/format.ts";
+import {
+  baselineNotifications,
+  buildNotifications,
+  clean,
+  rereviewNotifications,
+} from "../src/format.ts";
+import type { HeldMessage } from "../src/teams/types.ts";
 import { mr, person } from "./builders.ts";
 
 describe("clean", () => {
@@ -101,5 +107,73 @@ describe("baselineNotifications", () => {
     expect(baselineNotifications(3)).toEqual([
       { title: "Suica aktif", body: "3 MR menunggu review-mu" },
     ]);
+  });
+});
+
+describe("rereviewNotifications", () => {
+  const held = (id: number, name: string, overrides: Partial<HeldMessage> = {}): HeldMessage => ({
+    id,
+    kind: "rereview",
+    mrKey: "g/p!5",
+    mrTitle: "Add thing",
+    recipientName: name,
+    ...overrides,
+  });
+
+  it("asks about one Reviewer and opens that message when clicked", () => {
+    expect(rereviewNotifications([held(12, "Bob")])).toEqual([
+      {
+        title: "Minta review ulang?",
+        body: "Kamu push ke Add thing setelah Bob review. Kirim pesan Teams?",
+        url: "suica://message/12",
+      },
+    ]);
+  });
+
+  it("makes one notification per MR, naming every Reviewer, and opens the message list", () => {
+    const notifications = rereviewNotifications([
+      held(1, "Bob"),
+      held(2, "Carol"),
+      held(3, "Dave"),
+      held(4, "Erin", { mrKey: "g/p!8", mrTitle: "Other" }),
+    ]);
+    expect(notifications).toEqual([
+      {
+        title: "Minta review ulang?",
+        body: "Kamu push ke Add thing setelah Bob, Carol dan Dave review. Kirim pesan Teams?",
+        url: "suica://messages",
+      },
+      {
+        title: "Minta review ulang?",
+        body: "Kamu push ke Other setelah Erin review. Kirim pesan Teams?",
+        url: "suica://message/4",
+      },
+    ]);
+  });
+
+  it("joins two Reviewers with 'dan'", () => {
+    expect(rereviewNotifications([held(1, "Bob"), held(2, "Carol")])[0]?.body).toBe(
+      "Kamu push ke Add thing setelah Bob dan Carol review. Kirim pesan Teams?",
+    );
+  });
+
+  it("ignores messages of other kinds, and is silent when nothing was held", () => {
+    expect(rereviewNotifications([held(1, "Bob", { kind: "nudge" })])).toEqual([]);
+    expect(rereviewNotifications([])).toEqual([]);
+  });
+
+  it("cleans and shortens titles and names, and stays inside the body limit", () => {
+    const long = "T".repeat(300);
+    const names = Array.from({ length: 12 }, (_, index) => `${"N".repeat(60)}${index}`);
+    const [notification] = rereviewNotifications([
+      held(1, "-n Mallory\nsecond", { mrTitle: `--${long}` }),
+      ...names.map((name, index) => held(2 + index, name)),
+    ]);
+    expect(notification?.body).not.toContain("\n");
+    expect(notification?.body).not.toMatch(/T{51}/);
+    expect(notification?.body).not.toMatch(/N{61}/);
+    expect(notification?.body.startsWith("Kamu push ke T")).toBe(true);
+    expect(notification?.body.endsWith(" review. Kirim pesan Teams?")).toBe(true);
+    expect([...(notification?.body ?? "")].length).toBeLessThanOrEqual(160);
   });
 });

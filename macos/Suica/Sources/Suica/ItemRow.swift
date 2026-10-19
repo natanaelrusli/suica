@@ -5,6 +5,8 @@ struct ItemRow: View {
     let item: OutboxItem
     let busy: Bool
     let confirming: Bool
+    /// The row a `suica://` link pointed at.
+    var highlighted = false
     let onAction: (ItemAction) -> Void
     let onConfirm: () -> Void
     let onCancel: () -> Void
@@ -30,10 +32,21 @@ struct ItemRow: View {
                 if let hint {
                     Label(hint, systemImage: "info.circle").font(.caption).foregroundStyle(.orange)
                 }
-                if item.state == .pending, let text = item.text {
-                    Text(DisplayText.clean(text, max: confirming ? 600 : 200))
+                if item.state == .pending, confirming, let text = item.text {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(Copy.teamsPreviewHeading).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                        TeamsMessagePreview(recipient: item.recipientName, text: text)
+                    }
+                    .transition(Motion.reveal(reduceMotion: reduceMotion))
+                } else if item.state == .pending, let text = item.text {
+                    // Drawn as Teams shows it: Markdown, one cleaned line per line of the message.
+                    MarkdownText.inline(DisplayText.cleanLines(text), projectURL: nil)
                         .font(.callout)
-                        .lineLimit(confirming ? nil : 4)
+                        // Links open only when they are http(s).
+                        .environment(\.openURL, OpenURLAction { url in
+                            DisplayText.safeURL(url.absoluteString) == nil ? .discarded : .systemAction
+                        })
+                        .lineLimit(4)
                         .textSelection(.enabled)
                         .padding(8)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -48,10 +61,15 @@ struct ItemRow: View {
         }
         .padding(10)
         .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 10))
+        .overlay {
+            if highlighted { RoundedRectangle(cornerRadius: 10).strokeBorder(Color.accentColor, lineWidth: 2) }
+        }
+        .motion(value: highlighted)
         .motion(value: confirming)
         .motion(value: busy)
         .motion(value: item.status)
         .accessibilityElement(children: .contain)
+        .accessibilityAddTraits(highlighted ? .isSelected : [])
     }
 
     private var mrApproved: Bool { item.mrApproved == true }
@@ -74,6 +92,7 @@ struct ItemRow: View {
         return switch item.kind {
         case "nudge": "hand.wave.fill"
         case "reminder": "bell.fill"
+        case "rereview": "arrow.triangle.2.circlepath"
         case "notice": "checkmark.bubble.fill"
         default: "bubble.left.fill"
         }
@@ -84,6 +103,7 @@ struct ItemRow: View {
         return switch item.kind {
         case "nudge": .blue
         case "reminder": .orange
+        case "rereview": .indigo
         case "notice": .teal
         default: .gray
         }
@@ -212,12 +232,14 @@ struct ItemRow: View {
 struct OutboxItemRow: View {
     let model: MenuModel
     let item: OutboxItem
+    var highlighted = false
 
     var body: some View {
         ItemRow(
             item: item,
             busy: model.busyIds.contains(item.id),
             confirming: model.confirmation?.id == item.id,
+            highlighted: highlighted,
             onAction: { action in
                 switch action {
                 case .send: model.requestSend(item)

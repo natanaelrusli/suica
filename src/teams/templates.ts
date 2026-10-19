@@ -7,6 +7,7 @@ import type { TemplateName } from "./types.ts";
 export const PLACEHOLDERS = [
   "mr.title",
   "mr.url",
+  "mr.link",
   "mr.iid",
   "mr.project",
   "person.name",
@@ -16,17 +17,32 @@ export type Placeholder = (typeof PLACEHOLDERS)[number];
 export type Templates = Readonly<Record<TemplateName, string>>;
 
 export const DEFAULT_TEMPLATES: Templates = {
-  nudge:
-    "Halo {{person.name}}, boleh minta tolong review MR ini? {{mr.title}}\n{{mr.url}}\nTerima kasih!",
+  nudge: "Halo {{person.name}}, boleh minta tolong review MR ini?\n{{mr.link}}\nTerima kasih!",
   reminder:
-    "Halo {{person.name}}, mengingatkan kembali soal review MR ini ya: {{mr.title}}\n{{mr.url}}\nTerima kasih!",
+    "Halo {{person.name}}, mengingatkan kembali soal review MR ini ya:\n{{mr.link}}\nTerima kasih!",
   "notice.approved":
-    "Halo {{person.name}}, MR kamu sudah saya review dan saya approve: {{mr.title}}\n{{mr.url}}",
+    "Halo {{person.name}}, MR kamu sudah saya review dan saya approve:\n{{mr.link}}",
   "notice.changes":
-    "Halo {{person.name}}, saya sudah review MR kamu dan ada perubahan yang perlu dilihat: {{mr.title}}\n{{mr.url}}",
+    "Halo {{person.name}}, saya sudah review MR kamu dan ada perubahan yang perlu dilihat:\n{{mr.link}}",
   "notice.comments":
-    "Halo {{person.name}}, saya sudah review MR kamu dan meninggalkan beberapa komentar: {{mr.title}}\n{{mr.url}}",
+    "Halo {{person.name}}, saya sudah review MR kamu dan meninggalkan beberapa komentar:\n{{mr.link}}",
+  rereview:
+    "Halo {{person.name}}, MR ini sudah saya update sesuai review-mu. Boleh minta tolong dicek lagi?\n{{mr.link}}\nTerima kasih!",
 };
+
+/**
+ * Messages go to Teams as Markdown: a value written into a template is escaped, so a title with
+ * `*`, `_` or brackets reads as written instead of turning into formatting or a link.
+ */
+export function escapeMarkdown(text: string): string {
+  return text.replace(/[\\`*_[\]<>~#|]/g, "\\$&");
+}
+
+/** `[title](url)`, a link Teams shows as the title; the URL is http(s) from GitLab. */
+export function markdownLink(title: string, url: string): string {
+  const target = url.replace(/[ ()<>]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
+  return `[${escapeMarkdown(title)}](${target})`;
+}
 
 export class TemplateError extends Error {
   constructor(message: string) {
