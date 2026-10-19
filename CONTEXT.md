@@ -29,7 +29,7 @@ A Teams chat from the Owner to a Reviewer of the Owner's own MR who had already 
 _Avoid_: Re-request, follow-up
 
 **Review Notice**:
-A Teams chat from the Owner to the Author of someone else's MR, sent after the Owner has reviewed it. After an Agent Review is posted, it says how many findings the review has per severity.
+A Teams chat from the Owner to the Author of someone else's MR, sent after the Owner has reviewed it. After an Agent Review is posted, it says how many findings the review has per severity; after an Agent Re-review is posted, it says how many new findings it has.
 _Avoid_: Review reply, feedback ping
 
 **Activity Alert**:
@@ -39,6 +39,10 @@ _Avoid_: Update, notification
 **Agent Review**:
 A review of an MR that the agent writes with a language model following a skill, in answer to a Review Request or when the Owner asks for one, and posts to GitLab as the Owner once the Owner approves it.
 _Avoid_: Auto review, bot review
+
+**Agent Re-review**:
+An Agent Review of an MR whose previous Agent Review was posted, written after the Author pushed new commits. It reviews the changes since the commit the previous review covered and says, for each finding of the previous review, whether it was fixed.
+_Avoid_: incremental review, follow-up review
 
 **Pending Message**:
 A Reviewer Nudge, Re-review Nudge or Review Notice written by the agent but held until the Owner sends or skips it, when that flow is set to require approval.
