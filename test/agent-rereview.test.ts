@@ -33,6 +33,7 @@ function plan(overrides: Partial<RereviewInput>) {
     mrs: [mr(1)],
     heads: new Map(),
     bases: new Map([["g/p!1", base("posted", "sha-1-a")]]),
+    latest: new Map(),
     now: NOW,
     afterMs: AFTER,
     ...overrides,
@@ -96,6 +97,61 @@ describe("planRereviews", () => {
     const result = plan({ mrs: [mr(1, { headSha: "sha-1-b" })], heads: queued });
     expect(result.due).toEqual([]);
     expect(result.heads.get("g/p!1")?.queuedHead).toBe("sha-1-b");
+  });
+
+  it("counts a head whose newest review is ready, being posted or posted as queued, as when the Owner reviewed it by hand during the wait", () => {
+    const newest = (row: AgentReviewRow) =>
+      plan({
+        mrs: [mr(1, { headSha: "sha-1-b" })],
+        heads: settled,
+        latest: new Map([["g/p!1", row]]),
+      });
+    for (const status of ["ready", "posting", "posted"] as const) {
+      const covered = newest({ ...base(status, "sha-1-b"), id: 2 });
+      expect(covered.due).toEqual([]);
+      expect(covered.heads.get("g/p!1")).toEqual({
+        ...settled.get("g/p!1"),
+        queuedHead: "sha-1-b",
+      });
+    }
+    // Before the wait is over too, so the head never becomes due.
+    const early = plan({
+      mrs: [mr(1, { headSha: "sha-1-b" })],
+      heads: new Map([
+        ["g/p!1", { head: "sha-1-b", changedAt: NOW - MINUTE, queuedHead: "sha-1-a" }],
+      ]),
+      latest: new Map([["g/p!1", { ...base("ready", "sha-1-b"), id: 2 }]]),
+    });
+    expect(early.heads.get("g/p!1")?.queuedHead).toBe("sha-1-b");
+    for (const row of [
+      { ...base("ready", "sha-1-z"), id: 2 },
+      { ...base("skipped", "sha-1-b"), id: 2 },
+      { ...base("failed", "sha-1-b"), id: 2 },
+      { ...base("running", null), id: 2 },
+    ]) {
+      expect(newest(row).due.map((each) => each.key)).toEqual(["g/p!1"]);
+    }
+  });
+
+  it("does not re-review a head that a queued re-review reached by running after a later push", () => {
+    // Queued at sha-1-b, the run checked out sha-1-c, pushed meanwhile; that review is now ready.
+    let heads: ReadonlyMap<string, ReviewHead> = new Map([
+      ["g/p!1", { head: "sha-1-b", changedAt: NOW - 20 * MINUTE, queuedHead: "sha-1-b" }],
+    ]);
+    const latest = new Map([["g/p!1", { ...base("ready", "sha-1-c"), id: 2 }]]);
+    const poll = (minutes: number) => {
+      const result = plan({
+        mrs: [mr(1, { headSha: "sha-1-c" })],
+        heads,
+        latest,
+        now: NOW + minutes * MINUTE,
+      });
+      heads = result.heads;
+      return result.due.length;
+    };
+    expect(poll(0)).toBe(0);
+    expect(poll(10)).toBe(0);
+    expect(heads.get("g/p!1")?.queuedHead).toBe("sha-1-c");
   });
 
   it("skips drafts but keeps tracking their head, and an MR whose head GitLab has not computed keeps its entry", () => {
@@ -172,7 +228,7 @@ describe("fetchSinceDiff", () => {
     return { run, paths };
   }
 
-  it("fetchSinceDiff makes no request for a malformed SHA and returns undefined when GitLab fails", async () => {
+  it("fetchSinceDiff makes no request for a malformed SHA and says why when GitLab fails", async () => {
     for (const [key, from, to] of [
       ["g/p!1", "--upload-pack=x", TO],
       ["g/p!1", FROM, "ABCDEF1"],
@@ -181,15 +237,15 @@ describe("fetchSinceDiff", () => {
       ["not a key", FROM, TO],
     ] as const) {
       const fake = rest();
-      expect(await fetchSinceDiff(fake.run, key, from, to)).toBeUndefined();
+      expect(await fetchSinceDiff(fake.run, key, from, to)).toBe("error");
       expect(fake.paths).toEqual([]);
     }
     const failing = rest(new Error("glab"));
-    expect(await fetchSinceDiff(failing.run, "g/p!1", FROM, TO)).toBeUndefined();
+    expect(await fetchSinceDiff(failing.run, "g/p!1", FROM, TO)).toBe("error");
     // An answer GitLab would not give is a failure too.
-    expect(
-      await fetchSinceDiff(() => Promise.resolve({ nope: 1 }), "g/p!1", FROM, TO),
-    ).toBeUndefined();
+    expect(await fetchSinceDiff(() => Promise.resolve({ nope: 1 }), "g/p!1", FROM, TO)).toBe(
+      "error",
+    );
   });
 
   it("fetchSinceDiff returns the compare diff only when the previous commit is the merge base", async () => {
@@ -210,7 +266,20 @@ describe("fetchSinceDiff", () => {
     ]);
 
     const rebased = rest("c".repeat(40));
-    expect(await fetchSinceDiff(rebased.run, "g/p!1", FROM, TO)).toBeUndefined();
+    expect(await fetchSinceDiff(rebased.run, "g/p!1", FROM, TO)).toBe("not-ancestor");
     expect(rebased.paths).toHaveLength(1);
+  });
+
+  it("fetchSinceDiff treats a compare GitLab cut off by its timeout as unavailable, not as a complete diff", async () => {
+    const timedOut = (path: string): Promise<unknown> =>
+      Promise.resolve(
+        path.includes("/merge_base?") ? { id: FROM } : { ...COMPARE, compare_timeout: true },
+      );
+    expect(await fetchSinceDiff(timedOut, "g/p!1", FROM, TO)).toBe("timeout");
+    const inTime = (path: string): Promise<unknown> =>
+      Promise.resolve(
+        path.includes("/merge_base?") ? { id: FROM } : { ...COMPARE, compare_timeout: false },
+      );
+    expect(await fetchSinceDiff(inTime, "g/p!1", FROM, TO)).toHaveLength(1);
   });
 });

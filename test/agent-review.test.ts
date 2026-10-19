@@ -242,7 +242,7 @@ describe("buildPrompt", () => {
     expect(lines(false)).toEqual(
       expect.arrayContaining([
         ...shared,
-        `- The diff since ${PREV} is not available (the branch was rebased or force-pushed): review the whole merge request and say so in the scope.`,
+        `- The diff since ${PREV} is not available (the branch was rebased or force-pushed, or GitLab could not provide it): review the whole merge request and say so in the scope.`,
       ]),
     );
     expect(lines(false).join("\n")).not.toContain("since-last-review.diff");
@@ -329,6 +329,8 @@ function harness(
     sshUrl?: string;
     /** The merge base GitLab names for a re-review; PREV (an ancestor) by default. */
     mergeBase?: string;
+    /** GitLab cut the compare off at its timeout. */
+    compareTimeout?: boolean;
   } = {},
 ) {
   const calls: Call[] = [];
@@ -410,7 +412,12 @@ function harness(
       if (path.includes("/repository/merge_base?")) {
         return Promise.resolve({ id: options.mergeBase ?? PREV });
       }
-      if (path.includes("/repository/compare?")) return Promise.resolve({ diffs: SINCE_DIFFS });
+      if (path.includes("/repository/compare?")) {
+        return Promise.resolve({
+          diffs: SINCE_DIFFS,
+          ...(options.compareTimeout === true ? { compare_timeout: true } : {}),
+        });
+      }
       return Promise.resolve({
         ssh_url_to_repo: options.sshUrl ?? "ssh://git@gitlab.example:2222/g/p.git",
       });
@@ -693,13 +700,29 @@ describe("runAgentReview", () => {
     expect(h.file("since-last-review.diff")).toBeUndefined();
     expect(h.restPaths.some((path) => path.includes("/repository/compare?"))).toBe(false);
     expect(h.prompt()).toContain(
-      `- The diff since ${PREV} is not available (the branch was rebased or force-pushed): review the whole merge request and say so in the scope.`,
+      `- The diff since ${PREV} is not available (the branch was rebased or force-pushed, or GitLab could not provide it): review the whole merge request and say so in the scope.`,
     );
     expect(h.prompt()).not.toContain("./since-last-review.diff");
     expect(h.db.getAgentReview(queued.id)).toMatchObject({ status: "ready", previousSha: PREV });
     const warning = h.logs.find((line) => line.includes("incremental diff unavailable"));
     expect(warning).toContain('"mr_key":"g/p!7"');
+    expect(warning).toContain('"reason":"not-ancestor"');
     expect(warning).not.toContain(PREV);
+  });
+
+  it("reviews the whole MR when GitLab cut the compare off at its timeout", async () => {
+    const h = harness({ compareTimeout: true });
+    h.previous();
+    const queued = h.queue();
+    await runAgentReview(h.deps, queued);
+
+    expect(h.file("since-last-review.diff")).toBeUndefined();
+    expect(h.prompt()).toContain(`- The diff since ${PREV} is not available`);
+    expect(h.prompt()).not.toContain("./since-last-review.diff");
+    const warning = h.logs.find((line) => line.includes("incremental diff unavailable"));
+    expect(warning).toContain('"reason":"timeout"');
+    expect(warning).not.toContain(PREV);
+    expect(warning).not.toContain(SHA);
   });
 
   it("treats a review after a discarded one, or at the previous review's commit, as a first review", async () => {
@@ -847,6 +870,90 @@ describe("queueAutomaticReviews", () => {
     );
     expect(queuedKeys(db)).toEqual(["g/p!1"]);
     expect(db.loadReviewHeads().get("g/p!1")?.queuedHead).toBe("sha-1-b");
+  });
+
+  it("does not queue at once when GitLab asks again for an untracked MR whose posted review is at the current head", () => {
+    const db = store();
+    posted(db, "g/p!1", "sha-1-a");
+    queueAutomaticReviews(
+      { store: db, config: auto, log: silent, now: () => NOW },
+      snapshot({ reviewRequested: [waiting(1, null, { headSha: "sha-1-a" })] }),
+      ["g/p!1"],
+    );
+    expect(queuedKeys(db)).toEqual([]);
+  });
+
+  it("does not re-review a head the Owner had reviewed by hand during the wait, so that review stays the newest", () => {
+    const db = store();
+    posted(db, "g/p!1", "sha-1-a");
+    db.saveReviewHeads(
+      new Map([
+        ["g/p!1", { head: "sha-1-b", changedAt: NOW - 20 * MINUTE, queuedHead: "sha-1-a" }],
+      ]),
+    );
+    const id = db.queueAgentReview("g/p!1", "manual", NOW - 5 * MINUTE) ?? 0;
+    db.transitionAgentReview(id, ["queued"], "running", {}, NOW - 5 * MINUTE);
+    db.transitionAgentReview(id, ["running"], "ready", { headSha: "sha-1-b", body: "ok" }, NOW);
+    queueAutomaticReviews(
+      { store: db, config: auto, log: silent, now: () => NOW },
+      snapshot({
+        reviewRequested: [mr(1, { headSha: "sha-1-b", reviewers: [reviewer("me", "APPROVED")] })],
+      }),
+      [],
+    );
+    expect(queuedKeys(db)).toEqual([]);
+    expect(db.latestAgentReviews().get("g/p!1")).toMatchObject({ id, status: "ready" });
+    expect(db.loadReviewHeads().get("g/p!1")?.queuedHead).toBe("sha-1-b");
+  });
+
+  it("re-reviews a push made while a review ran, once that run is done, but counts a head with a queued review as queued", () => {
+    const setup = (): Store => {
+      const db = store();
+      posted(db, "g/p!1", "sha-1-a");
+      // A re-review of sha-1-b is open; the Author pushed sha-1-c since.
+      db.saveReviewHeads(
+        new Map([
+          ["g/p!1", { head: "sha-1-c", changedAt: NOW - 20 * MINUTE, queuedHead: "sha-1-b" }],
+        ]),
+      );
+      return db;
+    };
+    const poll = (db: Store, at: number) =>
+      queueAutomaticReviews(
+        { store: db, config: auto, log: silent, now: () => at },
+        snapshot({
+          reviewRequested: [mr(1, { headSha: "sha-1-c", reviewers: [reviewer("me", "APPROVED")] })],
+        }),
+        [],
+      );
+
+    const running = setup();
+    const id = running.queueAgentReview("g/p!1", "manual", NOW - 30 * MINUTE) ?? 0;
+    running.transitionAgentReview(id, ["queued"], "running", {}, NOW - 30 * MINUTE);
+    poll(running, NOW);
+    expect(queuedKeys(running)).toEqual([]);
+    expect(running.loadReviewHeads().get("g/p!1")?.queuedHead).toBe("sha-1-b");
+    // The run had checked out sha-1-b; it is posted, so sha-1-c is re-reviewed against it.
+    running.transitionAgentReview(
+      id,
+      ["running"],
+      "ready",
+      { headSha: "sha-1-b", body: "ok" },
+      NOW,
+    );
+    running.transitionAgentReview(id, ["ready"], "posting", {}, NOW);
+    running.transitionAgentReview(id, ["posting"], "posted", {}, NOW);
+    poll(running, NOW + MINUTE);
+    expect(queuedKeys(running)).toEqual(["g/p!1"]);
+    expect(running.loadReviewHeads().get("g/p!1")?.queuedHead).toBe("sha-1-c");
+
+    // A queued review checks out the head when it starts, so it covers sha-1-c.
+    const queued = setup();
+    queued.queueAgentReview("g/p!1", "manual", NOW - 30 * MINUTE);
+    poll(queued, NOW);
+    expect(queuedKeys(queued)).toEqual(["g/p!1"]);
+    expect(queued.agentReviewActivity().queued).toHaveLength(1);
+    expect(queued.loadReviewHeads().get("g/p!1")?.queuedHead).toBe("sha-1-c");
   });
 
   it("queues first reviews before re-reviews and still saves head tracking when the daily cap is reached", () => {
