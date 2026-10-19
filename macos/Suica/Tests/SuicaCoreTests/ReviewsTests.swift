@@ -83,16 +83,20 @@ actor FakeReviewsClient: ReviewsClient {
 
 @Test func reviewContractsDecode() throws {
     let reviews = try decodeDocument(ReviewListDocument.self, from: contract("reviews.v1.json"))
-    #expect(reviews.mergeRequests.map(\.key) == ["g/p!7"])
+    #expect(reviews.mergeRequests.map(\.key) == ["g/p!7", "g/p!9"])
     #expect(reviews.mergeRequests.first?.draft == true)
     #expect(reviews.mergeRequests.first?.reviewers.first?.state == "UNREVIEWED")
     #expect(reviews.me == Person(username: "me", name: "Nata"))
-    #expect(reviews.sections.map(\.group) == [.drafts])
+    #expect(reviews.sections.map(\.group) == [.waiting, .drafts])
     let agent = try #require(reviews.mergeRequests.first?.agentReview)
     #expect(agent.id == 3 && agent.status == "ready" && agent.cli == "claude" && agent.isReady)
     #expect(agent.model == "claude-opus-5-5" && agent.startedAt == 1_792_148_500_000)
     #expect(agent.headSha?.hasPrefix("01234567") == true && agent.body?.hasPrefix("# Code review") == true)
     #expect(!agent.isActive && !agent.canRequeue)
+    #expect(agent.previousSha == nil)
+    let rereview = try #require(reviews.mergeRequests.last?.agentReview)
+    #expect(rereview.previousSha == "0123456789abcdef0123456789abcdef01234567")
+    #expect(rereview.headSha == "89abcdef0123456789abcdef0123456789abcdef")
 
     let mr = try decodeDocument(MergeRequestDetail.self, from: contract("mr-detail.v1.json"))
     #expect(mr.pipelineStatus == "SUCCESS" && mr.additions == 3 && mr.deletions == 1)
@@ -387,6 +391,20 @@ private func withAgent(_ status: String?) -> ReviewListDocument {
     #expect(try detail("g/p!7", ["url": "https://gitlab.example/g/sub/p/-/merge_requests/7"]).projectURL
         == "https://gitlab.example/g/sub/p")
     #expect(try detail("g/p!7", ["url": "https://gitlab.example/odd"]).projectURL == nil)
+}
+
+@Test func anOlderAgentSendsNoPreviousSha() throws {
+    let json = Data(
+        """
+        {"id": 1, "status": "ready", "headSha": "abc", "detail": "", "createdAt": 1, "updatedAt": 2}
+        """.utf8)
+    let review = try JSONDecoder().decode(AgentReviewInfo.self, from: json)
+    #expect(review.previousSha == nil && review.headSha == "abc")
+    #expect(AgentReviewInfo(id: 1, status: "ready", previousSha: "abc").previousSha == "abc")
+}
+
+@Test func aRereviewIsLabelled() {
+    #expect(Copy.agentRereviewLabel == "Re-review")
 }
 
 @Test func aSummaryReadsWhenTheMergeRequestWasOpened() throws {

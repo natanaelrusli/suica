@@ -17,6 +17,8 @@ export interface AgentReviewJson {
   /** Epoch milliseconds; null while queued. */
   readonly startedAt: number | null;
   readonly headSha: string | null;
+  /** The commit the previous Agent Review covered; set only for an Agent Re-review. */
+  readonly previousSha: string | null;
   /** Markdown as the model wrote it; GitLab gets a sanitised copy with an agent label. */
   readonly body: string | null;
   readonly detail: string;
@@ -97,6 +99,7 @@ function toAgentReviewJson(row: AgentReviewRow): AgentReviewJson {
     model: row.model,
     startedAt: row.startedAt,
     headSha: row.headSha,
+    previousSha: row.previousSha,
     body: row.body,
     detail: row.detail,
     createdAt: row.createdAt,

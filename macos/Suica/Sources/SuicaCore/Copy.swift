@@ -237,6 +237,7 @@ public enum Copy {
         let who = model.map { "\(cliName(cli)) (\(DisplayText.clean($0, max: 60)))" } ?? cliName(cli)
         return sha.map { "By \(who) at commit \(String($0.prefix(8)))" } ?? "By \(who)"
     }
+    public static let agentRereviewLabel = "Re-review"
     // Agent Review activity (Overview and menu bar)
     public static let agentReviewHeading = "Agent Review"
     public static let reviewingNow = "Reviewing now"

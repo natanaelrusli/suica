@@ -37,6 +37,8 @@ public struct AgentReviewInfo: Codable, Equatable, Sendable {
     /// Epoch milliseconds; nil while queued.
     public let startedAt: Int?
     public let headSha: String?
+    /// The commit the previous Agent Review covered; set only for a re-review, absent from an older CLI.
+    public let previousSha: String?
     /// Markdown as the model wrote it.
     public let body: String?
     public let detail: String
@@ -45,7 +47,7 @@ public struct AgentReviewInfo: Codable, Equatable, Sendable {
 
     public init(
         id: Int, status: String, cli: String? = nil, model: String? = nil, startedAt: Int? = nil,
-        headSha: String? = nil, body: String? = nil, detail: String = "", createdAt: Int = 0, updatedAt: Int = 0
+        headSha: String? = nil, previousSha: String? = nil, body: String? = nil, detail: String = "", createdAt: Int = 0, updatedAt: Int = 0
     ) {
         self.id = id
         self.status = status
@@ -53,6 +55,7 @@ public struct AgentReviewInfo: Codable, Equatable, Sendable {
         self.model = model
         self.startedAt = startedAt
         self.headSha = headSha
+        self.previousSha = previousSha
         self.body = body
         self.detail = detail
         self.createdAt = createdAt

@@ -693,9 +693,12 @@ private struct AgentReviewTab: View {
                                 .disabled(busy)
                         }
                     }
-                    Text(Copy.agentReviewMeta(cli: review.cli, model: review.model, sha: review.headSha))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    HStack(spacing: 6) {
+                        if review.previousSha != nil { Badge(text: Copy.agentRereviewLabel, tint: .purple) }
+                        Text(Copy.agentReviewMeta(cli: review.cli, model: review.model, sha: review.headSha))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                     if !review.detail.isEmpty {
                         NoticeBox(
                             text: DisplayText.clean(review.detail, max: 400),

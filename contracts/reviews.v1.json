@@ -29,10 +29,42 @@
         "model": "claude-opus-5-5",
         "startedAt": 1792148500000,
         "headSha": "0123456789abcdef0123456789abcdef01234567",
+        "previousSha": null,
         "body": "# Code review: g/p!7\n\n## Findings\n1. `src/a.ts:4`: Blocker.",
         "detail": "",
         "createdAt": 1792148400000,
         "updatedAt": 1792152000000
+      }
+    },
+    {
+      "key": "g/p!9",
+      "title": "MR 9",
+      "url": "https://gitlab.example/g/p/-/merge_requests/9",
+      "draft": false,
+      "createdAt": "2026-10-14T10:00:00Z",
+      "author": {
+        "username": "alice",
+        "name": "Alice"
+      },
+      "reviewers": [
+        {
+          "username": "me",
+          "name": "me",
+          "state": "UNREVIEWED"
+        }
+      ],
+      "agentReview": {
+        "id": 4,
+        "status": "posted",
+        "cli": "claude",
+        "model": null,
+        "startedAt": 1792152100000,
+        "headSha": "89abcdef0123456789abcdef0123456789abcdef",
+        "previousSha": "0123456789abcdef0123456789abcdef01234567",
+        "body": "# Code review: g/p!9\n\nNo new findings.",
+        "detail": "",
+        "createdAt": 1792152050000,
+        "updatedAt": 1792152200000
       }
     }
   ]
