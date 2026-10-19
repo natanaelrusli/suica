@@ -577,6 +577,18 @@ describe("Re-review Nudge", () => {
     expect(modeFor({ kind: "notice", variant: "notice.comments" }, { modes })).toBe("auto");
   });
 
+  it("sends both findings notices in the findings mode", () => {
+    const modes = {
+      nudge: "auto",
+      notice: "dry-run",
+      rereview: "auto",
+      findings: "approval",
+    } as const;
+    expect(modeFor({ kind: "notice", variant: "notice.findings" }, { modes })).toBe("approval");
+    expect(modeFor({ kind: "notice", variant: "notice.refindings" }, { modes })).toBe("approval");
+    expect(modeFor({ kind: "notice", variant: "notice.comments" }, { modes })).toBe("dry-run");
+  });
+
   it("holds it for approval, renders the re-review template and reports it as held", async () => {
     const h = setup({ mode: "approval" });
     const id = queue(h, open);

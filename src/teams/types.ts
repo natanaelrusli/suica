@@ -7,6 +7,7 @@ export const TEMPLATE_NAMES = [
   "notice.changes",
   "notice.comments",
   "notice.findings",
+  "notice.refindings",
   "rereview",
 ] as const;
 export type TemplateName = (typeof TEMPLATE_NAMES)[number];

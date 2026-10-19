@@ -123,6 +123,40 @@ describe("describeFindings", () => {
   });
 });
 
+describe("describeFindings for an Agent Re-review", () => {
+  it("counts only the new findings", () => {
+    expect(describeFindings([], true)).toBe("tidak ada findings baru");
+    expect(describeFindings([{ severity: "Minor", count: 1 }], true)).toBe(
+      "ada 1 finding baru (1 Minor)",
+    );
+    expect(
+      describeFindings(
+        [
+          { severity: "Major", count: 1 },
+          { severity: "Minor", count: 1 },
+        ],
+        true,
+      ),
+    ).toBe("ada 2 findings baru (1 Major, 1 Minor)");
+    expect(describeFindings([{ severity: "", count: 1 }], true)).toBe("ada 1 finding baru");
+  });
+});
+
+describe("the built-in re-review findings notice", () => {
+  it("tells the Author what the Agent Re-review found and where to read it", () => {
+    expect(DEFAULT_TEMPLATES["notice.refindings"]).toBe(
+      "Halo {{person.name}}, saya sudah review ulang update MR kamu: {{review.findings}}.\n{{mr.link}}\nDetailnya ada di komentar MR.",
+    );
+    const text = renderTemplate(DEFAULT_TEMPLATES["notice.refindings"], {
+      ...values,
+      "review.findings": "ada 2 findings baru (1 Major, 1 Minor)",
+    });
+    expect(text).toBe(
+      "Halo Alice, saya sudah review ulang update MR kamu: ada 2 findings baru (1 Major, 1 Minor).\n[Add thing](https://gitlab.example/g/p/-/merge_requests/7)\nDetailnya ada di komentar MR.",
+    );
+  });
+});
+
 describe("the built-in findings notice", () => {
   it("tells the Author what the Agent Review found and where to read it", () => {
     const text = renderTemplate(DEFAULT_TEMPLATES["notice.findings"], {

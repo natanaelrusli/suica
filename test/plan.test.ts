@@ -337,6 +337,39 @@ describe("review notices (flow C)", () => {
     ]);
   });
 
+  it("announces a posted re-review as notice.refindings with its new findings, once", () => {
+    const state = withRound(round({ announcedReview: 3 }), { ...posted(4), rereview: true });
+    const current = snapshot({
+      reviewRequested: [theirs("UNREVIEWED", [note("a", ME), note("b", ME)])],
+    });
+    const result = plan({ snapshot: current, state });
+    expect(result.intents).toEqual([
+      {
+        dedupeKey: "findings:4",
+        kind: "notice",
+        variant: "notice.refindings",
+        mr: {
+          key: KEY,
+          iid: 7,
+          projectPath: "g/p",
+          title: "MR 7",
+          url: "https://gitlab.example/g/p/-/merge_requests/7",
+        },
+        recipient: { username: "alice", name: "Alice" },
+        findings: "ada 3 findings baru (2 Minor, 1 Nit)",
+      },
+    ]);
+    const [update] = result.roundUpdates;
+    expect(update?.round).toEqual(
+      round({ myNotes: 2, changedAt: NOW, noticedNotes: 2, announcedReview: 4 }),
+    );
+    const next = plan({
+      snapshot: current,
+      state: { ...state, rounds: new Map([[KEY, update!.round]]) },
+    });
+    expect(next.intents).toEqual([]);
+  });
+
   it("waits for the comments to show, but not longer than the notice debounce", () => {
     const current = snapshot({ reviewRequested: [theirs("UNREVIEWED")] });
     const early = plan({ snapshot: current, state: withRound(round(), posted(4)) });

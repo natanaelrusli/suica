@@ -31,6 +31,8 @@ export const DEFAULT_TEMPLATES: Templates = {
     "Halo {{person.name}}, saya sudah review MR kamu dan meninggalkan beberapa komentar:\n{{mr.link}}",
   "notice.findings":
     "Halo {{person.name}}, saya sudah review MR kamu: {{review.findings}}.\n{{mr.link}}\nDetailnya ada di komentar MR.",
+  "notice.refindings":
+    "Halo {{person.name}}, saya sudah review ulang update MR kamu: {{review.findings}}.\n{{mr.link}}\nDetailnya ada di komentar MR.",
   rereview:
     "Halo {{person.name}}, MR ini sudah saya update sesuai review-mu. Boleh minta tolong dicek lagi?\n{{mr.link}}\nTerima kasih!",
 };
@@ -49,11 +51,15 @@ export function markdownLink(title: string, url: string): string {
   return `[${escapeMarkdown(title)}](${target})`;
 }
 
-/** The `review.findings` value: "tidak ada findings", or the total and each severity in order. */
-export function describeFindings(counts: readonly FindingCount[]): string {
+/**
+ * The `review.findings` value: "tidak ada findings", or the total and each severity in order.
+ * An Agent Re-review reports `fresh` ones, so it says "baru" after "finding".
+ */
+export function describeFindings(counts: readonly FindingCount[], fresh = false): string {
   const total = counts.reduce((sum, each) => sum + each.count, 0);
-  if (total === 0) return "tidak ada findings";
-  const head = `ada ${total} ${total === 1 ? "finding" : "findings"}`;
+  const baru = fresh ? " baru" : "";
+  if (total === 0) return `tidak ada findings${baru}`;
+  const head = `ada ${total} ${total === 1 ? "finding" : "findings"}${baru}`;
   if (counts.every((each) => each.severity === "")) return head;
   const parts = counts.map(
     (each) =>

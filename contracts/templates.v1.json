@@ -49,6 +49,12 @@
       "defaultText": "Halo {{person.name}}, saya sudah review MR kamu: {{review.findings}}.\n{{mr.link}}\nDetailnya ada di komentar MR."
     },
     {
+      "name": "notice.refindings",
+      "text": "Halo {{person.name}}, saya sudah review ulang update MR kamu: {{review.findings}}.\n{{mr.link}}\nDetailnya ada di komentar MR.",
+      "custom": false,
+      "defaultText": "Halo {{person.name}}, saya sudah review ulang update MR kamu: {{review.findings}}.\n{{mr.link}}\nDetailnya ada di komentar MR."
+    },
+    {
       "name": "rereview",
       "text": "Halo {{person.name}}, MR ini sudah saya update sesuai review-mu. Boleh minta tolong dicek lagi?\n{{mr.link}}\nTerima kasih!",
       "custom": false,

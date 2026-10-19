@@ -64,9 +64,11 @@ export function modeFor(
   row: Pick<OutboxRow, "kind" | "variant">,
   config: Pick<Config["teams"], "modes">,
 ): SendMode {
-  // The Review Notice with an Agent Review's findings has its own mode, so it can go out on its
-  // own while the other Review Notices still wait for approval.
-  if (row.variant === "notice.findings") return config.modes.findings;
+  // The Review Notice with an Agent Review's or Re-review's findings has its own mode, so it can
+  // go out on its own while the other Review Notices still wait for approval.
+  if (row.variant === "notice.findings" || row.variant === "notice.refindings") {
+    return config.modes.findings;
+  }
   if (row.kind === "notice") return config.modes.notice;
   return row.kind === "rereview" ? config.modes.rereview : config.modes.nudge;
 }

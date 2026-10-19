@@ -250,10 +250,10 @@ export function planTeams(input: PlanInput): TeamsPlan {
       intents.push({
         dedupeKey: `findings:${posted.id}`,
         kind: "notice",
-        variant: "notice.findings",
+        variant: posted.rereview ? "notice.refindings" : "notice.findings",
         mr: intentMr(mr),
         recipient: mr.author,
-        findings: describeFindings(countFindings(posted.body)),
+        findings: describeFindings(countFindings(posted.body), posted.rereview),
       });
       round = { ...round, noticedNotes: round.myNotes, announcedReview: posted.id };
     }
