@@ -79,7 +79,7 @@ public enum Copy {
         case "mr.project": "The project path"
         case "person.name": "The recipient's name"
         case "owner.name": "Your name"
-        case "review.findings": "What the Agent Review found, per severity (findings notice only)"
+        case "review.findings": "What the Agent Review found, per severity (findings notices only)"
         default: name
         }
     }

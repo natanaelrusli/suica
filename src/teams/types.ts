@@ -60,7 +60,7 @@ export interface Intent {
   readonly variant: TemplateName;
   readonly mr: IntentMr;
   readonly recipient: Person;
-  /** The `review.findings` value of a `notice.findings` message. */
+  /** The `review.findings` value of a `notice.findings` or `notice.refindings` message. */
   readonly findings?: string;
 }
 
@@ -161,7 +161,7 @@ export interface OutboxRow {
   /** GitLab username of the person who receives the chat. */
   readonly recipient: string;
   readonly recipientName: string;
-  /** The `review.findings` value; null for every message but `notice.findings`. */
+  /** The `review.findings` value; null for every message but `notice.findings` and `notice.refindings`. */
   readonly findings: string | null;
   readonly status: OutboxStatus;
   readonly detail: string;
