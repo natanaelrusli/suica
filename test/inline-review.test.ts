@@ -51,6 +51,10 @@ describe("extractFindings", () => {
     );
     expect(extractFindings("## Notes\n1. `a.ts:1` — x")).toEqual([]);
   });
+  it("never extracts an item under a Previous findings heading as a finding", () => {
+    const body = "## Findings\n### Major\n1. `b.ts:4` new\n## Previous findings\n1. `a.ts:3` old\n";
+    expect(extractFindings(body).map((f) => f.path)).toEqual(["b.ts"]);
+  });
 });
 
 describe("countFindings", () => {
@@ -108,6 +112,11 @@ describe("countFindings", () => {
       { severity: "Major", count: 1 },
       { severity: "Minor", count: 1 },
     ]);
+  });
+  it("ignores items under a Previous findings heading when counting", () => {
+    const body =
+      "## Previous findings\n1. `a.ts:3` old — not fixed\n## Findings\n### Minor\n1. `b.ts:4` new\n";
+    expect(countFindings(body)).toEqual([{ severity: "Minor", count: 1 }]);
   });
 });
 

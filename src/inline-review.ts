@@ -23,6 +23,11 @@ const LIST_ITEM = /^ {0,3}(?:\d+[.)]|[-*+])\s/;
 const FINDING_ITEM =
   /^( {0,3}(?:(\d+)[.)]|[-*+])\s+)`([^`\s]+):(\d+)(?:[-–]\d+)?`[ \t]*(?:[—–:-][ \t]*)?(.*)$/;
 
+/** A Findings heading; a Previous one lists the earlier review's findings, which are not this review's. */
+function isFindingsHeading(title: string): boolean {
+  return /\bfindings\b/i.test(title) && !/^\W*previous\b/i.test(title);
+}
+
 /**
  * The findings a review lists under a heading named Findings (with its subheadings, such as one
  * per severity). A finding whose location is not its first code span is left in the summary.
@@ -39,7 +44,7 @@ export function extractFindings(markdown: string): Finding[] {
     const heading = inFence ? null : HEADING.exec(line);
     if (heading !== null) {
       const level = heading[1]?.length ?? 1;
-      if (/\bfindings\b/i.test(heading[2] ?? "")) sectionLevel = level;
+      if (isFindingsHeading(heading[2] ?? "")) sectionLevel = level;
       else if (sectionLevel !== undefined && level <= sectionLevel) sectionLevel = undefined;
       index += 1;
       continue;
@@ -100,7 +105,7 @@ export function countFindings(markdown: string): FindingCount[] {
     if (heading !== null) {
       const level = heading[1]?.length ?? 1;
       const title = heading[2] ?? "";
-      if (/\bfindings\b/i.test(title)) {
+      if (isFindingsHeading(title)) {
         sectionLevel = level;
         severity = "";
         itemIndent = undefined;
