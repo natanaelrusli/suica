@@ -1,4 +1,8 @@
+import { z } from "zod";
 import type { MergeRequest } from "./domain.ts";
+import type { RestRunner } from "./gitlab.ts";
+import { parseDiffs, parseMrKey } from "./reviews.ts";
+import type { DiffFileJson } from "./reviews.ts";
 import type { AgentReviewRow, ReviewHead } from "./store.ts";
 
 export interface RereviewInput {
@@ -57,4 +61,34 @@ export function planRereviews(input: RereviewInput): RereviewPlan {
     }
   }
   return { heads, due: due.sort(byAge) };
+}
+
+const SHA = /^[0-9a-f]{7,64}$/;
+const mergeBaseSchema = z.object({ id: z.string() });
+const compareSchema = z.object({ diffs: z.unknown() });
+
+/**
+ * The diff from the previously reviewed commit to the new head, from GitLab's compare API (the
+ * clone is shallow). Undefined when `fromSha` is not an ancestor of `toSha` (a rebase or
+ * force-push), when an input is malformed, or when GitLab fails; the caller logs.
+ */
+export async function fetchSinceDiff(
+  rest: RestRunner,
+  mrKey: string,
+  fromSha: string,
+  toSha: string,
+): Promise<DiffFileJson[] | undefined> {
+  const parts = parseMrKey(mrKey);
+  if (parts === undefined || !SHA.test(fromSha) || !SHA.test(toSha)) return undefined;
+  const repo = `projects/${encodeURIComponent(parts.projectPath)}/repository`;
+  try {
+    const base = mergeBaseSchema.parse(
+      await rest(`${repo}/merge_base?refs%5B%5D=${fromSha}&refs%5B%5D=${toSha}`),
+    );
+    if (base.id !== fromSha) return undefined;
+    const compare = compareSchema.parse(await rest(`${repo}/compare?from=${fromSha}&to=${toSha}`));
+    return parseDiffs(compare.diffs).files;
+  } catch {
+    return undefined;
+  }
 }

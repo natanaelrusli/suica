@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { planRereviews } from "../src/agent-rereview.ts";
+import { fetchSinceDiff, planRereviews } from "../src/agent-rereview.ts";
 import type { RereviewInput } from "../src/agent-rereview.ts";
 import type { AgentReviewRow, AgentReviewStatus, ReviewHead } from "../src/store.ts";
 import { mr } from "./builders.ts";
@@ -138,5 +138,79 @@ describe("planRereviews", () => {
     });
     expect([...result.heads.keys()].sort()).toEqual(["g/p!1", "g/p!2"]);
     expect(result.due.map((each) => each.key)).toEqual(["g/p!2", "g/p!1"]);
+  });
+});
+
+describe("fetchSinceDiff", () => {
+  const FROM = "a".repeat(40);
+  const TO = "b".repeat(40);
+  const COMPARE = {
+    commit: { id: TO },
+    diffs: [
+      {
+        old_path: "x.ts",
+        new_path: "y.ts",
+        new_file: false,
+        renamed_file: true,
+        deleted_file: false,
+        diff: "@@ -1 +1 @@\n-a\n+b\n",
+      },
+    ],
+  };
+  /** A REST fake that records each path and answers merge_base with `mergeBase`. */
+  function rest(mergeBase: string | Error = FROM) {
+    const paths: string[] = [];
+    const run = (path: string): Promise<unknown> => {
+      paths.push(path);
+      if (path.includes("/merge_base?")) {
+        return mergeBase instanceof Error
+          ? Promise.reject(mergeBase)
+          : Promise.resolve({ id: mergeBase });
+      }
+      return Promise.resolve(COMPARE);
+    };
+    return { run, paths };
+  }
+
+  it("fetchSinceDiff makes no request for a malformed SHA and returns undefined when GitLab fails", async () => {
+    for (const [key, from, to] of [
+      ["g/p!1", "--upload-pack=x", TO],
+      ["g/p!1", FROM, "ABCDEF1"],
+      ["g/p!1", "abc", TO],
+      ["g/p!1", FROM, `${TO}&x=1`],
+      ["not a key", FROM, TO],
+    ] as const) {
+      const fake = rest();
+      expect(await fetchSinceDiff(fake.run, key, from, to)).toBeUndefined();
+      expect(fake.paths).toEqual([]);
+    }
+    const failing = rest(new Error("glab"));
+    expect(await fetchSinceDiff(failing.run, "g/p!1", FROM, TO)).toBeUndefined();
+    // An answer GitLab would not give is a failure too.
+    expect(
+      await fetchSinceDiff(() => Promise.resolve({ nope: 1 }), "g/p!1", FROM, TO),
+    ).toBeUndefined();
+  });
+
+  it("fetchSinceDiff returns the compare diff only when the previous commit is the merge base", async () => {
+    const ancestor = rest();
+    expect(await fetchSinceDiff(ancestor.run, "g/sub/p!1", FROM, TO)).toEqual([
+      {
+        oldPath: "x.ts",
+        newPath: "y.ts",
+        newFile: false,
+        renamedFile: true,
+        deletedFile: false,
+        diff: "@@ -1 +1 @@\n-a\n+b\n",
+      },
+    ]);
+    expect(ancestor.paths).toEqual([
+      `projects/g%2Fsub%2Fp/repository/merge_base?refs%5B%5D=${FROM}&refs%5B%5D=${TO}`,
+      `projects/g%2Fsub%2Fp/repository/compare?from=${FROM}&to=${TO}`,
+    ]);
+
+    const rebased = rest("c".repeat(40));
+    expect(await fetchSinceDiff(rebased.run, "g/p!1", FROM, TO)).toBeUndefined();
+    expect(rebased.paths).toHaveLength(1);
   });
 });
