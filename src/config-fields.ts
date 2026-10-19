@@ -232,6 +232,12 @@ export const CONFIG_FIELDS: readonly ConfigField[] = [
     help: "At most this many automatic reviews in 24 hours; reviews you start yourself do not count",
   },
   {
+    path: ["review", "rereviewAfterMinutes"],
+    type: "int",
+    label: "Re-review after (minutes)",
+    help: "Re-review an MR after the Author's latest push has stood this long without a newer one",
+  },
+  {
     path: ["review", "timeoutMinutes"],
     type: "int",
     label: "Review timeout (minutes)",

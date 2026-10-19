@@ -647,6 +647,72 @@ describe("queueAutomaticReviews", () => {
     );
     expect(queuedKeys(again)).toEqual(["g/p!1"]);
   });
+
+  /** A review of `key` posted at `headSha`, triggered by hand so it does not count to the cap. */
+  function posted(db: Store, key: string, headSha: string): void {
+    const id = db.queueAgentReview(key, "manual", NOW - DAY) ?? 0;
+    db.transitionAgentReview(id, ["queued"], "running", {}, NOW - DAY);
+    db.transitionAgentReview(id, ["running"], "ready", { headSha, body: "ok" }, NOW - DAY);
+    db.transitionAgentReview(id, ["ready"], "posting", {}, NOW - DAY);
+    db.transitionAgentReview(id, ["posting"], "posted", {}, NOW - DAY);
+  }
+  const DAY = 86_400_000;
+  const MINUTE = 60_000;
+
+  it("queues a re-review once the pushed head has stood rereviewAfterMinutes and marks that head queued", () => {
+    const db = store();
+    posted(db, "g/p!1", "sha-1-a");
+    const poll = (headSha: string, at: number) =>
+      queueAutomaticReviews(
+        { store: db, config: auto, log: silent, now: () => at },
+        snapshot({
+          reviewRequested: [mr(1, { headSha, reviewers: [reviewer("me", "APPROVED")] })],
+        }),
+        [],
+      );
+    poll("sha-1-a", NOW - 5 * MINUTE);
+    poll("sha-1-b", NOW);
+    expect(queuedKeys(db)).toEqual([]);
+    poll("sha-1-b", NOW + 10 * MINUTE);
+    expect(queuedKeys(db)).toEqual(["g/p!1"]);
+    expect(db.loadReviewHeads().get("g/p!1")?.queuedHead).toBe("sha-1-b");
+  });
+
+  it("does not queue at once when GitLab asks again for an MR whose last review was posted", () => {
+    const db = store();
+    posted(db, "g/p!1", "sha-1-a");
+    db.saveReviewHeads(
+      new Map([["g/p!1", { head: "sha-1-a", changedAt: NOW - DAY, queuedHead: "sha-1-a" }]]),
+    );
+    queueAutomaticReviews(
+      { store: db, config: auto, log: silent, now: () => NOW },
+      snapshot({ reviewRequested: [waiting(1, null, { headSha: "sha-1-b" })] }),
+      ["g/p!1"],
+    );
+    expect(queuedKeys(db)).toEqual([]);
+  });
+
+  it("queues first reviews before re-reviews and still saves head tracking when the daily cap is reached", () => {
+    const db = store();
+    posted(db, "g/p!1", "sha-1-a");
+    const settled = { head: "sha-1-b", changedAt: NOW - 20 * MINUTE, queuedHead: "sha-1-a" };
+    db.saveReviewHeads(new Map([["g/p!1", settled]]));
+    queueAutomaticReviews(
+      { store: db, config: auto, log: silent, now: () => NOW },
+      snapshot({
+        reviewRequested: [
+          waiting(1, "2026-10-01T10:00:00Z", { headSha: "sha-1-b" }),
+          waiting(2, "2026-10-02T10:00:00Z"),
+          waiting(3, "2026-10-03T10:00:00Z"),
+        ],
+      }),
+      [],
+    );
+    expect(queuedKeys(db)).toEqual(["g/p!2", "g/p!3"]);
+    const heads = db.loadReviewHeads();
+    expect(heads.get("g/p!1")).toEqual(settled);
+    expect(heads.get("g/p!3")).toEqual({ head: "sha-3-a", changedAt: NOW, queuedHead: "sha-3-a" });
+  });
 });
 
 describe("createReviewWorker", () => {

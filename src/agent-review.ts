@@ -2,9 +2,10 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSy
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
+import { byAge, planRereviews } from "./agent-rereview.ts";
 import type { Config } from "./config.ts";
 import { UNREVIEWED } from "./domain.ts";
-import type { MergeRequest, Snapshot } from "./domain.ts";
+import type { Snapshot } from "./domain.ts";
 import { myReviewState } from "./events.ts";
 import type { Exec } from "./exec.ts";
 import { execFailure } from "./exec.ts";
@@ -30,6 +31,7 @@ import type { AgentReviewRow, Store } from "./store.ts";
 /** Agent Review: an MR reviewed by a coding agent CLI with a skill, posted only after approval. */
 
 const DAY_MS = 86_400_000;
+const MINUTE_MS = 60_000;
 const CLONE_TIMEOUT_MS = 5 * 60_000;
 const GIT_TIMEOUT_MS = 30_000;
 const MAX_NOTE_CHARS = 100_000;
@@ -514,18 +516,13 @@ export async function runAgentReview(deps: ReviewDeps, row: AgentReviewRow): Pro
 
 // MARK: - Queue, worker, post, discard
 
-/** Oldest first; an MR without a creation date goes last. */
-function byAge(a: MergeRequest, b: MergeRequest): number {
-  const at = (mr: MergeRequest): number =>
-    mr.createdAt === null ? Infinity : Date.parse(mr.createdAt);
-  return at(a) - at(b) || a.key.localeCompare(b.key);
-}
-
 /**
- * Queues automatic reviews after a poll, oldest MR first, within the daily cap: every MR waiting
- * for the Owner (not a draft, the Owner's state UNREVIEWED) that the agent never reviewed, and an
- * MR that just asked for the Owner's review again. A failed, skipped or discarded review is not
- * retried on its own; the Owner can press Review again.
+ * Queues automatic reviews after a poll, within the daily cap. First reviews go first, oldest MR
+ * first: every MR waiting for the Owner (not a draft, the Owner's state UNREVIEWED) that the agent
+ * never reviewed, and an MR that just asked for the Owner's review again unless its last review was
+ * posted (a push can ask again; the re-review's wait decides then). Re-reviews follow, as
+ * `planRereviews` finds them; their head counts as queued even when a review is already open. A
+ * failed, skipped or discarded review is not retried on its own; the Owner can press Review again.
  */
 export function queueAutomaticReviews(
   deps: Pick<ReviewDeps, "store" | "log" | "now"> & { readonly config: Pick<Config, "review"> },
@@ -535,19 +532,34 @@ export function queueAutomaticReviews(
   const { store, config, log } = deps;
   if (!config.review.auto) return;
   const reviewed = store.agentReviewedKeys();
+  const bases = store.rereviewBases();
   const asked = new Set(newRequests);
-  const candidates = snapshot.reviewRequested
+  const first = snapshot.reviewRequested
     .filter((mr) => !mr.draft && myReviewState(snapshot, mr) === UNREVIEWED)
-    .filter((mr) => asked.has(mr.key) || !reviewed.has(mr.key))
+    .filter(
+      (mr) =>
+        (asked.has(mr.key) && bases.get(mr.key)?.status !== "posted") || !reviewed.has(mr.key),
+    )
     .sort(byAge);
+  const plan = planRereviews({
+    mrs: snapshot.reviewRequested,
+    heads: store.loadReviewHeads(),
+    bases,
+    now: deps.now(),
+    afterMs: config.review.rereviewAfterMinutes * MINUTE_MS,
+  });
+  const candidates = [...first, ...plan.due];
   for (const mr of candidates) {
     const now = deps.now();
     if (store.countAgentReviews("auto", now - DAY_MS) >= config.review.maxPerDay) {
       log.warn("agent review daily cap reached", { waiting: candidates.length });
-      return;
+      break;
     }
     store.queueAgentReview(mr.key, "auto", now, mr.title);
+    const tracked = plan.due.includes(mr) ? plan.heads.get(mr.key) : undefined;
+    if (tracked !== undefined) plan.heads.set(mr.key, { ...tracked, queuedHead: tracked.head });
   }
+  store.saveReviewHeads(plan.heads);
 }
 
 export interface ReviewWorker {

@@ -42,9 +42,14 @@ describe("parseConfig", () => {
         skill: "madhani:madhani-code-review",
         maxChangedLines: 800,
         maxPerDay: 10,
+        rereviewAfterMinutes: 10,
         timeoutMinutes: 20,
       },
     });
+  });
+
+  it("review.rereviewAfterMinutes defaults to 10", () => {
+    expect(parseConfig(MINIMAL).review.rereviewAfterMinutes).toBe(10);
   });
 
   it("lets values be overridden", () => {

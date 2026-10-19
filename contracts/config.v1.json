@@ -288,6 +288,14 @@
       "effective": 10
     },
     {
+      "path": ["review", "rereviewAfterMinutes"],
+      "type": "int",
+      "label": "Re-review after (minutes)",
+      "help": "Re-review an MR after the Author's latest push has stood this long without a newer one",
+      "value": null,
+      "effective": 10
+    },
+    {
       "path": ["review", "timeoutMinutes"],
       "type": "int",
       "label": "Review timeout (minutes)",

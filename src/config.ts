@@ -95,6 +95,7 @@ export const configSchema = z
           .optional(),
         maxChangedLines: positiveInt.default(800),
         maxPerDay: positiveInt.default(10),
+        rereviewAfterMinutes: positiveInt.default(10),
         timeoutMinutes: positiveInt.default(20),
       })
       .strict()

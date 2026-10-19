@@ -63,6 +63,7 @@ Config file: `~/.config/suica/config.yaml` (override the path with `SUICA_CONFIG
 | `review.model`                     | CLI default                      | Model the review runs with: `sonnet`, `opus`, `haiku` or a full model name for Claude Code (`--model`), a model name for Codex (`-m`) |
 | `review.maxChangedLines`           | `800`                            | Larger MRs are skipped                                           |
 | `review.maxPerDay`                 | `10`                             | At most this many automatic reviews in 24 hours (yours do not count) |
+| `review.rereviewAfterMinutes`      | `10`                             | Agent Re-review after the Author's latest push has stood this long without a newer one |
 | `review.timeoutMinutes`            | `20`                             | A review run is stopped after this long                          |
 | `statePath`                        | `~/Library/Application Support/suica/state.db` | SQLite state file |
 
