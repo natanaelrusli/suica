@@ -44,6 +44,17 @@ const NESTED_PREVIOUS = [
   "1. `d.ts:2` not a finding",
 ].join("\n");
 
+const TOP_LEVEL_PREVIOUS = [
+  "## Previous review",
+  "### Findings",
+  "1. `a.ts:3` old — fixed",
+  "#### Major findings",
+  "- `c.ts:1` old too",
+  "## Findings",
+  "### Minor",
+  "1. `b.ts:4` new",
+].join("\n");
+
 describe("extractFindings", () => {
   it("takes the located items under Findings and its subheadings, with their continuation", () => {
     const findings = extractFindings(REVIEW);
@@ -71,6 +82,9 @@ describe("extractFindings", () => {
   });
   it("never extracts an item under a Previous subheading inside Findings, up to its next sibling", () => {
     expect(extractFindings(NESTED_PREVIOUS).map((f) => f.path)).toEqual(["b.ts"]);
+  });
+  it("never extracts an item under a Findings subheading of a Previous heading", () => {
+    expect(extractFindings(TOP_LEVEL_PREVIOUS).map((f) => f.path)).toEqual(["b.ts"]);
   });
 });
 
@@ -135,6 +149,7 @@ describe("countFindings", () => {
       "## Previous findings\n1. `a.ts:3` old — not fixed\n## Findings\n### Minor\n1. `b.ts:4` new\n";
     expect(countFindings(body)).toEqual([{ severity: "Minor", count: 1 }]);
     expect(countFindings(NESTED_PREVIOUS)).toEqual([{ severity: "Minor", count: 1 }]);
+    expect(countFindings(TOP_LEVEL_PREVIOUS)).toEqual([{ severity: "Minor", count: 1 }]);
   });
 });
 

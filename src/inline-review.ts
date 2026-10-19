@@ -35,14 +35,15 @@ function isFindingsHeading(title: string): boolean {
 
 /**
  * The findings a review lists under a heading named Findings (with its subheadings, such as one
- * per severity). A subheading starting with Previous is left out up to its next sibling, and a
+ * per severity). A heading starting with Previous, inside Findings or not, is left out with its
+ * subheadings (a `### Findings` under `## Previous review` included) up to its next sibling, and a
  * finding whose location is not its first code span is left in the summary.
  */
 export function extractFindings(markdown: string): Finding[] {
   const lines = markdown.replace(/\r\n/g, "\n").split("\n");
   const findings: Finding[] = [];
   let sectionLevel: number | undefined;
-  /** The level of the Previous subheading the lines are under, if any. */
+  /** The level of the Previous heading the lines are under, if any. */
   let previousLevel: number | undefined;
   let inFence = false;
   let index = 0;
@@ -54,14 +55,12 @@ export function extractFindings(markdown: string): Finding[] {
       const level = heading[1]?.length ?? 1;
       const title = heading[2] ?? "";
       if (previousLevel !== undefined && level > previousLevel) {
-        // Still under the Previous subheading.
+        // Still under the Previous heading.
       } else if (isFindingsHeading(title)) {
         sectionLevel = level;
         previousLevel = undefined;
-      } else if (sectionLevel !== undefined && level <= sectionLevel) {
-        sectionLevel = undefined;
-        previousLevel = undefined;
-      } else if (sectionLevel !== undefined) {
+      } else {
+        if (sectionLevel !== undefined && level <= sectionLevel) sectionLevel = undefined;
         previousLevel = isPreviousHeading(title) ? level : undefined;
       }
       index += 1;
@@ -115,7 +114,7 @@ const SEVERITY_HEADING = /^\W*([A-Za-z]+)\s*(?:$|[^A-Za-z\s])/;
 export function countFindings(markdown: string): FindingCount[] {
   const counts = new Map<string, number>();
   let sectionLevel: number | undefined;
-  /** The level of the Previous subheading the lines are under, if any, as in `extractFindings`. */
+  /** The level of the Previous heading the lines are under, if any, as in `extractFindings`. */
   let previousLevel: number | undefined;
   /** Undefined under a subheading that is not a severity. */
   let severity: string | undefined = "";
@@ -129,17 +128,16 @@ export function countFindings(markdown: string): FindingCount[] {
       const level = heading[1]?.length ?? 1;
       const title = heading[2] ?? "";
       if (previousLevel !== undefined && level > previousLevel) {
-        // Still under the Previous subheading.
+        // Still under the Previous heading.
       } else if (isFindingsHeading(title)) {
         sectionLevel = level;
         previousLevel = undefined;
         severity = "";
         itemIndent = undefined;
-      } else if (sectionLevel !== undefined && level <= sectionLevel) {
-        sectionLevel = undefined;
-        previousLevel = undefined;
-      } else if (sectionLevel !== undefined) {
+      } else {
+        if (sectionLevel !== undefined && level <= sectionLevel) sectionLevel = undefined;
         previousLevel = isPreviousHeading(title) ? level : undefined;
+        // Outside a section this is reset when the next Findings heading opens one.
         const word = SEVERITY_HEADING.exec(title)?.[1];
         severity =
           word === undefined
