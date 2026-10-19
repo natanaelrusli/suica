@@ -519,8 +519,9 @@ export async function runAgentReview(deps: ReviewDeps, row: AgentReviewRow): Pro
 /**
  * Queues automatic reviews after a poll, within the daily cap. First reviews go first, oldest MR
  * first: every MR waiting for the Owner (not a draft, the Owner's state UNREVIEWED) that the agent
- * never reviewed, and an MR that just asked for the Owner's review again unless its last review was
- * posted (a push can ask again; the re-review's wait decides then). Re-reviews follow, as
+ * never reviewed, and an MR that just asked for the Owner's review again, unless its last review was
+ * posted and its head is tracked (a push can ask again; the re-review's wait decides then; an MR
+ * re-added after a push has no tracked head, so it is reviewed at once). Re-reviews follow, as
  * `planRereviews` finds them; their head counts as queued even when a review is already open. A
  * failed, skipped or discarded review is not retried on its own; the Owner can press Review again.
  */
@@ -533,17 +534,17 @@ export function queueAutomaticReviews(
   if (!config.review.auto) return;
   const reviewed = store.agentReviewedKeys();
   const bases = store.rereviewBases();
+  const heads = store.loadReviewHeads();
   const asked = new Set(newRequests);
+  const waitsForRereview = (key: string): boolean =>
+    bases.get(key)?.status === "posted" && heads.has(key);
   const first = snapshot.reviewRequested
     .filter((mr) => !mr.draft && myReviewState(snapshot, mr) === UNREVIEWED)
-    .filter(
-      (mr) =>
-        (asked.has(mr.key) && bases.get(mr.key)?.status !== "posted") || !reviewed.has(mr.key),
-    )
+    .filter((mr) => (asked.has(mr.key) && !waitsForRereview(mr.key)) || !reviewed.has(mr.key))
     .sort(byAge);
   const plan = planRereviews({
     mrs: snapshot.reviewRequested,
-    heads: store.loadReviewHeads(),
+    heads,
     bases,
     now: deps.now(),
     afterMs: config.review.rereviewAfterMinutes * MINUTE_MS,

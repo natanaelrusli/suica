@@ -692,6 +692,18 @@ describe("queueAutomaticReviews", () => {
     expect(queuedKeys(db)).toEqual([]);
   });
 
+  it("queues at once when GitLab asks again for a posted MR whose head is not tracked, as after being re-added following a push", () => {
+    const db = store();
+    posted(db, "g/p!1", "sha-1-a");
+    queueAutomaticReviews(
+      { store: db, config: auto, log: silent, now: () => NOW },
+      snapshot({ reviewRequested: [waiting(1, null, { headSha: "sha-1-b" })] }),
+      ["g/p!1"],
+    );
+    expect(queuedKeys(db)).toEqual(["g/p!1"]);
+    expect(db.loadReviewHeads().get("g/p!1")?.queuedHead).toBe("sha-1-b");
+  });
+
   it("queues first reviews before re-reviews and still saves head tracking when the daily cap is reached", () => {
     const db = store();
     posted(db, "g/p!1", "sha-1-a");
