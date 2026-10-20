@@ -238,6 +238,17 @@ public enum Copy {
         return sha.map { "By \(who) at commit \(String($0.prefix(8)))" } ?? "By \(who)"
     }
     public static let agentRereviewLabel = "Re-review"
+    public static let rereviewNow = "Re-review"
+    /// The list's badge for an MR that changed since the agent's posted review.
+    public static func changedSinceReview(_ change: ChangedSinceReview) -> String {
+        let what =
+            switch (change.code, change.description) {
+            case (true, true): "code and description"
+            case (true, false): "code"
+            default: "description"
+            }
+        return "Changed since the agent's review: \(what)"
+    }
     // Agent Review activity (Overview and menu bar)
     public static let agentReviewHeading = "Agent Review"
     public static let reviewingNow = "Reviewing now"

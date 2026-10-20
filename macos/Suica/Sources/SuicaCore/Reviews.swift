@@ -70,6 +70,17 @@ public struct AgentReviewInfo: Codable, Equatable, Sendable {
     public var canRequeue: Bool { !isActive && !isReady }
 }
 
+/// How an MR changed since the agent's posted review; the list marks it and offers a re-review.
+public struct ChangedSinceReview: Codable, Equatable, Sendable {
+    public let code: Bool
+    public let description: Bool
+
+    public init(code: Bool, description: Bool) {
+        self.code = code
+        self.description = description
+    }
+}
+
 public struct ReviewSummary: Codable, Equatable, Identifiable, Sendable {
     public let key: String
     public let title: String
@@ -81,14 +92,19 @@ public struct ReviewSummary: Codable, Equatable, Identifiable, Sendable {
     public let reviewers: [ReviewerInfo]
     /// Nil when the agent never reviewed it, or from an agent without Agent Review.
     public let agentReview: AgentReviewInfo?
+    /// Set when the MR changed since the agent's posted review and no newer review is open; absent from an older CLI.
+    public let changedSinceReview: ChangedSinceReview?
 
     public var id: String { key }
+
+    /// The row offers Re-review: the MR changed since the posted review and another review can start.
+    public var offersRereview: Bool { changedSinceReview != nil && (agentReview?.canRequeue ?? true) }
 
     public var createdDate: Date? { createdAt.flatMap(MRNote.parse) }
 
     public init(
         key: String, title: String, url: String, draft: Bool, createdAt: String? = nil, author: Person,
-        reviewers: [ReviewerInfo], agentReview: AgentReviewInfo? = nil
+        reviewers: [ReviewerInfo], agentReview: AgentReviewInfo? = nil, changedSinceReview: ChangedSinceReview? = nil
     ) {
         self.key = key
         self.title = title
@@ -98,6 +114,7 @@ public struct ReviewSummary: Codable, Equatable, Identifiable, Sendable {
         self.author = author
         self.reviewers = reviewers
         self.agentReview = agentReview
+        self.changedSinceReview = changedSinceReview
     }
 }
 

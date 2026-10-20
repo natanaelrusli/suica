@@ -210,7 +210,7 @@ async function reviewsJson(): Promise<number> {
   const store = openStore(config.statePath ?? defaultStatePath());
   try {
     store.recoverStalePostings(Date.now());
-    const document = buildReviewList(snapshot, store.latestAgentReviews());
+    const document = buildReviewList(snapshot, store.latestAgentReviews(), store.rereviewBases());
     process.stdout.write(`${JSON.stringify(document)}\n`);
     return 0;
   } finally {

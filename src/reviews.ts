@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { UNREVIEWED } from "./domain.ts";
-import type { Person, Reviewer, Snapshot } from "./domain.ts";
+import type { MergeRequest, Person, Reviewer, Snapshot } from "./domain.ts";
 import { FetchFailure } from "./gitlab.ts";
 import type { GraphqlRunner, PostRunner, RestRunner } from "./gitlab.ts";
 import type { Logger } from "./log.ts";
@@ -69,6 +69,12 @@ export function buildReviewActivity(
   };
 }
 
+/** How an MR changed since the agent's posted review, for the list's badge and Re-review button. */
+export interface ChangedSinceReviewJson {
+  readonly code: boolean;
+  readonly description: boolean;
+}
+
 /** One open MR where the Owner is a Reviewer. See contracts/reviews.v1.json. */
 export interface ReviewSummaryJson {
   readonly key: string;
@@ -81,6 +87,12 @@ export interface ReviewSummaryJson {
   readonly reviewers: readonly Reviewer[];
   /** Null when the agent never reviewed it. */
   readonly agentReview: AgentReviewJson | null;
+  /**
+   * Set when the newest posted-or-discarded Agent Review was posted, the MR's head or description
+   * differs from what it read, and no review is open (queued, running, ready or posting). A base
+   * without a description hash (reviewed before the hash was kept) compares the head only.
+   */
+  readonly changedSinceReview: ChangedSinceReviewJson | null;
 }
 
 /** `suica reviews --json`. */
@@ -107,25 +119,46 @@ function toAgentReviewJson(row: AgentReviewRow): AgentReviewJson {
   };
 }
 
+const OPEN_STATUSES: readonly AgentReviewStatus[] = ["queued", "running", "ready", "posting"];
+
+/** Pure: see `ReviewSummaryJson.changedSinceReview`. */
+export function changedSinceReview(
+  mr: Pick<MergeRequest, "headSha" | "descriptionSha">,
+  latest: AgentReviewRow | undefined,
+  base: AgentReviewRow | undefined,
+): ChangedSinceReviewJson | null {
+  if (base?.status !== "posted" || base.headSha === null || mr.headSha === null) return null;
+  if (latest !== undefined && OPEN_STATUSES.includes(latest.status)) return null;
+  const code = base.headSha !== mr.headSha;
+  const description =
+    base.descriptionSha !== null &&
+    mr.descriptionSha !== null &&
+    base.descriptionSha !== mr.descriptionSha;
+  return code || description ? { code, description } : null;
+}
+
 export function buildReviewList(
   snapshot: Snapshot,
   agentReviews: ReadonlyMap<string, AgentReviewRow> = new Map(),
+  bases: ReadonlyMap<string, AgentReviewRow> = new Map(),
 ): ReviewListJson {
   return {
     version: 1,
     me: snapshot.me,
-    mergeRequests: snapshot.reviewRequested.map((mr) => ({
-      key: mr.key,
-      title: mr.title,
-      url: mr.url,
-      draft: mr.draft,
-      createdAt: mr.createdAt,
-      author: mr.author,
-      reviewers: mr.reviewers,
-      agentReview: ((row) => (row === undefined ? null : toAgentReviewJson(row)))(
-        agentReviews.get(mr.key),
-      ),
-    })),
+    mergeRequests: snapshot.reviewRequested.map((mr) => {
+      const latest = agentReviews.get(mr.key);
+      return {
+        key: mr.key,
+        title: mr.title,
+        url: mr.url,
+        draft: mr.draft,
+        createdAt: mr.createdAt,
+        author: mr.author,
+        reviewers: mr.reviewers,
+        agentReview: latest === undefined ? null : toAgentReviewJson(latest),
+        changedSinceReview: changedSinceReview(mr, latest, bases.get(mr.key)),
+      };
+    }),
   };
 }
 

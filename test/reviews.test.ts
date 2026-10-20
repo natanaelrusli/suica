@@ -5,11 +5,14 @@ import { createLogger } from "../src/log.ts";
 import {
   approveMergeRequest,
   buildReviewList,
+  changedSinceReview,
   fetchMrDetail,
   MR_DETAIL_QUERY,
   parseDiffs,
   parseMrKey,
 } from "../src/reviews.ts";
+import type { MergeRequest } from "../src/domain.ts";
+import type { AgentReviewRow } from "../src/store.ts";
 import { mr, person, reviewer, snapshot } from "./builders.ts";
 
 function golden(name: string): unknown {
@@ -121,6 +124,25 @@ describe("parseMrKey", () => {
   });
 });
 
+const POSTED_NINE: AgentReviewRow = {
+  id: 4,
+  mrKey: "g/p!9",
+  trigger: "auto",
+  status: "posted",
+  mrTitle: "MR 9",
+  model: null,
+  startedAt: 1792152100000,
+  cli: "claude",
+  headSha: "89abcdef0123456789abcdef0123456789abcdef",
+  previousSha: "0123456789abcdef0123456789abcdef01234567",
+  descriptionSha: null,
+  approved: false,
+  body: "# Code review: g/p!9\n\nNo new findings.",
+  detail: "",
+  createdAt: 1792152050000,
+  updatedAt: 1792152200000,
+};
+
 describe("buildReviewList", () => {
   it("matches the golden contract", () => {
     const list = buildReviewList(
@@ -162,30 +184,67 @@ describe("buildReviewList", () => {
             updatedAt: 1792152000000,
           },
         ],
-        [
-          "g/p!9",
-          {
-            id: 4,
-            mrKey: "g/p!9",
-            trigger: "auto",
-            status: "posted",
-            mrTitle: "MR 9",
-            model: null,
-            startedAt: 1792152100000,
-            cli: "claude",
-            headSha: "89abcdef0123456789abcdef0123456789abcdef",
-            previousSha: "0123456789abcdef0123456789abcdef01234567",
-            descriptionSha: null,
-            approved: false,
-            body: "# Code review: g/p!9\n\nNo new findings.",
-            detail: "",
-            createdAt: 1792152050000,
-            updatedAt: 1792152200000,
-          },
-        ],
+        ["g/p!9", POSTED_NINE],
       ]),
+      new Map([["g/p!9", POSTED_NINE]]),
     );
     expect(list).toEqual(golden("reviews.v1.json"));
+  });
+});
+
+describe("changedSinceReview", () => {
+  const base = (overrides: Partial<AgentReviewRow> = {}): AgentReviewRow => ({
+    ...POSTED_NINE,
+    headSha: "sha-9-a",
+    descriptionSha: "d1",
+    ...overrides,
+  });
+  const current = (overrides: Partial<MergeRequest> = {}) =>
+    mr(9, { headSha: "sha-9-a", descriptionSha: "d1", ...overrides });
+
+  it("is null while nothing changed, without a posted base, or while GitLab has no head", () => {
+    expect(changedSinceReview(current(), base(), base())).toBeNull();
+    expect(changedSinceReview(current({ headSha: "sha-9-b" }), undefined, undefined)).toBeNull();
+    const discarded = base({ status: "discarded", headSha: "sha-9-z" });
+    expect(changedSinceReview(current(), discarded, discarded)).toBeNull();
+    expect(changedSinceReview(current({ headSha: null }), base(), base())).toBeNull();
+  });
+
+  it("says which of the code and the description changed", () => {
+    expect(changedSinceReview(current({ headSha: "sha-9-b" }), base(), base())).toEqual({
+      code: true,
+      description: false,
+    });
+    expect(changedSinceReview(current({ descriptionSha: "d2" }), base(), base())).toEqual({
+      code: false,
+      description: true,
+    });
+    expect(
+      changedSinceReview(current({ headSha: "sha-9-b", descriptionSha: "d2" }), base(), base()),
+    ).toEqual({ code: true, description: true });
+  });
+
+  it("compares the head only when the base or the snapshot has no description hash", () => {
+    const old = base({ descriptionSha: null });
+    expect(changedSinceReview(current({ descriptionSha: "d2" }), old, old)).toBeNull();
+    expect(changedSinceReview(current({ descriptionSha: null }), base(), base())).toBeNull();
+    expect(changedSinceReview(current({ headSha: "sha-9-b" }), old, old)).toEqual({
+      code: true,
+      description: false,
+    });
+  });
+
+  it("is null while a newer review is open, and set again once that review failed or was skipped", () => {
+    const pushed = current({ headSha: "sha-9-b" });
+    for (const status of ["queued", "running", "ready", "posting"] as const) {
+      expect(changedSinceReview(pushed, base({ id: 5, status, headSha: null }), base())).toBeNull();
+    }
+    for (const status of ["failed", "skipped"] as const) {
+      expect(changedSinceReview(pushed, base({ id: 5, status }), base())).toEqual({
+        code: true,
+        description: false,
+      });
+    }
   });
 });
 

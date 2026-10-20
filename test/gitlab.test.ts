@@ -90,7 +90,7 @@ describe("the head commit", () => {
 
 describe("the description", () => {
   it("is fetched in the snapshot query and kept as a hash only, null when GitLab does not send it", () => {
-    expect(SNAPSHOT_QUERY.match(/\n  description\n/g)).toHaveLength(1);
+    expect(SNAPSHOT_QUERY.match(/\n {2}description\n/g)).toHaveLength(1);
     const snapshot = parseSnapshot(
       payload({
         reviewRequested: [node({ iid: "1", description: "Adds a thing" })],

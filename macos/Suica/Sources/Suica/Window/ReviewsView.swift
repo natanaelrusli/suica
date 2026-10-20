@@ -72,7 +72,13 @@ struct ReviewsView: View {
 
     private func rows(_ section: ReviewSection, in list: ReviewListDocument) -> some View {
         ForEach(section.items) { mr in
-            ReviewRow(mr: mr, group: section.group, myState: list.myState(mr)).tag(mr.key)
+            ReviewRow(
+                mr: mr, group: section.group, myState: list.myState(mr),
+                rereviewing: model.agentBusyKeys.contains(mr.key)
+            ) {
+                Task { await model.queueAgentReview(mr.key) }
+            }
+            .tag(mr.key)
         }
     }
 
@@ -122,6 +128,9 @@ private struct ReviewRow: View {
     let mr: ReviewSummary
     let group: ReviewGroup
     let myState: String?
+    /// True while a review of this MR is being queued from the row.
+    let rereviewing: Bool
+    let onRereview: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
@@ -150,6 +159,20 @@ private struct ReviewRow: View {
                 Label(badge, systemImage: review.status == "queued" ? "hourglass" : "sparkles")
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(ReviewTint.agent(review.status))
+            }
+            if let change = mr.changedSinceReview {
+                HStack(spacing: 6) {
+                    Label(Copy.changedSinceReview(change), systemImage: "arrow.triangle.2.circlepath")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.orange)
+                    if mr.offersRereview {
+                        Button(Copy.rereviewNow, action: onRereview)
+                            .buttonStyle(.bordered)
+                            .controlSize(.mini)
+                            .disabled(rereviewing)
+                            .help(Copy.reviewAgain)
+                    }
+                }
             }
             if shownState != nil || showsApprovals {
                 HStack(spacing: 4) {

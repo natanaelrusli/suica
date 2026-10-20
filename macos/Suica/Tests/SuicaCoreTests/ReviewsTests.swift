@@ -407,6 +407,29 @@ private func withAgent(_ status: String?) -> ReviewListDocument {
     #expect(Copy.agentRereviewLabel == "Re-review")
 }
 
+@Test func theListSaysHowAnMergeRequestChangedSinceTheAgentsReview() throws {
+    let list = try decodeDocument(ReviewListDocument.self, from: contract("reviews.v1.json"))
+    #expect(list.mergeRequests.first?.changedSinceReview == nil)
+    let changed = try #require(list.mergeRequests.last?.changedSinceReview)
+    #expect(changed == ChangedSinceReview(code: true, description: false))
+    #expect(Copy.changedSinceReview(changed) == "Changed since the agent's review: code")
+    #expect(Copy.changedSinceReview(ChangedSinceReview(code: false, description: true)) == "Changed since the agent's review: description")
+    #expect(Copy.changedSinceReview(ChangedSinceReview(code: true, description: true)) == "Changed since the agent's review: code and description")
+    // The row offers Re-review only while no review is queued, running, ready or being posted.
+    #expect(list.mergeRequests.last?.offersRereview == true)
+    let open = ReviewSummary(
+        key: "g/p!1", title: "t", url: "https://x", draft: false, author: Person(username: "a", name: "A"),
+        reviewers: [], agentReview: AgentReviewInfo(id: 1, status: "ready"), changedSinceReview: ChangedSinceReview(code: true, description: false))
+    #expect(!open.offersRereview)
+    let unchanged = ReviewSummary(
+        key: "g/p!1", title: "t", url: "https://x", draft: false, author: Person(username: "a", name: "A"), reviewers: [])
+    #expect(!unchanged.offersRereview)
+    let older = Data("""
+        {"key": "g/p!2", "title": "t", "url": "https://x", "draft": false, "author": {"username": "a", "name": "A"}, "reviewers": []}
+        """.utf8)
+    #expect(try JSONDecoder().decode(ReviewSummary.self, from: older).changedSinceReview == nil)
+}
+
 @Test func aSummaryReadsWhenTheMergeRequestWasOpened() throws {
     let list = try decodeDocument(ReviewListDocument.self, from: contract("reviews.v1.json"))
     #expect(list.mergeRequests.first?.createdDate == Date(timeIntervalSince1970: 1_791_968_400))

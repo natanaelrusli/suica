@@ -111,7 +111,7 @@ private func data(_ text: String) -> Data { Data(text.utf8) }
     let config = try decodeDocument(ConfigDocument.self, from: contract("config.v1.json"))
     #expect(config.path == "/tmp/config.yaml" && config.exists && config.sha256 == "0")
     #expect(config.issues.isEmpty)
-    #expect(config.fields.count == 37)
+    #expect(config.fields.count == 39)
     let first = try #require(config.fields.first)
     #expect(first.path == ["gitlab", "hostname"] && first.type == .string)
     #expect(first.value == .string("repo.example") && first.effective == .string("repo.example"))
