@@ -46,7 +46,7 @@ actor FakeTemplatesClient: TemplatesClient {
         Set(document.templates.map(\.name))
             == [
                 "nudge", "reminder", "rereview", "notice.approved", "notice.changes", "notice.comments",
-                "notice.findings", "notice.refindings",
+                "notice.findings", "notice.refindings", "notice.reapproved",
             ])
     // Every template the agent lists has its own title and description in the window.
     for name in document.templates.map(\.name) {

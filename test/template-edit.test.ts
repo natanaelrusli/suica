@@ -39,6 +39,7 @@ describe("showTemplates", () => {
       "notice.comments",
       "notice.findings",
       "notice.refindings",
+      "notice.reapproved",
       "rereview",
     ]);
     expect(doc.templates[0]).toEqual({

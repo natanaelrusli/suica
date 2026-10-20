@@ -158,6 +158,18 @@ describe("the built-in re-review findings notice", () => {
   });
 });
 
+describe("the built-in approved re-review notice", () => {
+  it("tells the Author the re-review found nothing new and the MR is approved", () => {
+    const text = renderTemplate(DEFAULT_TEMPLATES["notice.reapproved"], {
+      ...values,
+      "review.findings": "tidak ada findings baru",
+    });
+    expect(text).toBe(
+      "Halo Alice, saya Bahlil, agen review-nya Nata. Saya sudah review ulang update MR kamu: tidak ada findings baru, jadi MR-nya sudah saya approve.\n[Add thing](https://gitlab.example/g/p/-/merge_requests/7)",
+    );
+  });
+});
+
 describe("the built-in findings notice", () => {
   it("tells the Author what the Agent Review found and where to read it", () => {
     const text = renderTemplate(DEFAULT_TEMPLATES["notice.findings"], {

@@ -56,6 +56,12 @@
       "defaultText": "Halo {{person.name}}, saya {{agent.name}}, agen review-nya {{owner.name}}. Saya sudah review ulang update MR kamu: {{review.findings}}.\n{{mr.link}}\nDetailnya ada di komentar MR."
     },
     {
+      "name": "notice.reapproved",
+      "text": "Halo {{person.name}}, saya {{agent.name}}, agen review-nya {{owner.name}}. Saya sudah review ulang update MR kamu: {{review.findings}}, jadi MR-nya sudah saya approve.\n{{mr.link}}",
+      "custom": false,
+      "defaultText": "Halo {{person.name}}, saya {{agent.name}}, agen review-nya {{owner.name}}. Saya sudah review ulang update MR kamu: {{review.findings}}, jadi MR-nya sudah saya approve.\n{{mr.link}}"
+    },
+    {
       "name": "rereview",
       "text": "Halo {{person.name}}, saya {{agent.name}}, agen review-nya {{owner.name}}. MR ini sudah saya update sesuai review-mu. Boleh minta tolong dicek lagi?\n{{mr.link}}\nTerima kasih!",
       "custom": false,

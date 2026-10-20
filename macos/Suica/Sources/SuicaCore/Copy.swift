@@ -50,6 +50,7 @@ public enum Copy {
         case "notice.comments": "Review Notice: comments"
         case "notice.findings": "Review Notice: Agent Review findings"
         case "notice.refindings": "Review Notice: Agent Re-review findings"
+        case "notice.reapproved": "Review Notice: Agent Re-review approved"
         default: name
         }
     }
@@ -64,6 +65,8 @@ public enum Copy {
         case "notice.findings": "To the Author, after an Agent Review is posted on their MR, with its findings per severity."
         case "notice.refindings":
             "To the Author, after an Agent Re-review is posted on their MR, with its new findings per severity."
+        case "notice.reapproved":
+            "To the Author, after a clean Agent Re-review is posted and the agent approved their MR (review.approve)."
         default: ""
         }
     }

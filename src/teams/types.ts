@@ -8,6 +8,7 @@ export const TEMPLATE_NAMES = [
   "notice.comments",
   "notice.findings",
   "notice.refindings",
+  "notice.reapproved",
   "rereview",
 ] as const;
 export type TemplateName = (typeof TEMPLATE_NAMES)[number];
@@ -60,7 +61,7 @@ export interface Intent {
   readonly variant: TemplateName;
   readonly mr: IntentMr;
   readonly recipient: Person;
-  /** The `review.findings` value of a `notice.findings` or `notice.refindings` message. */
+  /** The `review.findings` value of a `notice.findings`, `notice.refindings` or `notice.reapproved` message. */
   readonly findings?: string;
 }
 
@@ -163,7 +164,7 @@ export interface OutboxRow {
   /** GitLab username of the person who receives the chat. */
   readonly recipient: string;
   readonly recipientName: string;
-  /** The `review.findings` value; null for every message but `notice.findings` and `notice.refindings`. */
+  /** The `review.findings` value; null for every message but the findings notices. */
   readonly findings: string | null;
   readonly status: OutboxStatus;
   readonly detail: string;

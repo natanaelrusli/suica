@@ -4,7 +4,7 @@ import Foundation
 
 /// One Teams message template, as `suica templates show --json` lists it.
 public struct MessageTemplate: Codable, Equatable, Identifiable, Sendable {
-    /// nudge, reminder, rereview, notice.approved, notice.changes, notice.comments, notice.findings or notice.refindings.
+    /// nudge, reminder, rereview, notice.approved, notice.changes, notice.comments, notice.findings, notice.refindings or notice.reapproved.
     public let name: String
     /// What the agent uses: the file's text when there is one, else the built-in text.
     public let text: String

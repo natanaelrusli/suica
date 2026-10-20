@@ -30,6 +30,7 @@ export const DEFAULT_TEMPLATES: Templates = {
   "notice.comments": `${INTRO} Saya sudah review MR kamu dan meninggalkan beberapa komentar:\n{{mr.link}}`,
   "notice.findings": `${INTRO} Saya sudah review MR kamu: {{review.findings}}.\n{{mr.link}}\nDetailnya ada di komentar MR.`,
   "notice.refindings": `${INTRO} Saya sudah review ulang update MR kamu: {{review.findings}}.\n{{mr.link}}\nDetailnya ada di komentar MR.`,
+  "notice.reapproved": `${INTRO} Saya sudah review ulang update MR kamu: {{review.findings}}, jadi MR-nya sudah saya approve.\n{{mr.link}}`,
   rereview: `${INTRO} MR ini sudah saya update sesuai review-mu. Boleh minta tolong dicek lagi?\n{{mr.link}}\nTerima kasih!`,
 };
 

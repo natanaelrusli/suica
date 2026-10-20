@@ -587,6 +587,7 @@ describe("Re-review Nudge", () => {
     } as const;
     expect(modeFor({ kind: "notice", variant: "notice.findings" }, { modes })).toBe("approval");
     expect(modeFor({ kind: "notice", variant: "notice.refindings" }, { modes })).toBe("approval");
+    expect(modeFor({ kind: "notice", variant: "notice.reapproved" }, { modes })).toBe("approval");
     expect(modeFor({ kind: "notice", variant: "notice.comments" }, { modes })).toBe("dry-run");
   });
 

@@ -383,6 +383,39 @@ describe("review notices (flow C)", () => {
     expect(late.intents.map((i) => i.dedupeKey)).toEqual(["findings:4"]);
   });
 
+  it("announces an approved re-review as notice.reapproved and counts the approval as noticed", () => {
+    const state = withRound(round({ announcedReview: 3 }), {
+      ...posted(4),
+      body: "## Previous review\n- fixed\n## Findings\nNone.",
+      rereview: true,
+      approved: true,
+    });
+    const current = snapshot({
+      reviewRequested: [theirs("APPROVED", [note("a", ME), note("b", ME)])],
+    });
+    const result = plan({ snapshot: current, state });
+    expect(result.intents.map((i) => [i.variant, i.findings])).toEqual([
+      ["notice.reapproved", "tidak ada findings baru"],
+    ]);
+    const [update] = result.roundUpdates;
+    expect(update?.round).toEqual(
+      round({
+        myState: "APPROVED",
+        myNotes: 2,
+        changedAt: NOW,
+        noticedState: "APPROVED",
+        noticedNotes: 2,
+        announcedReview: 4,
+      }),
+    );
+    const later = plan({
+      snapshot: current,
+      state: { ...state, rounds: new Map([[KEY, update!.round]]) },
+      now: NOW + 11 * MINUTE,
+    });
+    expect(later.intents).toEqual([]);
+  });
+
   it("announces each Agent Review once and still notices a later approval", () => {
     const result = plan({
       snapshot: snapshot({ reviewRequested: [theirs("APPROVED", [note("a", ME)])] }),

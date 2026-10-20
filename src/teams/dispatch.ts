@@ -66,7 +66,11 @@ export function modeFor(
 ): SendMode {
   // The Review Notice with an Agent Review's or Re-review's findings has its own mode, so it can
   // go out on its own while the other Review Notices still wait for approval.
-  if (row.variant === "notice.findings" || row.variant === "notice.refindings") {
+  if (
+    row.variant === "notice.findings" ||
+    row.variant === "notice.refindings" ||
+    row.variant === "notice.reapproved"
+  ) {
     return config.modes.findings;
   }
   if (row.kind === "notice") return config.modes.notice;
