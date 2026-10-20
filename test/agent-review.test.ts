@@ -273,8 +273,9 @@ describe("buildPrompt", () => {
 
 // MARK: - Running
 
+// Approval after a post is tested on its own, with APPROVING and NOT_APPROVING.
 const CONFIG = parseConfig(
-  "gitlab:\n  hostname: gitlab.example\nmodel:\n  cli: claude\nreview:\n  maxChangedLines: 100\n",
+  "gitlab:\n  hostname: gitlab.example\nmodel:\n  cli: claude\nreview:\n  maxChangedLines: 100\n  approve: false\n",
 );
 const CLAUDE: DetectedCli = { id: "claude", name: "Claude Code", path: "/bin/claude" };
 const CODEX: DetectedCli = { id: "codex", name: "Codex", path: "/bin/codex" };
@@ -1558,13 +1559,14 @@ describe("postAgentReview and discardAgentReview", () => {
       expect(off.h.db.getAgentReview(off.id)?.approved).toBe(false);
     });
 
-    it("is off by default, so approving stays one click in the app", async () => {
+    it("is on by default", async () => {
       const { h, id } = await readyWith(CLEAN_REREVIEW, true);
       const { deps, approvals } = approvingDeps(h, {
         config: parseConfig("gitlab:\n  hostname: gitlab.example\n"),
       });
       await postAgentReview(deps, id);
-      expect(approvals).toEqual([]);
+      expect(approvals).toHaveLength(1);
+      expect(h.db.getAgentReview(id)?.approved).toBe(true);
     });
 
     it("notes a refused approval on the posted review and does not retry", async () => {
