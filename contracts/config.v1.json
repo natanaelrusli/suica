@@ -329,6 +329,14 @@
       "effective": 20
     },
     {
+      "path": ["review", "concurrency"],
+      "type": "int",
+      "label": "Reviews at once",
+      "help": "How many Agent Reviews run at the same time, 1 to 4, each with its own CLI process and checkout",
+      "value": null,
+      "effective": 2
+    },
+    {
       "path": ["statePath"],
       "type": "string",
       "label": "State file",

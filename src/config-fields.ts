@@ -263,6 +263,12 @@ export const CONFIG_FIELDS: readonly ConfigField[] = [
     help: "A review run is stopped after this long",
   },
   {
+    path: ["review", "concurrency"],
+    type: "int",
+    label: "Reviews at once",
+    help: "How many Agent Reviews run at the same time, 1 to 4, each with its own CLI process and checkout",
+  },
+  {
     path: ["statePath"],
     type: "string",
     label: "State file",

@@ -92,6 +92,15 @@ func outcomeSaysWhetherYouApproved(status: String, detail: String, approved: Boo
         id: 4, mrKey: "g/p!7", mrTitle: "Add thing", cli: "claude", model: "opus", startedAt: 1_792_148_400_000,
         latestActivity: "Reading src/a.ts"))
     #expect(state.agentReview?.queued == [QueuedReview(id: 5, mrKey: "g/p!8", mrTitle: nil)])
+    #expect(state.agentReview?.allRunning == [running])
+}
+
+@Test func listsEveryRunningReviewAndFallsBackToTheOneAnOlderAgentNames() {
+    let first = RunningReview(id: 4, mrKey: "g/p!7", mrTitle: nil, cli: nil, model: nil, startedAt: nil)
+    let second = RunningReview(id: 6, mrKey: "g/p!9", mrTitle: nil, cli: nil, model: nil, startedAt: nil)
+    #expect(ReviewActivity(running: first, runningReviews: [first, second], queued: []).allRunning == [first, second])
+    #expect(ReviewActivity(running: first, queued: []).allRunning == [first])
+    #expect(ReviewActivity(running: nil, queued: []).allRunning.isEmpty)
 }
 
 @Test func aStateFromAnAgentWithoutAgentReviewHasNoActivity() throws {

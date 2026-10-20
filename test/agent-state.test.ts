@@ -36,16 +36,18 @@ describe("buildAgentState", () => {
       row(1, "sent", { approved: true, createdAt: 500, updatedAt: 600 }),
     ];
     const golden: unknown = JSON.parse(readFileSync("contracts/agent-state.v1.json", "utf8"));
+    const running = {
+      id: 4,
+      mrKey: "g/p!7",
+      mrTitle: "Add thing",
+      cli: "claude",
+      model: "opus",
+      startedAt: 1792148400000,
+      latestActivity: "Reading src/a.ts",
+    };
     const agentReview = {
-      running: {
-        id: 4,
-        mrKey: "g/p!7",
-        mrTitle: "Add thing",
-        cli: "claude",
-        model: "opus",
-        startedAt: 1792148400000,
-        latestActivity: "Reading src/a.ts",
-      },
+      running,
+      runningReviews: [running],
       queued: [{ id: 5, mrKey: "g/p!8", mrTitle: null }],
     };
     expect(buildAgentState({ ...base, rows, agentReview })).toEqual(golden);

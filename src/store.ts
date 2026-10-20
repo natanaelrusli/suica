@@ -193,7 +193,8 @@ export interface Store {
   /** Every MR that has a review row of any status. */
   agentReviewedKeys(): Set<string>;
   /** The review running now, if any, and the queue in the order it runs. */
-  agentReviewActivity(): { running: AgentReviewRow | undefined; queued: AgentReviewRow[] };
+  /** Every running review, oldest first, and the queue in run order. */
+  agentReviewActivity(): { running: AgentReviewRow[]; queued: AgentReviewRow[] };
   countAgentReviews(trigger: AgentReviewTrigger, since: number): number;
   /** Puts a running review back in the queue, as if it never started. */
   requeueAgentReview(id: number, now: number): boolean;
@@ -757,11 +758,10 @@ export function openStore(path: string): Store {
     },
 
     agentReviewActivity() {
-      const running = db
-        .prepare("SELECT * FROM agent_review WHERE status = 'running' ORDER BY id LIMIT 1")
-        .get();
       return {
-        running: running === undefined ? undefined : toAgentReview(running),
+        running: rows("SELECT * FROM agent_review WHERE status = 'running' ORDER BY id").map(
+          toAgentReview,
+        ),
         queued: rows("SELECT * FROM agent_review WHERE status = 'queued' ORDER BY id").map(
           toAgentReview,
         ),

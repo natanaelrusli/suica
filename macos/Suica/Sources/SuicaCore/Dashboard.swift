@@ -112,8 +112,14 @@ public struct StatusAgentReview: Codable, Equatable, Sendable {
     public let postAs: String?
     /// `review.model`; nil for the CLI's default.
     public let model: String?
+    /// The oldest running review.
     public let running: RunningReview?
+    /// Every running review, oldest first; nil from an agent older than `review.concurrency`.
+    public let runningReviews: [RunningReview]?
     public let queued: [QueuedReview]
+
+    /// Every running review, also from an older agent that names only one.
+    public var allRunning: [RunningReview] { runningReviews ?? running.map { [$0] } ?? [] }
 }
 
 /// `suica status --json`. `configError` is also set when the state database cannot be read; then

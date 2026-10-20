@@ -25,6 +25,7 @@
     "postAs": "comment",
     "model": null,
     "running": null,
+    "runningReviews": [],
     "queued": []
   },
   "modelCli": {

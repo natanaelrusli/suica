@@ -104,6 +104,8 @@ export const configSchema = z
         maxPerDay: positiveInt.default(10),
         rereviewAfterMinutes: positiveInt.default(10),
         timeoutMinutes: positiveInt.default(20),
+        // How many reviews run at once, each with its own CLI process and checkout.
+        concurrency: z.number().int().min(1).max(4).default(2),
       })
       .strict()
       .default({}),

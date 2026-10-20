@@ -782,28 +782,40 @@ export function rereviewWaitingReasons(
 }
 
 export interface ReviewWorker {
-  /** Starts the oldest queued review unless one is running or polling is paused. */
+  /** Starts the oldest queued reviews, up to `review.concurrency` running, unless polling is paused. */
   tick(): void;
   /** Resolves once no review is running. */
   idle(): Promise<void>;
 }
 
-/** One review at a time, next to the poll loop, so a long review never delays polling. */
+/**
+ * Up to `review.concurrency` reviews at a time, next to the poll loop, so a long review never
+ * delays polling. An MR has at most one open review (`queueAgentReview` refuses another), so two
+ * runs never review the same MR.
+ */
 export function createReviewWorker(deps: ReviewDeps): ReviewWorker {
-  let running: Promise<void> | undefined;
+  const running = new Set<Promise<void>>();
   const tick = (): void => {
-    if (running !== undefined || deps.signal?.aborted === true || deps.store.isPaused()) return;
-    const row = deps.store.nextQueuedAgentReview();
-    if (row === undefined) return;
-    running = runAgentReview(deps, row).finally(() => {
-      running = undefined;
-      tick();
-    });
+    while (
+      running.size < deps.config.review.concurrency &&
+      deps.signal?.aborted !== true &&
+      !deps.store.isPaused()
+    ) {
+      const row = deps.store.nextQueuedAgentReview();
+      if (row === undefined) return;
+      // runAgentReview marks the row running before its first await, so the next
+      // nextQueuedAgentReview returns another row.
+      const run: Promise<void> = runAgentReview(deps, row).finally(() => {
+        running.delete(run);
+        tick();
+      });
+      running.add(run);
+    }
   };
   return {
     tick,
     idle: async () => {
-      while (running !== undefined) await running;
+      while (running.size > 0) await Promise.all(running);
     },
   };
 }

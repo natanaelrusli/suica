@@ -52,6 +52,7 @@ describe("parseConfig", () => {
         maxPerDay: 10,
         rereviewAfterMinutes: 10,
         timeoutMinutes: 20,
+        concurrency: 2,
       },
     });
   });
@@ -67,6 +68,12 @@ describe("parseConfig", () => {
     expect(
       parseConfig(`${MINIMAL}teams:\n  modes:\n    approved: approval\n`).teams.modes.approved,
     ).toBe("approval");
+  });
+
+  it("review.concurrency is between 1 and 4", () => {
+    expect(parseConfig(`${MINIMAL}review:\n  concurrency: 4\n`).review.concurrency).toBe(4);
+    expect(() => parseConfig(`${MINIMAL}review:\n  concurrency: 5\n`)).toThrow();
+    expect(() => parseConfig(`${MINIMAL}review:\n  concurrency: 0\n`)).toThrow();
   });
 
   it("review.approve is on by default, and can be turned off", () => {

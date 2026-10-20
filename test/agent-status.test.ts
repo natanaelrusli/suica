@@ -120,7 +120,7 @@ describe("buildStatus", () => {
           config,
           paused: false,
           lastPoll: { at: 1792148400000, status: "ok", failure: null, durationMs: 1500 },
-          reviews: { running: undefined, queued: [] },
+          reviews: { running: [], queued: [] },
         },
       }),
     ).toEqual(golden);
@@ -139,7 +139,7 @@ describe("buildStatus", () => {
         config,
         paused: false,
         lastPoll: null,
-        reviews: { running: undefined, queued: [] },
+        reviews: { running: [], queued: [] },
       },
     });
     expect(status.paths.state).toBe(join(homedir(), "s", "state.db"));
@@ -218,7 +218,7 @@ describe("store failures", () => {
     const store: StatusStore = {
       lastPoll: () => ({ at: 2, status: "failed", failure: "x", durationMs: 6 }),
       isPaused: () => true,
-      agentReviewActivity: () => ({ running: undefined, queued: [] }),
+      agentReviewActivity: () => ({ running: [], queued: [] }),
       close: () => {
         closed = true;
       },
