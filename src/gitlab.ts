@@ -280,6 +280,15 @@ export function glabPostJson(config: Config["gitlab"], exec: Exec = defaultExec)
   };
 }
 
+const usersSchema = z.array(personSchema);
+
+/** A user's display name by username; undefined when GitLab knows no such user. */
+export async function fetchPerson(rest: RestRunner, username: string): Promise<Person | undefined> {
+  const users = usersSchema.safeParse(await rest(`users?username=${encodeURIComponent(username)}`));
+  if (!users.success) throw new FetchFailure("gitlab-error", "unexpected users response shape");
+  return users.data.find((user) => user.username === username);
+}
+
 export async function fetchSnapshot(run: GraphqlRunner): Promise<Snapshot> {
   return parseSnapshot(await run(SNAPSHOT_QUERY));
 }

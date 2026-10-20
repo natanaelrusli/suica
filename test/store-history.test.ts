@@ -224,3 +224,28 @@ describe("first approvals", () => {
     expect(store.loadApprovals(0)).toEqual([approval("g/p!6", NOW + DAY)]);
   });
 });
+
+describe("unnamed usernames", () => {
+  it("lists history usernames without a name, most recently active first, up to the limit", () => {
+    const store = openStore(":memory:");
+    store.commit(
+      snapshot({
+        reviewRequested: [mr(5, { author: { username: "named", name: "Named Person" } })],
+      }),
+      [
+        event("reviewer-reviewed", NOW, "old"),
+        event("owner-reviewed", NOW + 1, "named"),
+        event("activity", NOW + 2),
+        event("reviewer-reviewed", NOW + 3, "recent"),
+        event("reviewer-reviewed", NOW + 4, "middle"),
+        event("reviewer-reviewed", NOW + 5, "recent"),
+      ],
+    );
+    expect(store.unnamedUsernames(10)).toEqual(["recent", "middle", "old"]);
+    expect(store.unnamedUsernames(1)).toEqual(["recent"]);
+
+    store.saveNames([{ username: "recent", name: "Recent Person" }]);
+    expect(store.unnamedUsernames(10)).toEqual(["middle", "old"]);
+    expect(store.loadNames().get("recent")).toBe("Recent Person");
+  });
+});
