@@ -396,6 +396,8 @@ public final class ReviewsModel {
     public private(set) var approvingKeys: Set<String> = []
     /// The outcome of the last approval, per MR.
     public private(set) var approvalNotices: [String: String] = [:]
+    /// MRs you approved from the app since it started; the views celebrate each one.
+    public private(set) var approvedCount = 0
 
     @ObservationIgnored private let client: any ReviewsClient
     @ObservationIgnored private var latestRefresh = 0
@@ -473,7 +475,9 @@ public final class ReviewsModel {
         else { return }
         approvingKeys.insert(key)
         do {
-            approvalNotices[key] = Copy.approveOutcome(try await client.approve(key: key, sha: sha).code)
+            let code = try await client.approve(key: key, sha: sha).code
+            approvalNotices[key] = Copy.approveOutcome(code)
+            if code == "approved" { approvedCount += 1 }
         } catch {
             approvalNotices[key] = MenuModel.message(for: error)
         }

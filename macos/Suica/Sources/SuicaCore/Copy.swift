@@ -651,7 +651,7 @@ public enum Copy {
     public static let systemReducesMotion =
         "Reduce motion is on in System Settings → Accessibility → Display, so the app only fades."
     public static let menuBarHeading = "Menu bar"
-    public static let menuBarBadgePicker = "Beside the penguin"
+    public static let menuBarBadgePicker = "Beside the icon"
     public static let menuBarBadgeHint = "Shown while messages need you."
     public static let popoverCounters = "Show quick actions in the popover"
     public static let startPagePicker = "Open the window on"
@@ -663,6 +663,58 @@ public enum Copy {
     public static let previewSample = "A sample tile in the chosen colour"
     public static func openSection(_ title: String) -> String { "Open \(title)" }
 
+    public static func title(_ value: MenuBarIcon) -> String {
+        switch value {
+        case .penguin: "Penguin"
+        case .watermelon: "Watermelon"
+        case .emoji: "Emoji"
+        }
+    }
+    public static func title(_ value: Backdrop) -> String {
+        switch value {
+        case .plain: "Plain"
+        case .wash: "Accent wash"
+        case .sunrise: "Sunrise"
+        case .lagoon: "Lagoon"
+        case .watermelon: "Watermelon"
+        case .aurora: "Aurora"
+        }
+    }
+    public static func title(_ value: SoundEffect) -> String {
+        switch value {
+        case .off: "Off"
+        case .pop: "Pop"
+        case .glass: "Glass"
+        case .purr: "Purr"
+        case .hero: "Hero"
+        case .tink: "Tink"
+        case .submarine: "Submarine"
+        }
+    }
+    public static func title(_ value: AppearancePreset) -> String {
+        switch value {
+        case .classic: "Classic"
+        case .watermelonParty: "Watermelon party"
+        case .midnight: "Midnight"
+        case .sunrise: "Sunrise"
+        case .zen: "Zen"
+        }
+    }
+    public static let presetsHeading = "Presets"
+    public static let presetsHint = "One click sets several choices below; change any of them afterwards."
+    public static let customColor = "Your colour"
+    public static let menuBarIconPicker = "Icon"
+    public static let menuBarEmojiField = "Emoji"
+    public static let menuBarEmojiHint = "Type or pick one emoji (⌃⌘Space opens the emoji picker)."
+    public static let backdropHeading = "Backdrop"
+    public static let backdropHint = "A soft wash behind the window's pages and the top of the popover. Aurora drifts slowly with full motion."
+    public static let funHeading = "Fun"
+    public static let celebrationsToggle = "Confetti when you send, approve or reach inbox zero"
+    public static let celebrationsNoMotion = "Confetti needs motion: it is off while Motion is Off or the system reduces motion."
+    public static let soundPicker = "Sound"
+    public static let soundHint = "Played for the same moments, at the system's alert volume."
+    public static let celebrateTry = "Try it"
+    public static let inboxZero = "Inbox zero! 🎉"
     public static func title(_ value: AccentTheme) -> String {
         switch value {
         case .glacier: "Glacier"
@@ -672,6 +724,7 @@ public enum Copy {
         case .watermelon: "Watermelon"
         case .grape: "Grape"
         case .graphite: "Graphite"
+        case .custom: "Custom"
         }
     }
 

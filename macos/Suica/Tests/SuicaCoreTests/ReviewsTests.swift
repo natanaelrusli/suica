@@ -526,3 +526,16 @@ private func withAgent(_ status: String?) -> ReviewListDocument {
         #expect(model.refreshSeconds == seconds, "\(status)")
     }
 }
+
+@MainActor @Test func onlyASuccessfulApprovalCountsForTheCelebration() async throws {
+    let client = FakeReviewsClient(lists: [.success(list("g/p!1"))])
+    await client.setDetail("g/p!1", .success(try detail("g/p!1")))
+    await client.setActionResult(.success(ActionResult(code: "head-changed")))
+    let model = ReviewsModel(client: client)
+    await model.refresh()
+    await model.approve("g/p!1")
+    #expect(model.approvedCount == 0)
+    await client.setActionResult(.success(ActionResult(code: "approved")))
+    await model.approve("g/p!1")
+    #expect(model.approvedCount == 1)
+}

@@ -24,6 +24,8 @@ private final class MemoryStore: PreferenceStore {
         #expect(settings.menuBarBadge == .count)
         #expect(settings.showsPopoverCounters)
         #expect(settings.startPage == .overview)
+        #expect(settings.menuBarIcon == .penguin && settings.menuBarEmoji == "🍉")
+        #expect(settings.backdrop == .wash && settings.celebrations && settings.sound == .off)
         #expect(settings.isDefault)
     }
 }
@@ -91,10 +93,10 @@ private final class MemoryStore: PreferenceStore {
     for badge in MenuBarBadge.allCases { #expect(badge.label(for: 0) == nil) }
 }
 
-@Test func everyThemeButSystemHasItsOwnColour() {
-    #expect(AccentTheme.system.hex == nil)
+@Test func everyThemeButSystemAndCustomHasItsOwnColour() {
+    #expect(AccentTheme.system.hex == nil && AccentTheme.custom.hex == nil)
     let colours = AccentTheme.allCases.compactMap(\.hex)
-    #expect(colours.count == AccentTheme.allCases.count - 1)
+    #expect(colours.count == AccentTheme.allCases.count - 2)
     #expect(Set(colours).count == colours.count)
     #expect(AccentTheme.allCases.allSatisfy { !$0.title.isEmpty })
 }
@@ -103,4 +105,64 @@ private final class MemoryStore: PreferenceStore {
     #expect(DisplayText.shortKey("group/sub/project!12") == "project!12")
     #expect(DisplayText.shortKey("project!3") == "project!3")
     #expect(DisplayText.shortKey("a/b\u{202E}c!4") == DisplayText.clean("b\u{202E}c!4", max: 60))
+}
+
+@MainActor @Test func theNewChoicesSurviveARestartAndReset() {
+    withFreshStore { defaults in
+        let first = AppearanceSettings(defaults: defaults)
+        first.theme = .custom
+        first.customAccent = 0x123456
+        first.menuBarIcon = .emoji
+        first.menuBarEmoji = "  👩‍💻🐧 "
+        first.backdrop = .aurora
+        first.celebrations = false
+        first.sound = .pop
+        #expect(first.menuBarEmoji == "👩‍💻")
+        #expect(first.accentHex == 0x123456)
+
+        let second = AppearanceSettings(defaults: defaults)
+        #expect(second.theme == .custom && second.customAccent == 0x123456 && second.accentHex == 0x123456)
+        #expect(second.menuBarIcon == .emoji && second.menuBarEmoji == "👩‍💻")
+        #expect(second.backdrop == .aurora && !second.celebrations && second.sound == .pop)
+        second.reset()
+        #expect(second.isDefault && AppearanceSettings(defaults: defaults).isDefault)
+    }
+}
+
+@MainActor @Test func anEmptyEmojiFallsBackToTheWatermelon() {
+    withFreshStore { defaults in
+        let settings = AppearanceSettings(defaults: defaults)
+        settings.menuBarEmoji = "   "
+        #expect(settings.menuBarEmoji == "🍉")
+    }
+}
+
+@MainActor @Test func presetsSetWhatTheyNameAndLeaveTheRest() {
+    withFreshStore { defaults in
+        let settings = AppearanceSettings(defaults: defaults)
+        settings.startPage = .messages
+        AppearancePreset.watermelonParty.apply(to: settings)
+        #expect(settings.theme == .watermelon && settings.backdrop == .watermelon && settings.menuBarIcon == .watermelon)
+        #expect(settings.celebrations && settings.sound == .pop && settings.startPage == .messages)
+        AppearancePreset.zen.apply(to: settings)
+        #expect(!settings.celebrations && settings.sound == .off && settings.motion == .reduced && settings.backdrop == .plain)
+        #expect(AppearancePreset.allCases.allSatisfy { !Copy.title($0).isEmpty && !$0.emblem.isEmpty })
+    }
+}
+
+@Test func inboxZeroIsTheBadgeGoingToNothing() {
+    #expect(Celebration.onBadgeChange(from: 2, to: 0) == .inboxZero)
+    #expect(Celebration.onBadgeChange(from: 0, to: 0) == nil)
+    #expect(Celebration.onBadgeChange(from: 3, to: 1) == nil)
+    #expect(Celebration.onBadgeChange(from: 0, to: 2) == nil)
+}
+
+@Test func soundsNameTheSystemSounds() {
+    #expect(SoundEffect.off.systemName == nil)
+    #expect(SoundEffect.submarine.systemName == "Submarine")
+    for sound in SoundEffect.allCases {
+        if let name = sound.systemName {
+            #expect(FileManager.default.fileExists(atPath: "/System/Library/Sounds/\(name).aiff"), "\(name)")
+        }
+    }
 }
