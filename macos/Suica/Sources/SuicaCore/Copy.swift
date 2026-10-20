@@ -194,6 +194,7 @@ public enum Copy {
     public static let reviewAgain = "Review again"
     public static let postToGitLab = "Post to GitLab…"
     public static let discardReview = "Discard"
+    public static let cancelReview = "Cancel review"
     public static let postConfirmTitle = "Post this review to GitLab as you?"
     public static let postConfirmMessage =
         "Inline: each finding that names a line of the reviewed diff becomes a thread on that line, and the rest is one comment. As one comment: the whole review is one comment on the MR. Each is labelled as written by an agent; lines starting with / are escaped, and mentions and links are removed."
@@ -212,6 +213,7 @@ public enum Copy {
         case "discarded": "Discarded"
         case "failed": "Failed"
         case "skipped": "Skipped"
+        case "cancelled": "Cancelled"
         default: status
         }
     }
@@ -294,6 +296,7 @@ public enum Copy {
         case "already-queued": "A review of this MR is already queued or running."
         case "posted": "Review posted to GitLab."
         case "discarded": "Review discarded."
+        case "cancelled": "Review cancelled."
         case "failed": "Posting failed. Check the MR in GitLab before posting again."
         case "bad-key": "This merge request key cannot be reviewed."
         default: "Nothing to do: the review changed in the meantime."
@@ -429,10 +432,43 @@ public enum Copy {
     // MARK: Message rows
 
     public static let youApprovedMr = "You approved this MR in GitLab"
-    public static let trackedShort = "Tracked"
-    public static let toReviewShort = "To review"
-    public static let needsYouShort = "Needs you"
     public static func recentHeading(_ count: Int) -> String { "Recent (\(count))" }
+
+    // MARK: Menu bar panel
+
+    public static func polled(_ relative: String) -> String { "polled \(relative)" }
+    public static let panelLists = "List"
+    public static func needsYouTab(_ count: Int) -> String { "Needs you · \(count)" }
+    public static func recentTab(_ count: Int) -> String { "Recent · \(count)" }
+    public static let recentEmpty = "Nothing was sent or skipped lately."
+    // MARK: Overview widgets
+
+    public static let openLogs = "Open logs"
+    public static let editConfig = "Edit config"
+    public static let readyToApproveShort = "Ready to approve"
+    public static let readyToApproveCaption = "Only minor findings left"
+    public static let tokensToday = "Tokens today"
+    public static let waitingForReviewHeading = "Waiting for your review"
+    public static let agentReviewShort = "Agent review"
+    public static let readyToPostHeading = "Ready to post"
+    public static let reviewSettings = "Settings"
+    public static let weekHeading = "Last 7 days"
+    public static let tokensHeading = "Tokens"
+    public static let systemHeading = "System"
+    public static func allItems(_ count: Int) -> String { "All \(count) →" }
+    public static func linkTo(_ title: String) -> String { "\(title) →" }
+    public static func moreInMessages(_ count: Int) -> String { "\(count) more in Messages" }
+    public static func weekSummary(requests: Int, nudges: Int, pollSuccess: Double?) -> String {
+        let polls = pollSuccess.map { " · \(Int(($0 * 100).rounded()))% of polls ok" } ?? ""
+        return "\(requests) review requests · \(nudges) nudges sent\(polls)"
+    }
+    public static func tokenTotals(day: String, week: String, month: String) -> String {
+        "24 h \(day) · 7 d \(week) · 30 d \(month)"
+    }
+    public static let pauseShort = "Pause"
+    public static let resumeShort = "Resume"
+    public static let reviewsShort = "Reviews"
+    public static let openShort = "Open"
 
     public static func outcomeLabel(_ outcome: ItemOutcome) -> String {
         switch outcome {
@@ -511,7 +547,7 @@ public enum Copy {
     public static let menuBarHeading = "Menu bar"
     public static let menuBarBadgePicker = "Beside the penguin"
     public static let menuBarBadgeHint = "Shown while messages need you."
-    public static let popoverCounters = "Show Tracked, To review and Needs you in the popover"
+    public static let popoverCounters = "Show quick actions in the popover"
     public static let startPagePicker = "Open the window on"
     public static let windowHeading = "Window"
     public static let resetAppearance = "Restore defaults"

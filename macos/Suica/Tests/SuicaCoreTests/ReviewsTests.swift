@@ -67,6 +67,11 @@ actor FakeReviewsClient: ReviewsClient {
         return try actionResult.get()
     }
 
+    func cancelAgentReview(id: Int) async throws(AgentError) -> ActionResult {
+        actions.append("cancel \(id)")
+        return try actionResult.get()
+    }
+
     func approve(key: String, sha: String) async throws(AgentError) -> ActionResult {
         actions.append("approve \(key) \(sha)")
         return try actionResult.get()
@@ -310,6 +315,25 @@ private func withAgent(_ status: String?) -> ReviewListDocument {
     await model.postAgentReview("g/p!1", inline: true)
     await model.discardAgentReview("g/p!1")
     #expect(await client.actions == ["post 9", "post 9 inline", "discard 9"])
+}
+
+@MainActor @Test func cancelStopsOnlyAQueuedOrRunningReviewAndCanBeReviewedAgain() async {
+    let client = FakeReviewsClient(lists: [.success(withAgent("posting"))])
+    let model = ReviewsModel(client: client)
+    await model.refresh()
+    await model.cancelAgentReview("g/p!1")
+    #expect(await client.actions.isEmpty)
+
+    await client.setLists([.success(withAgent("running")), .success(withAgent("cancelled"))])
+    await model.refresh()
+    await client.setActionResult(.success(ActionResult(code: "cancelled")))
+    await model.cancelAgentReview("g/p!1")
+    #expect(await client.actions == ["cancel 9"])
+    #expect(model.agentBanner == "Review cancelled.")
+    #expect(!model.hasActiveAgentReview)
+    #expect(model.offersReview(for: "g/p!1"))
+    #expect(AgentReviewInfo(id: 1, status: "queued").isCancellable)
+    #expect(!AgentReviewInfo(id: 1, status: "ready").isCancellable)
 }
 
 @MainActor @Test func aFailedAgentActionShowsTheError() async {

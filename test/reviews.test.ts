@@ -11,6 +11,7 @@ import {
   MR_DETAIL_QUERY,
   parseDiffs,
   parseMrKey,
+  resolveOwnThreads,
 } from "../src/reviews.ts";
 import type { MergeRequest } from "../src/domain.ts";
 import type { AgentReviewRow } from "../src/store.ts";
@@ -402,5 +403,62 @@ describe("approveMergeRequest", () => {
     await expect(approveMergeRequest({ post, log }, "g/p!7", "-X DELETE")).resolves.toBe(
       "bad-request",
     );
+  });
+});
+
+describe("resolveOwnThreads", () => {
+  const log = createLogger({ write: () => undefined });
+  const page = (ids: string[], next: string | null) => ({
+    data: {
+      currentUser: { username: "me" },
+      project: {
+        mergeRequest: {
+          discussions: {
+            pageInfo: { hasNextPage: next !== null, endCursor: next },
+            nodes: ids.map((id) => ({
+              id,
+              resolvable: true,
+              resolved: false,
+              notes: { nodes: [{ author: { username: "me" } }] },
+            })),
+          },
+        },
+      },
+    },
+  });
+
+  it("reads every page of discussions on the encoded MR and resolves each open thread you started", async () => {
+    const calls: [string, Readonly<Record<string, string>>][] = [];
+    const graphql = (query: string, variables: Readonly<Record<string, string>> = {}) => {
+      calls.push([query.includes("discussionToggleResolve") ? "resolve" : "list", variables]);
+      if (query.includes("discussionToggleResolve")) {
+        return Promise.resolve({ data: { discussionToggleResolve: { errors: [] } } });
+      }
+      return Promise.resolve(
+        variables["after"] === undefined ? page(["a"], "c1") : page(["b"], null),
+      );
+    };
+    await expect(resolveOwnThreads({ graphql, log }, "g/sub/p!7")).resolves.toEqual({
+      resolved: 2,
+      complete: true,
+    });
+    expect(calls).toEqual([
+      ["list", { path: "g/sub/p", iid: "7" }],
+      ["list", { path: "g/sub/p", iid: "7", after: "c1" }],
+      ["resolve", { id: "a" }],
+      ["resolve", { id: "b" }],
+    ]);
+  });
+
+  it("resolves nothing when the discussions cannot be read, and never throws", async () => {
+    const graphql = () => Promise.reject(new FetchFailure("gitlab-error", "glab failed"));
+    await expect(resolveOwnThreads({ graphql, log }, "g/p!7")).resolves.toEqual({
+      resolved: 0,
+      complete: false,
+    });
+    await expect(resolveOwnThreads({ graphql, log }, "not a key")).resolves.toEqual({
+      resolved: 0,
+      complete: false,
+    });
   });
 });

@@ -433,6 +433,10 @@ extension CLIAgentClient: ReviewsClient {
         try await action(["review", "discard", String(id), "--json"], timeout: Self.shortTimeout)
     }
 
+    public func cancelAgentReview(id: Int) async throws(AgentError) -> ActionResult {
+        try await action(["review", "cancel", String(id), "--json"], timeout: Self.shortTimeout)
+    }
+
     public func approve(key: String, sha: String) async throws(AgentError) -> ActionResult {
         try await action(["mr", "approve", key, sha, "--json"], timeout: Self.gitlabTimeout)
     }

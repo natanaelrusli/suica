@@ -519,3 +519,113 @@ export async function approveMergeRequest(
   }
   return "approved";
 }
+
+/** Discussions the Owner started on one MR, a page at a time. */
+const OWN_THREADS_QUERY = `
+query SuicaOwnThreads($path: ID!, $iid: String!, $after: String) {
+  currentUser { username }
+  project(fullPath: $path) {
+    mergeRequest(iid: $iid) {
+      discussions(first: ${DISCUSSIONS_PAGE}, after: $after) {
+        pageInfo { hasNextPage endCursor }
+        nodes { id resolvable resolved notes(first: 1) { nodes { author { username } } } }
+      }
+    }
+  }
+}`;
+const RESOLVE_THREAD_MUTATION = `
+mutation SuicaResolveThread($id: DiscussionID!) {
+  discussionToggleResolve(input: { id: $id, resolve: true }) { errors }
+}`;
+/** 2,000 discussions: far beyond any MR on this team, and a bound on the calls. */
+const MAX_THREAD_PAGES = 20;
+
+const ownThreadsSchema = z.object({
+  data: z.object({
+    currentUser: z.object({ username: z.string() }),
+    project: z.object({
+      mergeRequest: z.object({
+        discussions: z.object({
+          pageInfo: z.object({ hasNextPage: z.boolean(), endCursor: z.string().nullable() }),
+          nodes: z.array(
+            z.object({
+              id: z.string(),
+              resolvable: z.boolean(),
+              resolved: z.boolean(),
+              notes: z.object({
+                nodes: z.array(z.object({ author: z.object({ username: z.string() }).nullable() })),
+              }),
+            }),
+          ),
+        }),
+      }),
+    }),
+  }),
+});
+const resolveSchema = z.object({
+  data: z.object({ discussionToggleResolve: z.object({ errors: z.array(z.string()) }) }),
+});
+
+export interface ResolveOutcome {
+  /** Threads resolved now. */
+  readonly resolved: number;
+  /** False when a thread could not be resolved or the threads could not all be read. */
+  readonly complete: boolean;
+}
+
+/**
+ * Resolves every open thread the Owner started on the MR (the Owner's own comments and the Agent
+ * Review's inline threads), after the Owner approved it. Threads others started stay open, even
+ * where the Owner replied. Never throws.
+ */
+export async function resolveOwnThreads(
+  deps: { readonly graphql: GraphqlRunner; readonly log: Logger },
+  key: string,
+): Promise<ResolveOutcome> {
+  const parts = parseMrKey(key);
+  if (parts === undefined) return { resolved: 0, complete: false };
+  const open: string[] = [];
+  try {
+    let after: string | null = null;
+    for (let page = 0; page < MAX_THREAD_PAGES; page++) {
+      const variables: Record<string, string> = { path: parts.projectPath, iid: parts.iid };
+      if (after !== null) variables["after"] = after;
+      const { data } = ownThreadsSchema.parse(await deps.graphql(OWN_THREADS_QUERY, variables));
+      const { pageInfo, nodes } = data.project.mergeRequest.discussions;
+      const me = data.currentUser.username;
+      for (const thread of nodes) {
+        if (
+          thread.resolvable &&
+          !thread.resolved &&
+          thread.notes.nodes[0]?.author?.username === me
+        ) {
+          open.push(thread.id);
+        }
+      }
+      if (!pageInfo.hasNextPage || pageInfo.endCursor === null) {
+        after = null;
+        break;
+      }
+      after = pageInfo.endCursor;
+    }
+    if (after !== null) throw new Error("too many discussions");
+  } catch (error) {
+    deps.log.warn("own threads lookup failed", { reason: errorName(error) });
+    return { resolved: 0, complete: false };
+  }
+  let resolved = 0;
+  for (const id of open) {
+    try {
+      const { data } = resolveSchema.parse(await deps.graphql(RESOLVE_THREAD_MUTATION, { id }));
+      if (data.discussionToggleResolve.errors.length === 0) resolved++;
+    } catch (error) {
+      deps.log.warn("resolve thread failed", { reason: errorName(error) });
+    }
+  }
+  deps.log.info("own threads resolved", { mr_key: key, resolved, open: open.length });
+  return { resolved, complete: resolved === open.length };
+}
+
+function errorName(error: unknown): string {
+  return error instanceof Error ? error.name : "unknown";
+}

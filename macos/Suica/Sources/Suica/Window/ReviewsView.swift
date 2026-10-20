@@ -723,6 +723,9 @@ private struct AgentReviewTab: View {
                             Button(Copy.postToGitLab) { confirmingPost = true }
                                 .buttonStyle(.borderedProminent)
                                 .disabled(busy)
+                        } else if review.isCancellable {
+                            Button(Copy.cancelReview) { Task { await model.cancelAgentReview(key) } }
+                                .disabled(busy)
                         } else if review.status == "failed" || review.status == "skipped" {
                             Button(Copy.discardReview) { Task { await model.discardAgentReview(key) } }
                                 .disabled(busy)

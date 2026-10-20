@@ -28,6 +28,7 @@ extension UnconfiguredClient: ReviewsClient {
     func queueAgentReview(key: String) async throws(AgentError) -> ActionResult { throw AgentError.launchFailed }
     func postAgentReview(id: Int, inline: Bool) async throws(AgentError) -> ActionResult { throw AgentError.launchFailed }
     func discardAgentReview(id: Int) async throws(AgentError) -> ActionResult { throw AgentError.launchFailed }
+    func cancelAgentReview(id: Int) async throws(AgentError) -> ActionResult { throw AgentError.launchFailed }
     func approve(key: String, sha: String) async throws(AgentError) -> ActionResult { throw AgentError.launchFailed }
 }
 
@@ -112,7 +113,7 @@ struct SuicaApp: App {
 
     var body: some Scene {
         MenuBarExtra {
-            MenuView(model: model, settings: appearance, navigator: navigator)
+            MenuView(model: model, window: window, reviews: reviews, settings: appearance, navigator: navigator)
                 .appearance(appearance)
         } label: {
             Image(nsImage: PenguinGlyph.image)

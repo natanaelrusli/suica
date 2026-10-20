@@ -72,6 +72,7 @@ export const AGENT_REVIEW_STATUSES = [
   "discarded",
   "failed",
   "skipped",
+  "cancelled",
 ] as const;
 export type AgentReviewStatus = (typeof AGENT_REVIEW_STATUSES)[number];
 export type AgentReviewTrigger = "auto" | "manual";
@@ -346,6 +347,7 @@ const DONE_REVIEW_STATUSES: readonly AgentReviewStatus[] = [
   "discarded",
   "failed",
   "skipped",
+  "cancelled",
 ];
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -739,7 +741,7 @@ export function openStore(path: string): Store {
     countAgentReviews(trigger, since) {
       const row = db
         .prepare(
-          "SELECT COUNT(*) AS n FROM agent_review WHERE trigger = ? AND created_at >= ? AND status != 'skipped'",
+          "SELECT COUNT(*) AS n FROM agent_review WHERE trigger = ? AND created_at >= ? AND status NOT IN ('skipped', 'cancelled')",
         )
         .get(trigger, since);
       return row === undefined ? 0 : integer(row, "n");
