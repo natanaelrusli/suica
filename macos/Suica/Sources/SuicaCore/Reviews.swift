@@ -422,7 +422,12 @@ public final class ReviewsModel {
     /// Stops a queued or running review; the background agent stops a running one within seconds.
     public func cancelAgentReview(_ key: String) async {
         guard let review = agentReview(for: key), review.isCancellable else { return }
-        await agentAction(key) { (client: any ReviewsClient) async throws(AgentError) -> ActionResult in try await client.cancelAgentReview(id: review.id) }
+        await cancelAgentReview(id: review.id, key: key)
+    }
+
+    /// Cancels the review the Overview or the menu bar shows, which may not be in the list read yet.
+    public func cancelAgentReview(id: Int, key: String) async {
+        await agentAction(key) { (client: any ReviewsClient) async throws(AgentError) -> ActionResult in try await client.cancelAgentReview(id: id) }
     }
 
     /// True when you are among the MR's approvers.

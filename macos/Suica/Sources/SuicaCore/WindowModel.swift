@@ -75,6 +75,11 @@ public final class WindowModel {
         errorText = failure
     }
 
+    /// Reads the status alone, for the menu bar panel's last poll; a failure keeps the last good one.
+    public func refreshStatus() async {
+        if let fresh = try? await client.status() { status = fresh }
+    }
+
     public func runRefreshLoop(every interval: Duration) async {
         while !Task.isCancelled {
             await refresh()
