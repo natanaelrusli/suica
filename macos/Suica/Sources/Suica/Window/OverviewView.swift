@@ -24,7 +24,7 @@ struct OverviewView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: metrics.gap) {
                 if let text = window.errorText { NoticeBox(text: text, tint: .red) }
-                if let text = window.banner { NoticeBox(text: text, tint: .secondary) }
+                if let text = window.banner { NoticeBox(text: text, tint: .secondary, onClose: window.dismissBanner) }
                 if let status = window.status {
                     if let error = status.configError {
                         NoticeBox(text: DisplayText.clean(error, max: 400), tint: .red)
@@ -46,7 +46,6 @@ struct OverviewView: View {
             .motion(value: reviewNotice)
             .motion(value: showsReviewSettings)
             .motion(value: showsSystem)
-            .frame(maxWidth: 1400, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)
             .tracksWidth(above: 860, $wide)
         }
@@ -313,7 +312,7 @@ struct OverviewView: View {
     private func agentWidget(_ review: StatusAgentReview) -> some View {
         Card(title: Copy.agentReviewHeading, symbol: "checkmark.bubble") {
             VStack(alignment: .leading, spacing: 8) {
-                if let text = reviewNotice { NoticeBox(text: text, tint: .secondary) }
+                if let text = reviewNotice { NoticeBox(text: text, tint: .secondary) { reviewNotice = nil } }
                 if !review.allRunning.isEmpty {
                     ForEach(review.allRunning, id: \.id) { running in
                         HStack(alignment: .top) {
@@ -537,30 +536,15 @@ struct OverviewView: View {
         let model = Binding<String>(
             get: { review.model ?? "" },
             set: { name in Task { await window.setReviewModel(name.isEmpty ? nil : name) } })
-        Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 6) {
-            GridRow {
-                Text(Copy.postingPicker).foregroundStyle(.secondary)
-                Picker(Copy.postingPicker, selection: posting) {
-                    Text(Copy.postWait).tag("approval")
-                    Text(Copy.postAuto).tag("auto")
-                }
-                .labelsHidden()
-                .fixedSize()
-            }
+        VStack(alignment: .leading, spacing: 10) {
+            ChoiceInput(key: "review.post", label: Copy.postingPicker, options: ["approval", "auto"], selection: Binding(
+                get: { posting.wrappedValue }, set: { if let mode = $0 { posting.wrappedValue = mode } }))
             if review.postAs != nil {
-                GridRow {
-                    Text(Copy.postAsPicker).foregroundStyle(.secondary)
-                    Picker(Copy.postAsPicker, selection: postAs) {
-                        Text(Copy.postAsCommentOption).tag("comment")
-                        Text(Copy.postAsInlineOption).tag("inline")
-                    }
-                    .labelsHidden()
-                    .fixedSize()
+                ChoiceInput(key: "review.postAs", label: Copy.postAsPicker, options: ["comment", "inline"], selection: Binding(
+                    get: { postAs.wrappedValue }, set: { if let mode = $0 { postAs.wrappedValue = mode } }))
                     .help(Copy.postAsHint)
-                }
             }
-            GridRow {
-                Text(Copy.reviewModelPicker).foregroundStyle(.secondary)
+            LabeledContent(Copy.reviewModelPicker) {
                 Picker(Copy.reviewModelPicker, selection: model) {
                     Text(Copy.cliDefaultModel).tag("")
                     ForEach(options, id: \.self) { Text(DisplayText.clean($0, max: 60)).tag($0) }
@@ -568,10 +552,17 @@ struct OverviewView: View {
                 .labelsHidden()
                 .fixedSize()
             }
+            if let effort = review.effort {
+                LevelSlider(label: Copy.reviewEffortPicker, levels: Self.efforts, selection: Binding(
+                    get: { effort }, set: { level in if let level { Task { await window.setReviewEffort(level) } } }))
+            }
         }
         .disabled(window.savingSetting || review.post == nil)
         Text(Copy.otherModelsHint).font(.caption2).foregroundStyle(.tertiary)
     }
+
+    /// `review.effort`'s levels, lowest first, as the agent lists them.
+    private static let efforts = ["low", "medium", "high", "xhigh", "max"]
 
     private func modelSection(_ cli: ModelCliStatus) -> some View {
         let selection = Binding<String>(
@@ -580,32 +571,19 @@ struct OverviewView: View {
         let active = cli.clis.first { $0.id == cli.active }
         let chosen = cli.clis.first { $0.id == cli.selected }
         return VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Picker(Copy.modelCliPicker, selection: selection) {
-                    Text(Copy.modelCliAuto).tag("auto")
-                    ForEach(cli.clis, id: \.id) { each in
-                        Text(each.path == nil ? Copy.notInstalled(each.name) : each.name).tag(each.id)
-                    }
-                }
-                .fixedSize()
-                // Without a loadable config there is nothing to write the choice into.
-                .disabled(cli.selected == nil || window.savingSetting)
-                if window.savingSetting { ProgressView().controlSize(.small) }
-            }
-            if let active {
-                Label(Copy.modelCliInUse(active.name), systemImage: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
-                if let path = active.path {
-                    Text(path).font(.caption.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
-                }
-            } else if let chosen {
+            ModelCliCards(
+                selection: Binding(get: { selection.wrappedValue }, set: { if let choice = $0 { selection.wrappedValue = choice } }),
+                options: ["auto"] + cli.clis.map(\.id), status: cli
+            )
+            // Without a loadable config there is nothing to write the choice into.
+            .disabled(cli.selected == nil || window.savingSetting)
+            if window.savingSetting { ProgressView().controlSize(.small) }
+            if let path = active?.path {
+                Text(path).font(.caption.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
+            } else if let chosen, active == nil {
                 Label(Copy.modelCliMissing(chosen.name), systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(.orange)
-            } else if cli.selected != nil {
-                Label(Copy.noModelCliInstalled, systemImage: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange)
             }
-            Text(Copy.modelCliNote).font(.caption).foregroundStyle(.tertiary)
         }
         .font(.callout)
     }

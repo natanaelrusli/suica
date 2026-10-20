@@ -253,6 +253,19 @@ func makeBrokenConfigStatus() -> StatusDocument {
     #expect(await client.statusCalls == 2)
 }
 
+@MainActor @Test func aClosedBannerStaysClosedUntilTheNextAction() async {
+    let client = FakeDashboardClient()
+    await client.setRestart(.success(ActionResult(code: "restarted")))
+    let model = WindowModel(client: client, menu: MenuModel(client: FakeClient(states: [.success(makeState())])))
+    _ = await model.restartAgent()
+    model.dismissBanner()
+    #expect(model.banner == nil)
+    await model.refresh()
+    #expect(model.banner == nil)
+    _ = await model.restartAgent()
+    #expect(model.banner == "Agent restarted.")
+}
+
 @MainActor @Test func aFailedRestartSaysRestartingFailedNotSendingFailed() async {
     let client = FakeDashboardClient()
     await client.setRestart(.success(ActionResult(code: "failed")))
@@ -334,11 +347,13 @@ func makeBrokenConfigStatus() -> StatusDocument {
     await model.setReviewPosting("auto")
     await model.setReviewModel("opus")
     await model.setReviewModel(nil)
+    await model.setReviewEffort("high")
     let saves = await client.saveCalls
     #expect(saves.map(\.edits) == [
         [ConfigEditRequest(path: ["review", "post"], value: .string("auto"))],
         [ConfigEditRequest(path: ["review", "model"], value: .string("opus"))],
         [ConfigEditRequest(path: ["review", "model"], value: .null)],
+        [ConfigEditRequest(path: ["review", "effort"], value: .string("high"))],
     ])
     #expect(saves.allSatisfy { $0.base == "now" })
     #expect(model.banner == Copy.reviewSettingSaved)

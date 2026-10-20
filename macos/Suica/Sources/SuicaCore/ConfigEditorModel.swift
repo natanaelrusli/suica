@@ -19,6 +19,9 @@ public final class ConfigEditorModel {
         self.client = client
     }
 
+    /// The Owner closed the banner; the next load or save sets a new one.
+    public func dismissBanner() { banner = nil }
+
     private static func key(_ field: ConfigField) -> String {
         field.path.joined(separator: ".")
     }
@@ -87,6 +90,9 @@ public final class ConfigEditorModel {
     }
 
     public var isDirty: Bool { !dirtyFields.isEmpty }
+
+    /// The field has an unsaved edit.
+    public func isEdited(_ field: ConfigField) -> Bool { dirtyFields.contains(field) }
 
     /// Shown by a search that matches the field, and always while it has an unsaved edit, text the
     /// drafts do not show, or an issue, so a search never hides something waiting to be fixed.

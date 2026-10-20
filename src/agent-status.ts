@@ -81,6 +81,8 @@ export interface StatusJson {
         readonly postAs: string;
         /** `review.model`; null for the CLI's default. */
         readonly model: string | null;
+        /** `review.effort`: low, medium, high, xhigh or max. */
+        readonly effort: string;
       })
     | null;
   readonly modelCli: {
@@ -196,6 +198,7 @@ export function buildStatus(input: StatusInput): StatusJson {
           post: config.review.post,
           postAs: config.review.postAs,
           model: config.review.model ?? null,
+          effort: config.review.effort,
           ...buildReviewActivity(loaded.reviews, config.review.model),
         },
     modelCli: {

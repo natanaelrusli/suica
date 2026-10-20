@@ -32,10 +32,10 @@ struct MenuView: View {
                 NoticeBox(text: text, tint: .red)
             }
             if let text = model.banner {
-                NoticeBox(text: text, tint: .secondary)
+                NoticeBox(text: text, tint: .secondary, onClose: model.dismissBanner)
             }
             if let text = cancelNotice {
-                NoticeBox(text: text, tint: .secondary)
+                NoticeBox(text: text, tint: .secondary) { cancelNotice = nil }
             }
             lists
             Divider()

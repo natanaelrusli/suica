@@ -29,6 +29,7 @@ private func data(_ text: String) -> Data { Data(text.utf8) }
     #expect(status.agentReview?.auto == true && status.agentReview?.model == nil)
     #expect(status.agentReview?.post == "approval")
     #expect(status.agentReview?.postAs == "comment")
+    #expect(status.agentReview?.effort == "medium")
     #expect(status.agentReview?.running == nil && status.agentReview?.queued.isEmpty == true)
     #expect(status.agentReview?.allRunning.isEmpty == true)
 }
@@ -120,7 +121,7 @@ private func data(_ text: String) -> Data { Data(text.utf8) }
     let config = try decodeDocument(ConfigDocument.self, from: contract("config.v1.json"))
     #expect(config.path == "/tmp/config.yaml" && config.exists && config.sha256 == "0")
     #expect(config.issues.isEmpty)
-    #expect(config.fields.count == 41)
+    #expect(config.fields.count == 42)
     let first = try #require(config.fields.first)
     #expect(first.path == ["gitlab", "hostname"] && first.type == .string)
     #expect(first.value == .string("repo.example") && first.effective == .string("repo.example"))
@@ -128,6 +129,13 @@ private func data(_ text: String) -> Data { Data(text.utf8) }
 
     let timeout = try #require(config.fields.first { $0.path == ["gitlab", "timeoutSeconds"] })
     #expect(timeout.type == .int && timeout.value == .null && timeout.effective == .int(60))
+    #expect(timeout.unit == "seconds" && timeout.max == nil && timeout.format == nil)
+    #expect(first.format == "hostname" && first.unit == nil)
+    let effort = try #require(config.fields.first { $0.path == ["review", "effort"] })
+    #expect(effort.type == .level && effort.options == ["low", "medium", "high", "xhigh", "max"])
+    #expect(effort.effective == .string("medium"))
+    let concurrency = try #require(config.fields.first { $0.path == ["review", "concurrency"] })
+    #expect(concurrency.max == 4 && concurrency.unit == "reviews")
 
     let mode = try #require(config.fields.first { $0.path == ["teams", "modes", "nudge"] })
     #expect(mode.type == .enum && mode.options?.isEmpty == false)

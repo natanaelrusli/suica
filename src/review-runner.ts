@@ -32,8 +32,12 @@ export class RunFailure extends Error {
   }
 }
 
-/** Enough for a review; higher levels cost much more time and tokens. */
-const REVIEW_EFFORT = "medium";
+/** How hard the CLI thinks, lowest first; `review.effort` picks one. */
+export const REVIEW_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
+export type ReviewEffort = (typeof REVIEW_EFFORTS)[number];
+
+/** Codex stops at xhigh. */
+const codexEffort = (effort: ReviewEffort): string => (effort === "max" ? "xhigh" : effort);
 
 /** Read-only tools only: the MR is untrusted, so no shell, no web, no edits. */
 const CLAUDE_TOOLS = ["Read", "Grep", "Glob", "Skill"] as const;
@@ -49,6 +53,8 @@ export function buildInvocation(
   workDir: string,
   /** The CLI's default when undefined. */
   model?: string,
+  /** Medium is enough for a review; higher levels cost much more time and tokens. */
+  effort: ReviewEffort = "medium",
 ): Invocation {
   if (cli === "claude") {
     return {
@@ -60,7 +66,7 @@ export function buildInvocation(
         "--verbose",
         ...(model === undefined ? [] : ["--model", model]),
         "--effort",
-        REVIEW_EFFORT,
+        effort,
         "--tools",
         ...CLAUDE_TOOLS,
         "--allowedTools",
@@ -83,7 +89,7 @@ export function buildInvocation(
       "-c",
       "mcp_servers={}",
       "-c",
-      `model_reasoning_effort="${REVIEW_EFFORT}"`,
+      `model_reasoning_effort="${codexEffort(effort)}"`,
       "-C",
       workDir,
       "-o",

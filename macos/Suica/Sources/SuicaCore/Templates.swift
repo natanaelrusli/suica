@@ -242,6 +242,12 @@ public final class TemplateEditorModel {
         self.client = client
     }
 
+    /// The Owner closed the banner; the next save or reset sets a new one.
+    public func dismissBanner() { banner = nil }
+
+    /// The Owner closed the problem with the last save; the next save checks again.
+    public func dismissIssue() { issue = nil }
+
     public var selected: MessageTemplate? { document?.templates.first { $0.name == selectedName } }
     public var teamsTemplates: [MessageTemplate] { document?.templates.filter { !$0.isAlert } ?? [] }
     public var alertTemplates: [MessageTemplate] { document?.templates.filter(\.isAlert) ?? [] }

@@ -19,6 +19,12 @@ public final class MenuModel {
         self.client = client
     }
 
+    /// The Owner closed the banner; the next action sets a new one.
+    public func dismissBanner() { banner = nil }
+
+    /// The Owner closed the error; the next refresh shows it again if the agent still fails.
+    public func dismissError() { errorText = nil }
+
     public var isPaused: Bool { state?.paused ?? false }
 
     /// Messages that need the Owner to act.

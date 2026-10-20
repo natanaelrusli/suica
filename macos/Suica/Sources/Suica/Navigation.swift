@@ -109,6 +109,15 @@ enum SidebarItem: Hashable {
         if case .statistics(let page) = self { page } else { nil }
     }
 
+    /// Configuration's own pages: its categories, the templates and Appearance. The sidebar marks
+    /// Configuration for them, and the toolbar offers the way back to its overview.
+    var isUnderConfiguration: Bool {
+        switch self {
+        case .settings, .templates, .section(.appearance): true
+        default: false
+        }
+    }
+
     /// The nested page's name, shown after the section's in the window title.
     var subtitle: String? {
         switch self {
@@ -171,8 +180,8 @@ struct SidebarNode: Identifiable {
     }
 
     /// The sidebar's three groups: what needs you, what happened, and how the agent and the app
-    /// are set up. Statistics' pages are nested under it, as are Configuration's categories and
-    /// the templates.
+    /// are set up. Statistics' pages are nested under it; Configuration's categories, the
+    /// templates and Appearance open from its overview page.
     static let groups: [(title: String, nodes: [SidebarNode])] = [
         (Copy.workGroup, [SidebarNode(.overview), SidebarNode(.reviews), SidebarNode(.messages)]),
         (
@@ -188,14 +197,7 @@ struct SidebarNode: Identifiable {
         ),
         (
             Copy.settingsGroup,
-            [
-                SidebarNode(
-                    .configuration,
-                    children: ConfigCategory.known.map {
-                        SidebarNode(item: .settings($0), title: $0.title, symbol: $0.symbol, tint: $0.tint)
-                    } + [SidebarNode(item: .templates, title: Copy.messageTemplates, symbol: "text.bubble", tint: .blue)]),
-                SidebarNode(.appearance),
-            ]
+            [SidebarNode(.configuration)]
         ),
     ]
 }

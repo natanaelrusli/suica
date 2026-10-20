@@ -112,6 +112,8 @@ public struct StatusAgentReview: Codable, Equatable, Sendable {
     public let postAs: String?
     /// `review.model`; nil for the CLI's default.
     public let model: String?
+    /// `review.effort`; nil from an agent without the setting.
+    public var effort: String?
     /// The oldest running review.
     public let running: RunningReview?
     /// Every running review, oldest first; nil from an agent older than `review.concurrency`.
@@ -263,7 +265,8 @@ public struct UsageDocument: Codable, Equatable, Sendable {
 // MARK: - Config
 
 public enum FieldType: String, Codable, Equatable, Sendable {
-    case string, int, bool, `enum`, clock, weekdays, stringList, emailMap, unknown
+    /// `level`: an `enum` whose options run from least to most, shown as a slider.
+    case string, int, bool, `enum`, level, clock, weekdays, stringList, emailMap, unknown
 
     /// A type this app does not know decodes as `.unknown` and is shown read-only.
     public init(from decoder: any Decoder) throws {
@@ -280,6 +283,12 @@ public struct ConfigField: Codable, Equatable, Sendable {
     public let options: [String]?
     public let placeholder: String?
     public let restartNote: String?
+    /// `int` only: what the number counts; seconds, minutes and hours make it a duration.
+    public var unit: String?
+    /// `int` only, when the agent caps it; every number is at least 1.
+    public var max: Int?
+    /// `string` only: `hostname` or `path`, for the input the editor shows.
+    public var format: String?
     /// As written in the file; `.null` when absent.
     public let value: JSONValue
     /// After defaults; `.null` when absent or when the config is invalid.

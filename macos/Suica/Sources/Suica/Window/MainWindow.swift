@@ -2,21 +2,50 @@ import AppKit
 import SuicaCore
 import SwiftUI
 
-/// A coloured box for a message above a section's content.
-/// The parent animates its appearance with `.motion(value:)`.
+/// A coloured box for a message above a section's content, with × to close it.
+/// The parent animates its appearance with `.motion(value:)`; closing animates by itself.
 struct NoticeBox: View {
     let text: String
     let tint: Color
+    /// Clears the notice at its source, so it stays closed after the page goes away. Without it,
+    /// × hides the box here until its text changes.
+    var onClose: (() -> Void)?
+    /// False for a failure that is the whole page, where closing would leave it blank.
+    var closable = true
+    @State private var closed: String?
     @Environment(\.motionLevel) private var motion
 
     var body: some View {
-        Text(text)
-            .font(.callout)
-            .textSelection(.enabled)
+        if closed != text {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(text)
+                    .font(.callout)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                if closable { closeButton }
+            }
             .padding(8)
-            .frame(maxWidth: .infinity, alignment: .leading)
             .background(tint.opacity(0.15), in: RoundedRectangle(cornerRadius: 6))
-            .transition(Motion.reveal(motion))
+            .transition(Motion.notice(motion))
+        }
+    }
+
+    private var closeButton: some View {
+        Button {
+            withMotion(Motion.content, motion) {
+                closed = text
+                onClose?()
+            }
+        } label: {
+            Image(systemName: "xmark")
+                .font(.caption.weight(.semibold))
+                .padding(2)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.borderless)
+        .foregroundStyle(.secondary)
+        .help(Copy.closeNotice)
+        .accessibilityLabel(Copy.closeNotice)
     }
 }
 
@@ -154,6 +183,7 @@ struct MainWindow: View {
     let settings: AppearanceSettings
     @Bindable var navigator: Navigator
     @State private var columns: NavigationSplitViewVisibility = .all
+    @State private var statisticsOpen = false
     /// Bumped for a row each time it is picked, so only its icon bounces.
     @State private var picks: [SidebarItem: Int] = [:]
     @Environment(\.motionLevel) private var motion
@@ -169,13 +199,34 @@ struct MainWindow: View {
         NavigationSplitView(columnVisibility: $columns) {
             sidebar
         } detail: {
-            // A new identity per section, so the old page fades out while the new one comes in.
-            ZStack {
-                page(current)
-                    .id(current)
-                    .transition(Motion.page(motion))
+            // The sidebar floats over this column and AppKit reports its width as a leading safe
+            // area, changed frame by frame while the sidebar opens or closes. Scrolling pages
+            // picked that change up only at the end, so they slid over and then jumped to their new
+            // width. Handing the width to the page as its own padding on every frame makes it
+            // resize and reflow along with the sidebar. The GeometryReader keeps the safe area, so
+            // its size is the column's whatever the page asks for and cannot feed back.
+            GeometryReader { proxy in
+                // A new identity per section, so the old page fades out while the new one comes in.
+                ZStack {
+                    page(current)
+                        .id(current)
+                        .transition(Motion.page(motion))
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .safeAreaPadding(.leading, proxy.safeAreaInsets.leading)
+                .ignoresSafeArea(.container, edges: .leading)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .toolbar {
+                // Configuration's pages have no sidebar row of their own: the way back is here.
+                if current.isUnderConfiguration {
+                    ToolbarItem(placement: .navigation) {
+                        Button { navigator.selection = .section(.configuration) } label: {
+                            Label(Copy.backToConfiguration, systemImage: "chevron.backward")
+                        }
+                        .help(Copy.backToConfiguration)
+                    }
+                }
+            }
             .background(alignment: .top) {
                 BackdropView(backdrop: settings.backdrop, strength: settings.backdrop == .wash ? 0.1 : 0.2)
                     .frame(height: 220)
@@ -183,9 +234,6 @@ struct MainWindow: View {
             }
             .motion(Motion.page, value: current)
         }
-        // The detail column follows the sidebar with the same curve, so pages resize smoothly
-        // rather than snapping to their new width at the end.
-        .motion(Motion.sidebar, value: columns)
         .navigationTitle(title)
         .frame(minWidth: 760, minHeight: 480)
         // The Dock icon exists only while the window does.
@@ -209,18 +257,44 @@ struct MainWindow: View {
         .task { await window.runRefreshLoop(every: .seconds(30)) }
     }
 
+    /// The row the sidebar marks: Configuration for its own pages, which have no row.
+    private var sidebarSelection: Binding<SidebarItem?> {
+        Binding(
+            get: { navigator.selection.map { $0.isUnderConfiguration ? .section(.configuration) : $0 } },
+            set: { navigator.selection = $0 })
+    }
+
     private var sidebar: some View {
-        List(selection: $navigator.selection) {
+        List(selection: sidebarSelection) {
             ForEach(SidebarNode.groups, id: \.title) { group in
                 Section(group.title) {
-                    OutlineGroup(group.nodes, children: \.children) { node in
+                    ForEach(group.nodes) { node in
                         sidebarRow(node)
+                            .tag(node.item)
+                            // The row is already marked on Configuration's own pages, so picking it
+                            // changes no selection: the tap itself goes back to the overview.
+                            .simultaneousGesture(
+                                TapGesture().onEnded { navigator.selection = node.item },
+                                isEnabled: node.item == .section(.configuration))
+                        // The sidebar list slid the rows below while it drew new rows at their
+                        // final place, so they overlapped (an OutlineGroup's expanding did the
+                        // same). The rows are added without that, and each fades in on its own.
+                        if let children = node.children, statisticsOpen {
+                            ForEach(Array(children.enumerated()), id: \.element.id) { index, child in
+                                sidebarRow(child)
+                                    .padding(.leading, 14)
+                                    .staggeredEntrance(index)
+                                    .tag(child.item)
+                            }
+                        }
                     }
                 }
             }
         }
-        .onChange(of: navigator.selection) { _, picked in
+        .onChange(of: navigator.selection, initial: true) { _, picked in
             if let picked { picks[picked, default: 0] += 1 }
+            // A Statistics page opened from elsewhere shows where it sits.
+            if picked?.statisticsPage != nil { statisticsOpen = true }
         }
         .safeAreaInset(edge: .top) {
             // Fixed width, so the header slides away with the sidebar instead of squeezing.
@@ -237,7 +311,26 @@ struct MainWindow: View {
 
     private func sidebarRow(_ node: SidebarNode) -> some View {
         Label {
-            Text(node.title)
+            HStack(spacing: 4) {
+                Text(node.title)
+                if node.children != nil {
+                    Spacer(minLength: 0)
+                    Button {
+                        statisticsOpen.toggle()
+                    } label: {
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.semibold))
+                            .rotationEffect(.degrees(statisticsOpen ? 90 : 0))
+                            .motion(value: statisticsOpen)
+                            .frame(width: 16, height: 16)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(.secondary)
+                    .help(statisticsOpen ? Copy.collapse : Copy.expand)
+                    .accessibilityLabel(statisticsOpen ? Copy.collapse : Copy.expand)
+                }
+            }
         } icon: {
             SidebarIcon(symbol: node.symbol, tint: node.tint)
                 .symbolEffect(.bounce, value: motion == .full ? picks[node.item, default: 0] : 0)
@@ -276,7 +369,7 @@ struct MainWindow: View {
             }
         case .usage: UsageView(window: window)
         case .logs: LogsView(window: window)
-        case .configuration: ConfigurationView(window: window, editor: editor, category: item.category)
+        case .configuration: ConfigurationView(window: window, editor: editor, navigator: navigator, category: item.category)
         case .appearance: AppearanceView(settings: settings)
         }
     }

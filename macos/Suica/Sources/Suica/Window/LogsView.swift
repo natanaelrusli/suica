@@ -21,13 +21,15 @@ struct LogsView: View {
                 if model.truncated { NoticeBox(text: Copy.logTruncated(LogsModel.maxEntries), tint: .secondary) }
                 entries(folder: folder)
             } else if window.errorText != nil {
-                NoticeBox(text: Copy.logFolderUnknown, tint: .red)
+                NoticeBox(text: Copy.logFolderUnknown, tint: .red, closable: false)
                 Spacer()
             } else {
                 ProgressView(Copy.loading).frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .padding(20)
+        .motion(value: model.errorText)
+        .motion(value: model.truncated)
         .searchable(text: $query, prompt: Copy.searchLogs)
         // Restarted when the stream or folder changes; cancelled when the page goes away.
         .task(id: "\(folder ?? "")|\(model.stream.rawValue)") {

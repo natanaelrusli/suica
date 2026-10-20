@@ -364,7 +364,13 @@ async function runCli(
   /** Each step of the run, as the Owner sees it. */
   onActivity: (text: string) => void,
 ): Promise<RunResult> {
-  const invocation = buildInvocation(cli, prompt, workDir, deps.config.review.model);
+  const invocation = buildInvocation(
+    cli,
+    prompt,
+    workDir,
+    deps.config.review.model,
+    deps.config.review.effort,
+  );
   const describe = (line: string): string[] =>
     cli === "claude" ? describeClaudeEvent(line, workDir) : describeCodexEvent(line);
   let stdout: string;

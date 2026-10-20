@@ -23,7 +23,7 @@ describe("CONFIG_FIELDS", () => {
     const fromFields = CONFIG_FIELDS.map((field) => field.path.join(".")).sort();
     expect(fromFields).toEqual(fromSchema);
     expect(new Set(fromFields).size).toBe(fromFields.length);
-    expect(fromFields).toHaveLength(41);
+    expect(fromFields).toHaveLength(42);
   });
 
   it("gives enum fields the schema's options", () => {
@@ -36,8 +36,28 @@ describe("CONFIG_FIELDS", () => {
     expect(rereview?.type).toBe("enum");
     expect(rereview?.options).toEqual(["auto", "approval", "dry-run"]);
     for (const field of CONFIG_FIELDS) {
-      expect(field.options !== undefined).toBe(field.type === "enum");
+      expect(field.options !== undefined).toBe(field.type === "enum" || field.type === "level");
     }
+  });
+
+  it("lists the review effort as a level from low to max", () => {
+    const effort = CONFIG_FIELDS.find((field) => field.path.join(".") === "review.effort");
+    expect(effort?.type).toBe("level");
+    expect(effort?.options).toEqual(["low", "medium", "high", "xhigh", "max"]);
+  });
+
+  it("gives every duration the unit its key names, and units and formats only where they fit", () => {
+    for (const field of CONFIG_FIELDS) {
+      const key = field.path.at(-1) ?? "";
+      const named = /(Seconds|Minutes|Hours)$/.exec(key)?.[1]?.toLowerCase();
+      if (named !== undefined) expect(field.unit, key).toBe(named);
+      if (field.unit !== undefined || field.max !== undefined) expect(field.type, key).toBe("int");
+      if (field.format !== undefined) expect(field.type, key).toBe("string");
+    }
+    const concurrency = CONFIG_FIELDS.find(
+      (field) => field.path.join(".") === "review.concurrency",
+    );
+    expect(concurrency?.max).toBe(4);
   });
 
   it("lists the re-review wait as a whole number of minutes", () => {

@@ -22,7 +22,6 @@ struct StatisticsPageView: View {
             .padding(20)
             .motion(value: window.errorText)
             .motion(value: window.stats)
-            .frame(maxWidth: 900, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
     }

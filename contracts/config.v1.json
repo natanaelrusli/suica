@@ -10,6 +10,7 @@
       "type": "string",
       "label": "GitLab host",
       "help": "GitLab host passed to glab --hostname",
+      "format": "hostname",
       "value": "repo.example",
       "effective": "repo.example"
     },
@@ -18,46 +19,52 @@
       "type": "string",
       "label": "glab executable",
       "help": "glab executable",
+      "format": "path",
       "value": null,
       "effective": "glab"
     },
     {
       "path": ["gitlab", "timeoutSeconds"],
       "type": "int",
-      "label": "glab timeout (seconds)",
+      "label": "glab timeout",
       "help": "Timeout for one glab call",
+      "unit": "seconds",
       "value": null,
       "effective": 60
     },
     {
       "path": ["polling", "activeSeconds"],
       "type": "int",
-      "label": "Active poll interval (seconds)",
+      "label": "Active poll interval",
       "help": "Poll interval while you are at the Mac",
+      "unit": "seconds",
       "value": null,
       "effective": 120
     },
     {
       "path": ["polling", "idleSeconds"],
       "type": "int",
-      "label": "Idle poll interval (seconds)",
+      "label": "Idle poll interval",
       "help": "Poll interval while idle",
+      "unit": "seconds",
       "value": null,
       "effective": 300
     },
     {
       "path": ["polling", "idleAfterSeconds"],
       "type": "int",
-      "label": "Idle after (seconds)",
+      "label": "Idle after",
       "help": "No keyboard or mouse input for this long counts as idle",
+      "unit": "seconds",
       "value": null,
       "effective": 300
     },
     {
       "path": ["polling", "maxBackoffSeconds"],
       "type": "int",
-      "label": "Maximum backoff (seconds)",
+      "label": "Maximum backoff",
       "help": "Cap for the exponential backoff after failed polls",
+      "unit": "seconds",
       "value": null,
       "effective": 300
     },
@@ -66,6 +73,7 @@
       "type": "int",
       "label": "Summary threshold",
       "help": "More notifications than this in one poll become one summary",
+      "unit": "notifications",
       "value": null,
       "effective": 4
     },
@@ -91,22 +99,25 @@
       "label": "Teams MCP command",
       "help": "Command that starts the Teams MCP server",
       "placeholder": "~/.config/teams-mcp/run.sh",
+      "format": "path",
       "value": null,
       "effective": null
     },
     {
       "path": ["teams", "startTimeoutSeconds"],
       "type": "int",
-      "label": "Teams start timeout (seconds)",
+      "label": "Teams start timeout",
       "help": "Timeout for the Teams MCP to start",
+      "unit": "seconds",
       "value": null,
       "effective": 30
     },
     {
       "path": ["teams", "callTimeoutSeconds"],
       "type": "int",
-      "label": "Teams call timeout (seconds)",
+      "label": "Teams call timeout",
       "help": "Timeout for one Teams MCP call",
+      "unit": "seconds",
       "value": null,
       "effective": 60
     },
@@ -182,24 +193,27 @@
     {
       "path": ["teams", "reminderAfterHours"],
       "type": "int",
-      "label": "Reminder after (hours)",
+      "label": "Reminder after",
       "help": "Reminder if the Reviewer is still UNREVIEWED this long after the nudge",
+      "unit": "hours",
       "value": null,
       "effective": 24
     },
     {
       "path": ["teams", "noticeDebounceMinutes"],
       "type": "int",
-      "label": "Notice debounce (minutes)",
+      "label": "Notice debounce",
       "help": "Review Notice after this long without further change by you",
+      "unit": "minutes",
       "value": null,
       "effective": 10
     },
     {
       "path": ["teams", "rereviewAfterMinutes"],
       "type": "int",
-      "label": "Re-review after (minutes)",
+      "label": "Re-review after",
       "help": "Re-review Nudge after your latest push has stood this long without a newer one",
+      "unit": "minutes",
       "value": null,
       "effective": 10
     },
@@ -208,6 +222,7 @@
       "type": "int",
       "label": "Messages per Reviewer",
       "help": "At most this many messages per MR per Reviewer",
+      "unit": "messages",
       "value": null,
       "effective": 2
     },
@@ -217,6 +232,7 @@
       "label": "Templates folder",
       "help": "Folder with template files",
       "placeholder": "~/.config/suica/templates",
+      "format": "path",
       "value": null,
       "effective": null
     },
@@ -297,10 +313,20 @@
       "effective": null
     },
     {
+      "path": ["review", "effort"],
+      "type": "level",
+      "label": "Review effort",
+      "help": "How hard the CLI thinks during a review: claude --effort, or Codex reasoning effort (max is xhigh there). Higher levels take longer and use more tokens",
+      "options": ["low", "medium", "high", "xhigh", "max"],
+      "value": null,
+      "effective": "medium"
+    },
+    {
       "path": ["review", "maxChangedLines"],
       "type": "int",
-      "label": "Largest MR (changed lines)",
+      "label": "Largest MR",
       "help": "Larger MRs are skipped",
+      "unit": "changed lines",
       "value": null,
       "effective": 800
     },
@@ -309,22 +335,25 @@
       "type": "int",
       "label": "Automatic reviews per day",
       "help": "At most this many automatic reviews in 24 hours; reviews you start yourself do not count",
+      "unit": "reviews",
       "value": null,
       "effective": 10
     },
     {
       "path": ["review", "rereviewAfterMinutes"],
       "type": "int",
-      "label": "Re-review after (minutes)",
+      "label": "Re-review after",
       "help": "Re-review an MR after the Author's latest push has stood this long without a newer one",
+      "unit": "minutes",
       "value": null,
       "effective": 10
     },
     {
       "path": ["review", "timeoutMinutes"],
       "type": "int",
-      "label": "Review timeout (minutes)",
+      "label": "Review timeout",
       "help": "A review run is stopped after this long",
+      "unit": "minutes",
       "value": null,
       "effective": 20
     },
@@ -333,6 +362,8 @@
       "type": "int",
       "label": "Reviews at once",
       "help": "How many Agent Reviews run at the same time, 1 to 4, each with its own CLI process and checkout",
+      "unit": "reviews",
+      "max": 4,
       "value": null,
       "effective": 2
     },
@@ -343,6 +374,7 @@
       "help": "SQLite state file",
       "placeholder": "~/Library/Application Support/suica/state.db",
       "restartNote": "A new path starts with an empty history and a fresh baseline.",
+      "format": "path",
       "value": null,
       "effective": null
     }

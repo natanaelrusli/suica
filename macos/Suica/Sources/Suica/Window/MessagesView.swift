@@ -41,10 +41,10 @@ struct MessagesView: View {
                     .listRowSeparator(.hidden)
             }
             if let text = model.errorText {
-                NoticeBox(text: text, tint: .red).listRowSeparator(.hidden)
+                NoticeBox(text: text, tint: .red, onClose: model.dismissError).listRowSeparator(.hidden)
             }
             if let text = model.banner {
-                NoticeBox(text: text, tint: .secondary).listRowSeparator(.hidden)
+                NoticeBox(text: text, tint: .secondary, onClose: model.dismissBanner).listRowSeparator(.hidden)
             }
             if let teams = model.state?.teams {
                 let attention = teams.attention.filter(group.contains)

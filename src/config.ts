@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { parse } from "yaml";
 import { z } from "zod";
 import { MODEL_CLI_CHOICES } from "./model-cli.ts";
+import { REVIEW_EFFORTS } from "./review-runner.ts";
 import { errorMessage } from "./util.ts";
 
 const positiveInt = z.number().int().positive();
@@ -100,6 +101,8 @@ export const configSchema = z
           .string()
           .regex(/^[A-Za-z0-9][\w.:[\]/-]*$/, "must be a model name such as sonnet, opus or haiku")
           .optional(),
+        // How hard the CLI thinks: claude --effort, codex model_reasoning_effort (max is xhigh there).
+        effort: z.enum(REVIEW_EFFORTS).default("medium"),
         maxChangedLines: positiveInt.default(800),
         maxPerDay: positiveInt.default(10),
         rereviewAfterMinutes: positiveInt.default(10),
