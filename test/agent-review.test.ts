@@ -1270,7 +1270,7 @@ describe("postAgentReview and discardAgentReview", () => {
     /** Post deps where the approve call is recorded apart from the note, and can be refused. */
     function approvingDeps(
       h: ReturnType<typeof harness>,
-      options: { conflict?: boolean; config?: typeof APPROVING } = {},
+      options: { conflict?: boolean; crash?: boolean; config?: typeof APPROVING } = {},
     ) {
       const base = postDeps(h);
       const approvals: unknown[] = [];
@@ -1279,6 +1279,7 @@ describe("postAgentReview and discardAgentReview", () => {
         if (options.conflict === true) {
           return Promise.reject(new FetchFailure("gitlab-error", "conflict", 409));
         }
+        if (options.crash === true) return Promise.reject(new Error("broken pipe"));
         approvals.push({ path, fields });
         return Promise.resolve();
       };
@@ -1333,6 +1334,17 @@ describe("postAgentReview and discardAgentReview", () => {
         detail: "Not approved: the source branch moved since the review.",
       });
       expect(await postAgentReview(deps, id)).toBe("nothing");
+    });
+
+    it("keeps the review posted when the approval call itself throws", async () => {
+      const { h, id } = await readyWith(CLEAN_REREVIEW, true);
+      const { deps } = approvingDeps(h, { crash: true });
+      expect(await postAgentReview(deps, id)).toBe("posted");
+      expect(h.db.getAgentReview(id)).toMatchObject({
+        status: "posted",
+        approved: false,
+        detail: "Not approved: GitLab refused the approval.",
+      });
     });
   });
 

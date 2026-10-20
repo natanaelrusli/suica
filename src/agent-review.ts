@@ -832,7 +832,14 @@ async function approveAfterPost(
   ) {
     return;
   }
-  const outcome = await approveMergeRequest(deps, row.mrKey, row.headSha);
+  // The note is already on GitLab: whatever the approval does, the row stays posted.
+  let outcome: ApproveOutcome;
+  try {
+    outcome = await approveMergeRequest(deps, row.mrKey, row.headSha);
+  } catch (error) {
+    deps.log.warn("agent review approval crashed", { id: row.id, reason: errorName(error) });
+    outcome = "failed";
+  }
   deps.log.info("agent review approval", { id: row.id, mr_key: row.mrKey, outcome });
   const note =
     outcome === "approved"
