@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   buildPrompt,
   createReviewWorker,
+  cancelAgentReview,
   discardAgentReview,
   findSkillDir,
   postAgentReview,
@@ -850,6 +851,45 @@ describe("runAgentReview", () => {
     expect(same.prompt()).not.toContain("re-review");
   });
 
+  it("stops the CLI when the Owner cancels the running review, and reports no failure", async () => {
+    const h = harness();
+    const queued = h.queue();
+    let cwd = "";
+    const exec: Exec = (file, args, options) => {
+      if (file !== "/bin/claude") return h.deps.exec(file, args, options);
+      cwd = options.cwd ?? "";
+      // The app cancels from another process while the CLI runs.
+      expect(cancelAgentReview(h.db, queued.id, NOW)).toBe(true);
+      return new Promise((_, reject) => {
+        options.signal?.addEventListener("abort", () => {
+          reject(Object.assign(new Error("aborted"), { code: "ABORT_ERR" }));
+        });
+      });
+    };
+    await runAgentReview({ ...h.deps, exec, cancelCheckMs: 5 }, queued);
+
+    expect(h.db.getAgentReview(queued.id)).toMatchObject({
+      status: "cancelled",
+      detail: "Cancelled by you.",
+      body: null,
+    });
+    expect(h.notifications).toEqual([]);
+    expect(h.logs.some((line) => line.includes("agent review cancelled"))).toBe(true);
+    expect(existsSync(cwd)).toBe(false);
+  });
+
+  it("drops a review the Owner cancelled just as the CLI finished, without notifying", async () => {
+    const h = harness();
+    const queued = h.queue();
+    const exec: Exec = (file, args, options) => {
+      if (file === "/bin/claude") cancelAgentReview(h.db, queued.id, NOW);
+      return h.deps.exec(file, args, options);
+    };
+    await runAgentReview({ ...h.deps, exec }, queued);
+    expect(h.db.getAgentReview(queued.id)?.status).toBe("cancelled");
+    expect(h.notifications).toEqual([]);
+  });
+
   it("does nothing for a row that is no longer queued", async () => {
     const h = harness();
     const queued = h.queue();
@@ -1366,6 +1406,24 @@ describe("postAgentReview and discardAgentReview", () => {
         detail: "Not approved: GitLab refused the approval.",
       });
     });
+  });
+
+  it("cancels a queued review so it never runs, and nothing that is already done", async () => {
+    const h = harness();
+    const queued = h.queue();
+    expect(cancelAgentReview(h.db, queued.id, NOW)).toBe(true);
+    await runAgentReview(h.deps, queued);
+    expect(h.db.getAgentReview(queued.id)?.status).toBe("cancelled");
+    expect(h.calls).toEqual([]);
+    // A cancelled review does not count toward review.maxPerDay, and Review again can queue one.
+    expect(h.db.countAgentReviews("manual", 0)).toBe(0);
+    expect(cancelAgentReview(h.db, queued.id, NOW)).toBe(false);
+    const again = h.db.queueAgentReview("g/p!7", "manual", NOW);
+    expect(again).toBeDefined();
+
+    await runAgentReview(h.deps, h.db.getAgentReview(again ?? 0) ?? queued);
+    expect(cancelAgentReview(h.db, again ?? 0, NOW)).toBe(false);
+    expect(h.db.getAgentReview(again ?? 0)?.status).toBe("ready");
   });
 
   it("discards a ready review so the MR can be queued again", async () => {

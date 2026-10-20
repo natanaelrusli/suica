@@ -194,6 +194,7 @@ public enum Copy {
     public static let reviewAgain = "Review again"
     public static let postToGitLab = "Post to GitLab…"
     public static let discardReview = "Discard"
+    public static let cancelReview = "Cancel review"
     public static let postConfirmTitle = "Post this review to GitLab as you?"
     public static let postConfirmMessage =
         "Inline: each finding that names a line of the reviewed diff becomes a thread on that line, and the rest is one comment. As one comment: the whole review is one comment on the MR. Each is labelled as written by an agent; lines starting with / are escaped, and mentions and links are removed."
@@ -212,6 +213,7 @@ public enum Copy {
         case "discarded": "Discarded"
         case "failed": "Failed"
         case "skipped": "Skipped"
+        case "cancelled": "Cancelled"
         default: status
         }
     }
@@ -294,6 +296,7 @@ public enum Copy {
         case "already-queued": "A review of this MR is already queued or running."
         case "posted": "Review posted to GitLab."
         case "discarded": "Review discarded."
+        case "cancelled": "Review cancelled."
         case "failed": "Posting failed. Check the MR in GitLab before posting again."
         case "bad-key": "This merge request key cannot be reviewed."
         default: "Nothing to do: the review changed in the meantime."

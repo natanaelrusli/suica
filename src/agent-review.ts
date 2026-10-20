@@ -37,6 +37,8 @@ const CLONE_TIMEOUT_MS = 5 * 60_000;
 const GIT_TIMEOUT_MS = 30_000;
 const MAX_NOTE_CHARS = 100_000;
 const MAX_SKILL_CHARS = 120_000;
+/** How often a running review checks whether the Owner cancelled it from another process. */
+const CANCEL_CHECK_MS = 2_000;
 
 // MARK: - Sanitising for GitLab
 
@@ -289,6 +291,8 @@ export interface ReviewDeps {
   readonly home?: string;
   /** Stops a run in progress when the agent shuts down. */
   readonly signal?: AbortSignal;
+  /** How often a run checks whether it was cancelled; CANCEL_CHECK_MS when absent. */
+  readonly cancelCheckMs?: number;
   /** Post with `review.post: auto`; without them a ready review always waits for the Owner. */
   readonly post?: PostRunner;
   readonly postJson?: PostJsonRunner;
@@ -392,7 +396,10 @@ async function checkout(deps: ReviewDeps, detail: MrDetailJson, repoDir: string)
         project.data.ssh_url_to_repo,
         repoDir,
       ],
-      { timeoutMs: CLONE_TIMEOUT_MS },
+      {
+        timeoutMs: CLONE_TIMEOUT_MS,
+        ...(deps.signal === undefined ? {} : { signal: deps.signal }),
+      },
     );
     const { stdout } = await deps.exec("git", ["-C", repoDir, "rev-parse", "HEAD"], {
       timeoutMs: GIT_TIMEOUT_MS,
@@ -444,20 +451,39 @@ async function prepareRereview(
   return { previousSha: previous.headSha, incremental: typeof files !== "string" };
 }
 
-/** Runs one queued review to ready, skipped or failed. Never throws. */
-export async function runAgentReview(deps: ReviewDeps, row: AgentReviewRow): Promise<void> {
-  const { store, log } = deps;
+/**
+ * Runs one queued review to ready, skipped, failed or cancelled. Never throws. The Owner cancels a running
+ * review from another process (`suica review cancel`) by moving its row on: the run notices within
+ * `cancelCheckMs`, stops the clone or the CLI, and leaves the row as cancelled.
+ */
+export async function runAgentReview(baseDeps: ReviewDeps, row: AgentReviewRow): Promise<void> {
+  const { store, log } = baseDeps;
   if (
     !store.transitionAgentReview(
       row.id,
       ["queued"],
       "running",
-      { startedAt: deps.now() },
-      deps.now(),
+      { startedAt: baseDeps.now() },
+      baseDeps.now(),
     )
   ) {
     return;
   }
+  const cancel = new AbortController();
+  const watch = setInterval(() => {
+    if (store.getAgentReview(row.id)?.status !== "running") cancel.abort();
+  }, baseDeps.cancelCheckMs ?? CANCEL_CHECK_MS);
+  watch.unref();
+  const deps: ReviewDeps = {
+    ...baseDeps,
+    signal:
+      baseDeps.signal === undefined
+        ? cancel.signal
+        : AbortSignal.any([baseDeps.signal, cancel.signal]),
+  };
+  const cancelled = (): void => {
+    log.info("agent review cancelled", { id: row.id, mr_key: row.mrKey });
+  };
   const started = deps.now();
   let workDir: string | undefined;
   let mrTitle = row.mrKey;
@@ -516,7 +542,7 @@ export async function runAgentReview(deps: ReviewDeps, row: AgentReviewRow): Pro
       store.recordTokenUsage({ at: deps.now(), purpose: "review", ...result.tokens });
     }
     const model = result.model ?? deps.config.review.model;
-    store.transitionAgentReview(
+    const ready = store.transitionAgentReview(
       row.id,
       ["running"],
       "ready",
@@ -530,6 +556,10 @@ export async function runAgentReview(deps: ReviewDeps, row: AgentReviewRow): Pro
       },
       deps.now(),
     );
+    if (!ready) {
+      cancelled();
+      return;
+    }
     log.info("agent review ready", {
       id: row.id,
       mr_key: row.mrKey,
@@ -573,13 +603,18 @@ export async function runAgentReview(deps: ReviewDeps, row: AgentReviewRow): Pro
         : error instanceof Error
           ? `${error.name}: ${error.message}`
           : "unknown error";
-    store.transitionAgentReview(
-      row.id,
-      ["running"],
-      skipped ? "skipped" : "failed",
-      { detail: reason },
-      deps.now(),
-    );
+    if (
+      !store.transitionAgentReview(
+        row.id,
+        ["running"],
+        skipped ? "skipped" : "failed",
+        { detail: reason },
+        deps.now(),
+      )
+    ) {
+      cancelled();
+      return;
+    }
     log.warn(skipped ? "agent review skipped" : "agent review failed", {
       id: row.id,
       mr_key: row.mrKey,
@@ -590,6 +625,7 @@ export async function runAgentReview(deps: ReviewDeps, row: AgentReviewRow): Pro
       body: `${mrTitle.slice(0, 60)}: ${reason.slice(0, 120)}`,
     });
   } finally {
+    clearInterval(watch);
     if (workDir !== undefined) rmSync(workDir, { recursive: true, force: true });
   }
 }
@@ -859,6 +895,21 @@ async function approveAfterPost(
 
 function errorName(error: unknown): string {
   return error instanceof Error ? error.name : "unknown";
+}
+
+/**
+ * Stops a queued or running review. A running one is stopped by the background agent, which
+ * watches its row (see `runAgentReview`). The MR is not queued again on its own until it changes;
+ * the Owner can press Review again.
+ */
+export function cancelAgentReview(store: Store, id: number, now: number): boolean {
+  return store.transitionAgentReview(
+    id,
+    ["queued", "running"],
+    "cancelled",
+    { detail: "Cancelled by you." },
+    now,
+  );
 }
 
 /** Drops a review that is waiting, failed or skipped, so the MR can be reviewed again. */

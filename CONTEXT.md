@@ -37,7 +37,7 @@ A notification to the Owner that someone else reviewed or replied on one of the 
 _Avoid_: Update, notification
 
 **Agent Review**:
-A review of an MR that the agent writes with a language model following a skill, in answer to a Review Request or when the Owner asks for one, and posts to GitLab as the Owner once the Owner approves it.
+A review of an MR that the agent writes with a language model following a skill, in answer to a Review Request or when the Owner asks for one, and posts to GitLab as the Owner once the Owner approves it. The Owner can cancel it while it is queued or running.
 _Avoid_: Auto review, bot review
 
 **Agent Re-review**:

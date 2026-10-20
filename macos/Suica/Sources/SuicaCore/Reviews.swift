@@ -29,7 +29,7 @@ public struct ReviewerInfo: Codable, Equatable, Sendable {
 /// The newest Agent Review of an MR.
 public struct AgentReviewInfo: Codable, Equatable, Sendable {
     public let id: Int
-    /// queued, running, ready, posting, posted, discarded, failed or skipped; kept as sent.
+    /// queued, running, ready, posting, posted, discarded, failed, skipped or cancelled; kept as sent.
     public let status: String
     public let cli: String?
     /// As the CLI reported it, else `review.model`; nil until known or for the CLI's default.
@@ -64,6 +64,8 @@ public struct AgentReviewInfo: Codable, Equatable, Sendable {
 
     /// The agent is still on it: the page refreshes until it is done.
     public var isActive: Bool { status == "queued" || status == "running" || status == "posting" }
+    /// Queued or running: the Owner can still cancel it. A post in flight cannot be.
+    public var isCancellable: Bool { status == "queued" || status == "running" }
     /// Written and waiting for the Owner to post or discard it.
     public var isReady: Bool { status == "ready" }
     /// Another review can be started.
@@ -348,6 +350,8 @@ public protocol ReviewsClient: Sendable {
     func postAgentReview(id: Int, inline: Bool) async throws(AgentError) -> ActionResult
     /// discarded or nothing.
     func discardAgentReview(id: Int) async throws(AgentError) -> ActionResult
+    /// Stops a queued or running review: cancelled or nothing.
+    func cancelAgentReview(id: Int) async throws(AgentError) -> ActionResult
     /// Approves the MR as you at `sha`: approved, head-changed, bad-request or failed.
     func approve(key: String, sha: String) async throws(AgentError) -> ActionResult
 }
@@ -413,6 +417,12 @@ public final class ReviewsModel {
     public func discardAgentReview(_ key: String) async {
         guard let review = agentReview(for: key) else { return }
         await agentAction(key) { (client: any ReviewsClient) async throws(AgentError) -> ActionResult in try await client.discardAgentReview(id: review.id) }
+    }
+
+    /// Stops a queued or running review; the background agent stops a running one within seconds.
+    public func cancelAgentReview(_ key: String) async {
+        guard let review = agentReview(for: key), review.isCancellable else { return }
+        await agentAction(key) { (client: any ReviewsClient) async throws(AgentError) -> ActionResult in try await client.cancelAgentReview(id: review.id) }
     }
 
     /// True when you are among the MR's approvers.

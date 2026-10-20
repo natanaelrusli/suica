@@ -16,7 +16,7 @@ import {
   fetchMrDetail,
   parseMrKey,
 } from "./reviews.ts";
-import { discardAgentReview, postAgentReview } from "./agent-review.ts";
+import { cancelAgentReview, discardAgentReview, postAgentReview } from "./agent-review.ts";
 import { parseTemplateRequest, saveTemplate, showTemplates } from "./template-edit.ts";
 import { defaultTemplatesPath } from "./teams/templates.ts";
 import type { TemplateSaveJson } from "./template-edit.ts";
@@ -30,7 +30,7 @@ import { OUTBOX_STATUSES } from "./teams/types.ts";
 import { buildUsage } from "./usage.ts";
 
 const USAGE =
-  "usage: suica <once|status|state|stats|usage|pause|resume|pending [--all]|send <id> [--json]|skip <id> [--json]|retry <id> [--json]|selftest|reviews --json|mr <key> --json|mr approve <key> <sha> --json|review queue <key> --json|review post <id> [--inline|--comment] --json|review discard <id> --json|config show --json|config set --json|templates show --json|templates set --json|agent install|agent uninstall|agent restart --json>\n";
+  "usage: suica <once|status|state|stats|usage|pause|resume|pending [--all]|send <id> [--json]|skip <id> [--json]|retry <id> [--json]|selftest|reviews --json|mr <key> --json|mr approve <key> <sha> --json|review queue <key> --json|review post <id> [--inline|--comment] --json|review discard <id> --json|review cancel <id> --json|config show --json|config set --json|templates show --json|templates set --json|agent install|agent uninstall|agent restart --json>\n";
 const TEAMS_DISABLED = "teams is disabled: set teams.enabled to true in the config\n";
 const SHOWN_WITH_ALL = 50;
 
@@ -219,9 +219,10 @@ async function reviewsJson(): Promise<number> {
 }
 
 /**
- * `suica review queue|post|discard`: the background agent runs queued reviews after its next poll;
- * post and discard act on a review that waits for the Owner. `post` takes `--inline` or
- * `--comment`, else `review.postAs`. Each prints `{"status": …}`.
+ * `suica review queue|post|discard|cancel`: the background agent runs queued reviews after its next
+ * poll; post and discard act on a review that waits for the Owner, and cancel stops a queued or
+ * running one. `post` takes `--inline` or `--comment`, else `review.postAs`. Each prints
+ * `{"status": …}`.
  */
 async function reviewCommand(argv: readonly string[]): Promise<number> {
   const [action, target] = [argv[1], argv[2]];
@@ -238,13 +239,17 @@ async function reviewCommand(argv: readonly string[]): Promise<number> {
       return id === undefined ? reply("already-queued", true) : reply("queued", true);
     }
     const id = parseId(target);
-    if (id === undefined || (action !== "post" && action !== "discard")) {
+    if (id === undefined || !["post", "discard", "cancel"].includes(action ?? "")) {
       process.stderr.write(USAGE);
       return 2;
     }
     if (action === "discard") {
       const done = discardAgentReview(store, id, Date.now());
       return reply(done ? "discarded" : "nothing", done);
+    }
+    if (action === "cancel") {
+      const done = cancelAgentReview(store, id, Date.now());
+      return reply(done ? "cancelled" : "nothing", done);
     }
     const mode = argv.includes("--inline")
       ? "inline"
