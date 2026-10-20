@@ -6,7 +6,14 @@ import { createReviewWorker, queueAutomaticReviews } from "./agent-review.ts";
 import type { ReviewWorker } from "./agent-review.ts";
 import { defaultExec } from "./exec.ts";
 import { createFailureTracker } from "./failures.ts";
-import { fetchSnapshot, glabPost, glabPostJson, glabRest, glabRunner } from "./gitlab.ts";
+import {
+  fetchPerson,
+  fetchSnapshot,
+  glabPost,
+  glabPostJson,
+  glabRest,
+  glabRunner,
+} from "./gitlab.ts";
 import { createLogger } from "./log.ts";
 import type { Logger } from "./log.ts";
 import { loadAlerts } from "./alerts.ts";
@@ -84,6 +91,7 @@ export function createRuntime(configPath: string, signal?: AbortSignal): Runtime
 
   const deps: PollDeps = {
     fetchSnapshot: () => fetchSnapshot(run),
+    lookupPerson: (username) => fetchPerson(glabRest(config.gitlab), username),
     store,
     notifier,
     alerts,

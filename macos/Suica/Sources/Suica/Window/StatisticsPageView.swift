@@ -68,8 +68,11 @@ struct StatisticsPageView: View {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(alignment: .firstTextBaseline) {
                     Text(name).font(.body.weight(.medium)).lineLimit(1)
-                    Text("@\(DisplayText.clean(person.username, max: 60))")
-                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    // The name is the username until the agent has looked it up.
+                    if person.name != person.username {
+                        Text("@\(DisplayText.clean(person.username, max: 60))")
+                            .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    }
                     Spacer(minLength: 8)
                     Text(Copy.mergeRequestCount(person.mergeRequests))
                         .font(.callout.weight(.semibold).monospacedDigit())
@@ -127,7 +130,9 @@ struct StatisticsPageView: View {
                 }
                 Text(
                     "\(DisplayText.shortKey(row.mrKey)) · \(Copy.openedOn(opened)) · "
-                        + Copy.approvedBy(DisplayText.clean(row.approver.name, max: 80))
+                        + Copy.approvedBy(
+                            DisplayText.clean(row.approver.name, max: 80),
+                            username: DisplayText.clean(row.approver.username, max: 60))
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)

@@ -495,7 +495,9 @@ public enum Copy {
     public static let slowestApprovalsHint =
         "Your MRs by the time from opening to the first approval, as the agent saw it. Counted from this version of Suica on."
     public static func mergeRequestCount(_ n: Int) -> String { n == 1 ? "1 MR" : "\(n) MRs" }
-    public static func approvedBy(_ name: String) -> String { "First approved by \(name)" }
+    public static func approvedBy(_ name: String, username: String) -> String {
+        name == username ? "First approved by @\(username)" : "First approved by \(name) (@\(username))"
+    }
     public static func openedOn(_ date: String) -> String { "opened \(date)" }
     /// A wait: minutes up to a day, then days and hours.
     public static func duration(_ m: Int) -> String {

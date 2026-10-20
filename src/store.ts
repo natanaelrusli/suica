@@ -178,8 +178,11 @@ export interface Store {
   loadHistory(since: number): HistoryRows;
   /** The first approvals seen at or after `since`, oldest first. */
   loadApprovals(since: number): FirstApproval[];
-  /** Username to display name, for everyone seen on an open MR, as last seen. */
+  /** Username to display name, for everyone seen on an open MR or looked up, as last seen. */
   loadNames(): Map<string, string>;
+  /** Usernames in the history without a display name, the most recently active first. */
+  unnamedUsernames(limit: number): string[];
+  saveNames(people: readonly Person[]): void;
   /** The latest poll (the last recorded of a tie), undefined when the log is empty. */
   lastPoll(): PollLogEntry | undefined;
   /** Also drops rows older than the retention. */
@@ -772,6 +775,24 @@ export function openStore(path: string): Store {
           .all()
           .map((row) => [text(row, "username"), text(row, "name")] as const),
       );
+    },
+
+    unnamedUsernames(limit) {
+      return db
+        .prepare(
+          `SELECT username FROM history_event
+           WHERE username != '' AND username NOT IN (SELECT username FROM person_name)
+           GROUP BY username ORDER BY MAX(at) DESC LIMIT ?`,
+        )
+        .all(limit)
+        .map((row) => text(row, "username"));
+    },
+
+    saveNames(people) {
+      const insert = db.prepare(
+        "INSERT OR REPLACE INTO person_name (username, name) VALUES (?, ?)",
+      );
+      for (const person of people) insert.run(person.username, person.name);
     },
 
     loadApprovals(since) {
