@@ -12,7 +12,12 @@ import { execFailure } from "./exec.ts";
 import type { Notification } from "./format.ts";
 import { descriptionSha } from "./gitlab.ts";
 import type { GraphqlRunner, PostJsonRunner, PostRunner, RestRunner } from "./gitlab.ts";
-import { extractFindings, isCleanReview, placeFinding, summaryWithout } from "./inline-review.ts";
+import {
+  extractFindings,
+  isReadyToApprove,
+  placeFinding,
+  summaryWithout,
+} from "./inline-review.ts";
 import type { Finding, ThreadPosition } from "./inline-review.ts";
 import type { Logger } from "./log.ts";
 import { detectModelClis, resolveModelCli } from "./model-cli.ts";
@@ -871,9 +876,9 @@ const APPROVAL_DETAIL: Record<Exclude<ApproveOutcome, "approved">, string> = {
 };
 
 /**
- * With `review.approve`, approves the MR as the Owner at the reviewed commit once a clean Agent
- * Re-review (no finding, every previous item fixed) is posted. A first review never approves,
- * and a refused approval is noted on the row, never retried.
+ * With `review.approve`, approves the MR as the Owner at the reviewed commit once a review that is
+ * ready to approve (only Minor or Nit left) is posted, then resolves the Owner's own threads. A
+ * refused approval is noted on the row, never retried.
  */
 async function approveAfterPost(
   deps: Pick<ReviewDeps, "store" | "now" | "log" | "graphql"> & {
@@ -885,10 +890,9 @@ async function approveAfterPost(
 ): Promise<void> {
   if (
     !deps.config.review.approve ||
-    row.previousSha === null ||
     row.headSha === null ||
     row.body === null ||
-    !isCleanReview(row.body)
+    !isReadyToApprove(row.body)
   ) {
     return;
   }

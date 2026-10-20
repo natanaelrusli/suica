@@ -331,6 +331,9 @@ const SINCE_DIFFS = [
 const PREVIOUS_REVIEW = "# Code review\n## Findings\n1. Major `a.ts:1` — old problem.\n";
 const CLEAN_REREVIEW =
   "# Re-review\n## Previous review\n- Major `a.ts:1` old problem — fixed, the guard is there.\n## Findings\nNone.\n";
+const MINOR_REVIEW =
+  "# Review\n## Findings\n### Minor\n1. `a.ts:1` naming.\n### Nit\n1. `a.ts:2` spacing.\n";
+const MAJOR_REVIEW = "# Review\n## Findings\n### Major\n1. `a.ts:1` wrong total.\n";
 const OPEN_REREVIEW =
   "# Re-review\n## Previous review\n- Major `a.ts:1` old problem — not fixed.\n## Findings\nNone.\n";
 
@@ -1483,16 +1486,24 @@ describe("postAgentReview and discardAgentReview", () => {
       expect(untouched.resolved).toEqual([]);
     });
 
-    it("does not approve a re-review with an open previous item, a first review, or with review.approve off", async () => {
+    it("approves a first review with only Minor or Nit findings", async () => {
+      const { h, id } = await readyWith(MINOR_REVIEW, false);
+      const { deps, approvals } = approvingDeps(h);
+      expect(await postAgentReview(deps, id)).toBe("posted");
+      expect(approvals).toHaveLength(1);
+      expect(h.db.getAgentReview(id)?.approved).toBe(true);
+    });
+
+    it("does not approve with a serious finding or open previous item, or with review.approve off", async () => {
       const open = await readyWith(OPEN_REREVIEW, true);
       const a = approvingDeps(open.h);
       expect(await postAgentReview(a.deps, open.id)).toBe("posted");
       expect(a.approvals).toEqual([]);
       expect(open.h.db.getAgentReview(open.id)).toMatchObject({ approved: false, detail: "" });
 
-      const first = await readyWith(CLEAN_REREVIEW, false);
-      const b = approvingDeps(first.h);
-      await postAgentReview(b.deps, first.id);
+      const major = await readyWith(MAJOR_REVIEW, false);
+      const b = approvingDeps(major.h);
+      await postAgentReview(b.deps, major.id);
       expect(b.approvals).toEqual([]);
 
       const off = await readyWith(CLEAN_REREVIEW, true);
@@ -1500,6 +1511,15 @@ describe("postAgentReview and discardAgentReview", () => {
       await postAgentReview(c.deps, off.id);
       expect(c.approvals).toEqual([]);
       expect(off.h.db.getAgentReview(off.id)?.approved).toBe(false);
+    });
+
+    it("is off by default, so approving stays one click in the app", async () => {
+      const { h, id } = await readyWith(CLEAN_REREVIEW, true);
+      const { deps, approvals } = approvingDeps(h, {
+        config: parseConfig("gitlab:\n  hostname: gitlab.example\n"),
+      });
+      await postAgentReview(deps, id);
+      expect(approvals).toEqual([]);
     });
 
     it("notes a refused approval on the posted review and does not retry", async () => {

@@ -240,8 +240,10 @@ export function planTeams(input: PlanInput): TeamsPlan {
     }
     // An Agent Review is announced with its findings once its comments show (or, should they
     // never be counted, after the debounce), and that announces those comments too. A re-review
-    // the agent approved after says so, and that announces the approval too.
+    // the agent approved after says so, and that announces the approval too; an approved first
+    // review is announced with its findings, and the approval follows as its own notice.
     const posted = state.postedReviews.get(mr.key);
+    const reapproved = posted?.approved === true && posted.rereview;
     if (
       live &&
       posted !== undefined &&
@@ -251,7 +253,7 @@ export function planTeams(input: PlanInput): TeamsPlan {
       intents.push({
         dedupeKey: `findings:${posted.id}`,
         kind: "notice",
-        variant: posted.approved
+        variant: reapproved
           ? "notice.reapproved"
           : posted.rereview
             ? "notice.refindings"
@@ -264,7 +266,7 @@ export function planTeams(input: PlanInput): TeamsPlan {
         ...round,
         noticedNotes: round.myNotes,
         announcedReview: posted.id,
-        ...(posted.approved ? { noticedState: APPROVED } : {}),
+        ...(reapproved ? { noticedState: APPROVED } : {}),
       };
     }
     const variant = noticeVariant(round);

@@ -66,7 +66,7 @@ public enum Copy {
         case "notice.refindings":
             "To the Author, after an Agent Re-review is posted on their MR, with its new findings per severity."
         case "notice.reapproved":
-            "To the Author, after a clean Agent Re-review is posted and the agent approved their MR (review.approve)."
+            "To the Author, after an Agent Re-review is posted and the agent approved their MR (review.approve)."
         default: ""
         }
     }

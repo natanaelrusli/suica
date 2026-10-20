@@ -46,7 +46,7 @@ describe("parseConfig", () => {
         auto: true,
         post: "approval",
         postAs: "comment",
-        approve: true,
+        approve: false,
         skill: "madhani:madhani-code-review",
         maxChangedLines: 800,
         maxPerDay: 10,
@@ -69,9 +69,9 @@ describe("parseConfig", () => {
     ).toBe("approval");
   });
 
-  it("review.approve is on by default", () => {
-    expect(parseConfig(MINIMAL).review.approve).toBe(true);
-    expect(parseConfig(`${MINIMAL}review:\n  approve: false\n`).review.approve).toBe(false);
+  it("review.approve is off by default, so approving stays one click", () => {
+    expect(parseConfig(MINIMAL).review.approve).toBe(false);
+    expect(parseConfig(`${MINIMAL}review:\n  approve: true\n`).review.approve).toBe(true);
   });
 
   it("review.rereviewAfterMinutes defaults to 10", () => {
