@@ -20,6 +20,7 @@ import type { ReviewDeps } from "../src/agent-review.ts";
 import { parseConfig } from "../src/config.ts";
 import type { Exec, ExecOptions } from "../src/exec.ts";
 import { FetchFailure, descriptionSha } from "../src/gitlab.ts";
+import type { GraphqlRunner } from "../src/gitlab.ts";
 import type { Notification } from "../src/format.ts";
 import { createLogger } from "../src/log.ts";
 import type { DetectedCli } from "../src/model-cli.ts";
@@ -1143,6 +1144,43 @@ describe("createReviewWorker", () => {
   });
 });
 
+/** GitLab's discussions on the MR as the own-threads query reads them, and the resolve calls. */
+function threadsGitLab(
+  threads: { id: string; author: string; resolved?: boolean; resolvable?: boolean }[] = [],
+  options: { refuse?: string } = {},
+) {
+  const resolved: string[] = [];
+  const graphql: GraphqlRunner = (query, variables = {}) => {
+    if (query.includes("discussionToggleResolve")) {
+      const id = variables["id"] ?? "";
+      if (id === options.refuse) {
+        return Promise.resolve({ data: { discussionToggleResolve: { errors: ["no"] } } });
+      }
+      resolved.push(id);
+      return Promise.resolve({ data: { discussionToggleResolve: { errors: [] } } });
+    }
+    return Promise.resolve({
+      data: {
+        currentUser: { username: "me" },
+        project: {
+          mergeRequest: {
+            discussions: {
+              pageInfo: { hasNextPage: false, endCursor: null },
+              nodes: threads.map((thread) => ({
+                id: thread.id,
+                resolvable: thread.resolvable ?? true,
+                resolved: thread.resolved ?? false,
+                notes: { nodes: [{ author: { username: thread.author } }] },
+              })),
+            },
+          },
+        },
+      },
+    });
+  };
+  return { graphql, resolved };
+}
+
 describe("postAgentReview and discardAgentReview", () => {
   async function ready() {
     const h = harness();
@@ -1163,6 +1201,7 @@ describe("postAgentReview and discardAgentReview", () => {
       store: h.db,
       config: CONFIG,
       now: () => NOW,
+      graphql: threadsGitLab().graphql,
       log: silent,
       rest: (path: string) =>
         Promise.resolve(
@@ -1330,9 +1369,15 @@ describe("postAgentReview and discardAgentReview", () => {
     /** Post deps where the approve call is recorded apart from the note, and can be refused. */
     function approvingDeps(
       h: ReturnType<typeof harness>,
-      options: { conflict?: boolean; crash?: boolean; config?: typeof APPROVING } = {},
+      options: {
+        conflict?: boolean;
+        crash?: boolean;
+        config?: typeof APPROVING;
+        gitlab?: ReturnType<typeof threadsGitLab>;
+      } = {},
     ) {
       const base = postDeps(h);
+      const gitlab = options.gitlab ?? threadsGitLab();
       const approvals: unknown[] = [];
       const post = (path: string, fields: Readonly<Record<string, string>>) => {
         if (!path.endsWith("/approve")) return base.deps.post(path, fields);
@@ -1344,7 +1389,7 @@ describe("postAgentReview and discardAgentReview", () => {
         return Promise.resolve();
       };
       return {
-        deps: { ...base.deps, post, config: options.config ?? APPROVING },
+        deps: { ...base.deps, post, graphql: gitlab.graphql, config: options.config ?? APPROVING },
         approvals,
         notes: base.notes,
       };
@@ -1363,6 +1408,46 @@ describe("postAgentReview and discardAgentReview", () => {
         approved: true,
         detail: `Approved as you at commit ${SHA.slice(0, 8)}.`,
       });
+    });
+
+    it("resolves the open threads you started once it approved, and says how many", async () => {
+      const { h, id } = await readyWith(CLEAN_REREVIEW, true);
+      const gitlab = threadsGitLab([
+        { id: "gid://gitlab/Discussion/1", author: "me" },
+        { id: "gid://gitlab/Discussion/2", author: "me", resolved: true },
+        { id: "gid://gitlab/Discussion/3", author: "alice" },
+        { id: "gid://gitlab/Discussion/4", author: "me", resolvable: false },
+        { id: "gid://gitlab/Discussion/5", author: "me" },
+      ]);
+      const { deps } = approvingDeps(h, { gitlab });
+      expect(await postAgentReview(deps, id)).toBe("posted");
+      expect(gitlab.resolved).toEqual(["gid://gitlab/Discussion/1", "gid://gitlab/Discussion/5"]);
+      expect(h.db.getAgentReview(id)?.detail).toBe(
+        `Approved as you at commit ${SHA.slice(0, 8)}. Resolved 2 of your threads.`,
+      );
+    });
+
+    it("says to check GitLab when a thread could not be resolved, and resolves none without approval", async () => {
+      const { h, id } = await readyWith(CLEAN_REREVIEW, true);
+      const gitlab = threadsGitLab(
+        [
+          { id: "gid://gitlab/Discussion/1", author: "me" },
+          { id: "gid://gitlab/Discussion/2", author: "me" },
+        ],
+        { refuse: "gid://gitlab/Discussion/2" },
+      );
+      expect(await postAgentReview(approvingDeps(h, { gitlab }).deps, id)).toBe("posted");
+      expect(h.db.getAgentReview(id)?.detail).toBe(
+        `Approved as you at commit ${SHA.slice(0, 8)}. Resolved 1 of your threads; check GitLab for the others.`,
+      );
+
+      const refused = await readyWith(CLEAN_REREVIEW, true);
+      const untouched = threadsGitLab([{ id: "gid://gitlab/Discussion/1", author: "me" }]);
+      await postAgentReview(
+        approvingDeps(refused.h, { conflict: true, gitlab: untouched }).deps,
+        refused.id,
+      );
+      expect(untouched.resolved).toEqual([]);
     });
 
     it("does not approve a re-review with an open previous item, a first review, or with review.approve off", async () => {

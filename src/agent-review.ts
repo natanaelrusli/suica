@@ -25,8 +25,8 @@ import {
   RunFailure,
 } from "./review-runner.ts";
 import type { RunResult } from "./review-runner.ts";
-import { approveMergeRequest, fetchMrDetail, parseMrKey } from "./reviews.ts";
-import type { ApproveOutcome, DiffFileJson, MrDetailJson } from "./reviews.ts";
+import { approveMergeRequest, fetchMrDetail, parseMrKey, resolveOwnThreads } from "./reviews.ts";
+import type { ApproveOutcome, DiffFileJson, MrDetailJson, ResolveOutcome } from "./reviews.ts";
 import type { AgentReviewRow, Store } from "./store.ts";
 
 /** Agent Review: an MR reviewed by a coding agent CLI with a skill, posted only after approval. */
@@ -787,7 +787,7 @@ function inlineDetail(posted: number, total: number): string {
  * failed post goes back to ready with a note to check GitLab before trying again.
  */
 export async function postAgentReview(
-  deps: Pick<ReviewDeps, "store" | "now" | "log" | "rest"> & {
+  deps: Pick<ReviewDeps, "store" | "now" | "log" | "rest" | "graphql"> & {
     readonly config: Pick<Config, "review">;
     readonly post: PostRunner;
     readonly postJson: PostJsonRunner;
@@ -855,7 +855,7 @@ const APPROVAL_DETAIL: Record<Exclude<ApproveOutcome, "approved">, string> = {
  * and a refused approval is noted on the row, never retried.
  */
 async function approveAfterPost(
-  deps: Pick<ReviewDeps, "store" | "now" | "log"> & {
+  deps: Pick<ReviewDeps, "store" | "now" | "log" | "graphql"> & {
     readonly config: Pick<Config, "review">;
     readonly post: PostRunner;
   },
@@ -882,7 +882,7 @@ async function approveAfterPost(
   deps.log.info("agent review approval", { id: row.id, mr_key: row.mrKey, outcome });
   const note =
     outcome === "approved"
-      ? `Approved as you at commit ${row.headSha.slice(0, 8)}.`
+      ? `Approved as you at commit ${row.headSha.slice(0, 8)}. ${resolvedNote(await resolveOwnThreads(deps, row.mrKey))}`.trim()
       : APPROVAL_DETAIL[outcome];
   deps.store.transitionAgentReview(
     row.id,
@@ -891,6 +891,13 @@ async function approveAfterPost(
     { approved: outcome === "approved", detail: [detail, note].filter(Boolean).join(" ") },
     deps.now(),
   );
+}
+
+function resolvedNote(threads: ResolveOutcome): string {
+  const count =
+    threads.resolved === 1 ? "1 of your threads" : `${threads.resolved} of your threads`;
+  if (threads.complete) return threads.resolved === 0 ? "" : `Resolved ${count}.`;
+  return `Resolved ${count}; check GitLab for the others.`;
 }
 
 function errorName(error: unknown): string {

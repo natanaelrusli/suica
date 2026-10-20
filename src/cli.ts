@@ -15,6 +15,7 @@ import {
   buildReviewList,
   fetchMrDetail,
   parseMrKey,
+  resolveOwnThreads,
 } from "./reviews.ts";
 import { cancelAgentReview, discardAgentReview, postAgentReview } from "./agent-review.ts";
 import { parseTemplateRequest, saveTemplate, showTemplates } from "./template-edit.ts";
@@ -263,6 +264,7 @@ async function reviewCommand(argv: readonly string[]): Promise<number> {
         now: Date.now,
         log: createLogger(),
         rest: glabRest(config.gitlab),
+        graphql: glabRunner(config.gitlab),
         post: glabPost(config.gitlab),
         postJson: glabPostJson(config.gitlab),
       },
@@ -282,14 +284,15 @@ async function mrJson(key: string): Promise<number> {
   return 0;
 }
 
-/** `suica mr approve <key> <sha> --json`: approves as the Owner at that commit; prints `{"status": …}`. */
+/**
+ * `suica mr approve <key> <sha> --json`: approves as the Owner at that commit, then resolves the
+ * open threads the Owner started; prints `{"status": …}`.
+ */
 async function approveCommand(key: string, sha: string): Promise<number> {
   const { gitlab } = loadConfig(defaultConfigPath());
-  const outcome = await approveMergeRequest(
-    { post: glabPost(gitlab), log: createLogger() },
-    key,
-    sha,
-  );
+  const log = createLogger();
+  const outcome = await approveMergeRequest({ post: glabPost(gitlab), log }, key, sha);
+  if (outcome === "approved") await resolveOwnThreads({ graphql: glabRunner(gitlab), log }, key);
   process.stdout.write(`${actionJson(outcome)}\n`);
   return outcome === "approved" ? 0 : 1;
 }
