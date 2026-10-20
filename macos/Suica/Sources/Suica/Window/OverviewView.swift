@@ -687,6 +687,13 @@ struct ReviewingNow: View {
                     Text(Copy.runningLine(cli: running.cli, model: running.model, since: running.startedAt, now: context.date))
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    if let latest = running.latestActivity {
+                        Text(DisplayText.clean(latest, max: 160))
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
                     if queued > 0 {
                         Text(Copy.queuedReviews(queued)).font(.caption).foregroundStyle(.tertiary)
                     }

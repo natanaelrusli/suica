@@ -42,12 +42,15 @@ public struct AgentReviewInfo: Codable, Equatable, Sendable {
     /// Markdown as the model wrote it.
     public let body: String?
     public let detail: String
+    /// What the run did, oldest first (at most the last 50 steps); absent from an older CLI.
+    public let activity: [ReviewActivityLine]?
     public let createdAt: Int
     public let updatedAt: Int
 
     public init(
         id: Int, status: String, cli: String? = nil, model: String? = nil, startedAt: Int? = nil,
-        headSha: String? = nil, previousSha: String? = nil, body: String? = nil, detail: String = "", createdAt: Int = 0, updatedAt: Int = 0
+        headSha: String? = nil, previousSha: String? = nil, body: String? = nil, detail: String = "",
+        activity: [ReviewActivityLine]? = nil, createdAt: Int = 0, updatedAt: Int = 0
     ) {
         self.id = id
         self.status = status
@@ -58,6 +61,7 @@ public struct AgentReviewInfo: Codable, Equatable, Sendable {
         self.previousSha = previousSha
         self.body = body
         self.detail = detail
+        self.activity = activity
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -70,6 +74,20 @@ public struct AgentReviewInfo: Codable, Equatable, Sendable {
     public var isReady: Bool { status == "ready" }
     /// Another review can be started.
     public var canRequeue: Bool { !isActive && !isReady }
+}
+
+/// One step of a running Agent Review, as the agent recorded it.
+public struct ReviewActivityLine: Codable, Equatable, Sendable {
+    /// Epoch milliseconds.
+    public let at: Int
+    public let text: String
+
+    public init(at: Int, text: String) {
+        self.at = at
+        self.text = text
+    }
+
+    public var date: Date { Date(timeIntervalSince1970: Double(at) / 1000) }
 }
 
 /// How an MR changed since the agent's posted review; the list marks it and offers a re-review.
@@ -401,6 +419,13 @@ public final class ReviewsModel {
     /// True while a review is queued, running or being posted: the page keeps refreshing.
     public var hasActiveAgentReview: Bool {
         list?.mergeRequests.contains { $0.agentReview?.isActive == true } ?? false
+    }
+
+    /// How often the page reads the list and the selected MR again: every 3 seconds while a review
+    /// runs, so its activity reads live, every 15 while one is queued or posting, else every 30.
+    public var refreshSeconds: Int {
+        if list?.mergeRequests.contains(where: { $0.agentReview?.status == "running" }) == true { return 3 }
+        return hasActiveAgentReview ? 15 : 30
     }
 
     public func queueAgentReview(_ key: String) async {

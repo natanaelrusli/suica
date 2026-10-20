@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   buildInvocation,
+  describeClaudeEvent,
+  describeCodexEvent,
   parseClaudeOutput,
   parseCodexOutput,
   RunFailure,
@@ -9,7 +11,13 @@ import {
 describe("buildInvocation", () => {
   it("gives claude only read tools, refuses the rest without asking and starts no MCP server", () => {
     const { args, lastMessageFile } = buildInvocation("claude", "/skill\n\nreview", "/w");
-    expect(args.slice(0, 4)).toEqual(["-p", "/skill\n\nreview", "--output-format", "json"]);
+    expect(args.slice(0, 5)).toEqual([
+      "-p",
+      "/skill\n\nreview",
+      "--output-format",
+      "stream-json",
+      "--verbose",
+    ]);
     const tools = args.slice(args.indexOf("--tools") + 1, args.indexOf("--allowedTools"));
     expect(tools).toEqual(["Read", "Grep", "Glob", "Skill"]);
     expect(args).toContain("--strict-mcp-config");
@@ -127,5 +135,68 @@ describe("parseCodexOutput", () => {
   it("fails without a final message and reports no tokens without a finished turn", () => {
     expect(() => parseCodexOutput("", "  ")).toThrow(RunFailure);
     expect(parseCodexOutput('{"type":"turn.started"}', "x").tokens).toBeNull();
+  });
+});
+
+describe("the live activity", () => {
+  const assistant = (content: unknown[]) =>
+    JSON.stringify({ type: "assistant", message: { content } });
+
+  it("reads the review from the result event of claude's stream", () => {
+    const stdout = [
+      JSON.stringify({ type: "system", subtype: "init" }),
+      assistant([{ type: "text", text: "Looking at the diff." }]),
+      JSON.stringify({ type: "result", is_error: false, result: "# Review", modelUsage: {} }),
+    ].join("\n");
+    expect(parseClaudeOutput(stdout).body).toBe("# Review");
+  });
+
+  it("describes claude's steps, thinking and notes, with paths inside the checkout", () => {
+    const tool = (name: string, input: unknown) => assistant([{ type: "tool_use", name, input }]);
+    expect(describeClaudeEvent(tool("Read", { file_path: "/w/src/a.ts" }), "/w")).toEqual([
+      "Reading src/a.ts",
+    ]);
+    expect(
+      describeClaudeEvent(tool("Grep", { pattern: "timeoutMs", path: "/w/src" }), "/w"),
+    ).toEqual(['Searching "timeoutMs" in src']);
+    expect(describeClaudeEvent(tool("Glob", { pattern: "**/*.ts" }), "/w")).toEqual([
+      "Finding files **/*.ts",
+    ]);
+    expect(
+      describeClaudeEvent(tool("Skill", { skill: "madhani:madhani-code-review" }), "/w"),
+    ).toEqual(["Loading skill madhani:madhani-code-review"]);
+    expect(
+      describeClaudeEvent(
+        assistant([
+          { type: "thinking", thinking: "The retry loop\nhas no cap." },
+          { type: "text", text: "Checking the callers next." },
+        ]),
+        "/w",
+      ),
+    ).toEqual(["Thinking: The retry loop has no cap.", "Checking the callers next."]);
+    expect(describeClaudeEvent(JSON.stringify({ type: "system", subtype: "init" }), "/w")).toEqual(
+      [],
+    );
+    expect(describeClaudeEvent("not json", "/w")).toEqual([]);
+  });
+
+  it("shortens a long line to 200 characters", () => {
+    const [line] = describeClaudeEvent(assistant([{ type: "text", text: "x".repeat(500) }]), "/w");
+    expect(line).toHaveLength(200);
+    expect(line?.endsWith("…")).toBe(true);
+  });
+
+  it("describes codex's reasoning, commands and final message", () => {
+    const item = (type: string, item: unknown) => JSON.stringify({ type, item });
+    expect(
+      describeCodexEvent(item("item.completed", { type: "reasoning", text: "**Plan** check" })),
+    ).toEqual(["Thinking: **Plan** check"]);
+    expect(
+      describeCodexEvent(item("item.started", { type: "command_execution", command: "rg -n x" })),
+    ).toEqual(["Running rg -n x"]);
+    expect(
+      describeCodexEvent(item("item.completed", { type: "agent_message", text: "# R" })),
+    ).toEqual(["Writing the review"]);
+    expect(describeCodexEvent(item("item.completed", { type: "command_execution" }))).toEqual([]);
   });
 });

@@ -254,6 +254,8 @@ public enum Copy {
     public static let agentReviewHeading = "Agent Review"
     public static let reviewingNow = "Reviewing now"
     public static let notReviewing = "Not reviewing anything right now."
+    public static let activityHeading = "What the agent is doing"
+    public static let activityStarting = "Starting…"
     public static func reviewing(_ title: String) -> String { "Reviewing \(title)" }
     public static func queuedReviews(_ count: Int) -> String { count == 1 ? "1 more queued" : "\(count) more queued" }
     public static let nextInQueue = "Next in queue"

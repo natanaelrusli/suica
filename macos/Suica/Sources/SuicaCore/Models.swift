@@ -132,14 +132,20 @@ public struct RunningReview: Codable, Equatable, Sendable {
     public let model: String?
     /// Epoch milliseconds.
     public let startedAt: Int?
+    /// The run's newest step; nil before its first, and from an older CLI.
+    public let latestActivity: String?
 
-    public init(id: Int, mrKey: String, mrTitle: String?, cli: String?, model: String?, startedAt: Int?) {
+    public init(
+        id: Int, mrKey: String, mrTitle: String?, cli: String?, model: String?, startedAt: Int?,
+        latestActivity: String? = nil
+    ) {
         self.id = id
         self.mrKey = mrKey
         self.mrTitle = mrTitle
         self.cli = cli
         self.model = model
         self.startedAt = startedAt
+        self.latestActivity = latestActivity
     }
 }
 

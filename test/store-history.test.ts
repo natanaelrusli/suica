@@ -42,7 +42,7 @@ describe("schema v3", () => {
     store.close();
 
     const raw = new DatabaseSync(path);
-    expect(raw.prepare("PRAGMA user_version").get()?.["user_version"]).toBe(11);
+    expect(raw.prepare("PRAGMA user_version").get()?.["user_version"]).toBe(12);
     raw.close();
   });
 });

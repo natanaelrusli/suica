@@ -99,6 +99,7 @@ function row(overrides: Partial<AgentReviewRow> = {}): AgentReviewRow {
     approved: false,
     body: "# Review\n/close\nping @bob",
     detail: "",
+    activity: [],
     createdAt: NOW,
     updatedAt: NOW,
     ...overrides,
@@ -414,7 +415,9 @@ function harness(
   };
   const exec: Exec = (file, args, execOptions) => {
     try {
-      return Promise.resolve(respond(file, args, execOptions));
+      const result = respond(file, args, execOptions);
+      for (const line of result.stdout.split("\n")) execOptions.onStdoutLine?.(line);
+      return Promise.resolve(result);
     } catch (error) {
       return Promise.reject(error instanceof Error ? error : new Error("exec"));
     }
@@ -893,6 +896,26 @@ describe("runAgentReview", () => {
     await runAgentReview({ ...h.deps, exec }, queued);
     expect(h.db.getAgentReview(queued.id)?.status).toBe("cancelled");
     expect(h.notifications).toEqual([]);
+  });
+
+  it("records what the run is doing while it runs: the clone, the CLI start and its steps", async () => {
+    const stream = [
+      JSON.stringify({
+        type: "assistant",
+        message: { content: [{ type: "tool_use", name: "Read", input: { file_path: "a.ts" } }] },
+      }),
+      JSON.stringify({ type: "result", is_error: false, result: "# Code review", modelUsage: {} }),
+    ].join("\n");
+    const h = harness({ cliStdout: stream });
+    const queued = h.queue();
+    await runAgentReview(h.deps, queued);
+    const row = h.db.getAgentReview(queued.id);
+    expect(row?.status).toBe("ready");
+    expect(row?.activity.map((line) => line.text)).toEqual([
+      "Cloning the source branch",
+      "Starting Claude Code",
+      "Reading a.ts",
+    ]);
   });
 
   it("queues a review again when the agent shuts down during the run, without notifying", async () => {

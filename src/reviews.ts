@@ -5,7 +5,7 @@ import { FetchFailure } from "./gitlab.ts";
 import type { GraphqlRunner, PostRunner, RestRunner } from "./gitlab.ts";
 import { isReadyToApprove } from "./inline-review.ts";
 import type { Logger } from "./log.ts";
-import type { AgentReviewRow, AgentReviewStatus } from "./store.ts";
+import type { ActivityLine, AgentReviewRow, AgentReviewStatus } from "./store.ts";
 
 /** The newest Agent Review of an MR. */
 export interface AgentReviewJson {
@@ -23,6 +23,8 @@ export interface AgentReviewJson {
   /** Markdown as the model wrote it; GitLab gets a sanitised copy with an agent label. */
   readonly body: string | null;
   readonly detail: string;
+  /** What the run did, oldest first: at most the last 50 steps, written while it runs. */
+  readonly activity: readonly ActivityLine[];
   /** Epoch milliseconds. */
   readonly createdAt: number;
   readonly updatedAt: number;
@@ -40,6 +42,8 @@ export interface ReviewActivityJson {
     readonly model: string | null;
     /** Epoch milliseconds. */
     readonly startedAt: number | null;
+    /** The run's newest step; null before its first. */
+    readonly latestActivity: string | null;
   } | null;
   /** In the order they run. */
   readonly queued: readonly {
@@ -65,6 +69,7 @@ export function buildReviewActivity(
             cli: running.cli,
             model: running.model ?? configuredModel ?? null,
             startedAt: running.startedAt,
+            latestActivity: running.activity.at(-1)?.text ?? null,
           },
     queued: activity.queued.map((row) => ({ id: row.id, mrKey: row.mrKey, mrTitle: row.mrTitle })),
   };
@@ -121,6 +126,7 @@ function toAgentReviewJson(row: AgentReviewRow): AgentReviewJson {
     previousSha: row.previousSha,
     body: row.body,
     detail: row.detail,
+    activity: row.activity,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };

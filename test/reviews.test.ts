@@ -4,6 +4,7 @@ import { FetchFailure } from "../src/gitlab.ts";
 import { createLogger } from "../src/log.ts";
 import {
   approveMergeRequest,
+  buildReviewActivity,
   buildReviewList,
   changedSinceReview,
   readyToApprove,
@@ -141,6 +142,7 @@ const POSTED_NINE: AgentReviewRow = {
   approved: false,
   body: "# Code review: g/p!9\n\nNo new findings.",
   detail: "",
+  activity: [],
   createdAt: 1792152050000,
   updatedAt: 1792152200000,
 };
@@ -182,6 +184,7 @@ describe("buildReviewList", () => {
             approved: false,
             body: "# Code review: g/p!7\n\n## Findings\n1. `src/a.ts:4`: Blocker.",
             detail: "",
+            activity: [],
             createdAt: 1792148400000,
             updatedAt: 1792152000000,
           },
@@ -477,5 +480,43 @@ describe("resolveOwnThreads", () => {
       resolved: 0,
       complete: false,
     });
+  });
+});
+
+describe("buildReviewList activity", () => {
+  it("passes a running review's activity through, oldest first", () => {
+    const running: AgentReviewRow = {
+      ...POSTED_NINE,
+      status: "running",
+      activity: [
+        { at: 1, text: "Cloning the source branch" },
+        { at: 2, text: "Reading src/a.ts" },
+      ],
+    };
+    const list = buildReviewList(
+      snapshot({ reviewRequested: [mr(9, { reviewers: [reviewer("me", "UNREVIEWED")] })] }),
+      new Map([["g/p!9", running]]),
+    );
+    expect(list.mergeRequests[0]?.agentReview?.activity).toEqual(running.activity);
+  });
+});
+
+describe("buildReviewActivity", () => {
+  it("names the running review's newest step, or null before its first", () => {
+    const running: AgentReviewRow = {
+      ...POSTED_NINE,
+      status: "running",
+      activity: [
+        { at: 1, text: "Cloning the source branch" },
+        { at: 2, text: "Reading src/a.ts" },
+      ],
+    };
+    expect(buildReviewActivity({ running, queued: [] }, undefined).running?.latestActivity).toBe(
+      "Reading src/a.ts",
+    );
+    expect(
+      buildReviewActivity({ running: { ...running, activity: [] }, queued: [] }, undefined).running
+        ?.latestActivity,
+    ).toBeNull();
   });
 });
