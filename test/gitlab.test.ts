@@ -3,6 +3,7 @@ import type { Exec } from "../src/exec.ts";
 import {
   FetchFailure,
   SNAPSHOT_QUERY,
+  descriptionSha,
   glabPost,
   glabRest,
   glabRunner,
@@ -84,6 +85,30 @@ describe("the head commit", () => {
     );
     expect(snapshot.reviewRequested.map((each) => each.headSha)).toEqual(["abc123"]);
     expect(snapshot.authored.map((each) => each.headSha)).toEqual(["def456", null, null]);
+  });
+});
+
+describe("the description", () => {
+  it("is fetched in the snapshot query and kept as a hash only, null when GitLab does not send it", () => {
+    expect(SNAPSHOT_QUERY.match(/\n  description\n/g)).toHaveLength(1);
+    const snapshot = parseSnapshot(
+      payload({
+        reviewRequested: [node({ iid: "1", description: "Adds a thing" })],
+        authored: [
+          node({ iid: "2", description: null }),
+          node({ iid: "3", description: "" }),
+          node({ iid: "4" }),
+        ],
+      }),
+    );
+    const [one] = snapshot.reviewRequested;
+    expect(one?.descriptionSha).toBe(descriptionSha("Adds a thing"));
+    expect(one?.descriptionSha).toMatch(/^[0-9a-f]{64}$/);
+    expect(JSON.stringify(snapshot)).not.toContain("Adds a thing");
+    const [two, three, four] = snapshot.authored;
+    expect(two?.descriptionSha).toBe(descriptionSha(""));
+    expect(three?.descriptionSha).toBe(two?.descriptionSha);
+    expect(four?.descriptionSha).toBeNull();
   });
 });
 

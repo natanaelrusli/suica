@@ -174,7 +174,8 @@ describe("loadTemplates", () => {
   it("uses the built-in Indonesian defaults when the folder does not exist", () => {
     expect(loadTemplates(join(tempDir(), "missing"))).toEqual(DEFAULT_TEMPLATES);
     expect(DEFAULT_TEMPLATES.nudge).toContain("Boleh minta tolong review");
-    for (const name of TEMPLATE_NAMES) expect(DEFAULT_TEMPLATES[name]).toContain("saya {{agent.name}}");
+    for (const name of TEMPLATE_NAMES)
+      expect(DEFAULT_TEMPLATES[name]).toContain("saya {{agent.name}}");
   });
 
   it("has a built-in Indonesian re-review template that asks for another look", () => {

@@ -192,6 +192,7 @@ describe("review notices (flow C)", () => {
     postedAt,
     body: REVIEW_BODY,
     rereview: false,
+    approved: false,
   });
 
   it("records the first sighting without any notice", () => {

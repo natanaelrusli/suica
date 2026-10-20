@@ -30,6 +30,8 @@ export interface MergeRequest {
   readonly createdAt: string | null;
   /** The head commit of the source branch; null while GitLab has not computed it. */
   readonly headSha: string | null;
+  /** SHA-256 of the description, so a change to it is noticed; null when not fetched. */
+  readonly descriptionSha: string | null;
   readonly author: Person;
   readonly reviewers: readonly Reviewer[];
   /** Most recent notes only; empty for MRs fetched without notes. */

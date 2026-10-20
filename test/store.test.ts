@@ -183,8 +183,49 @@ describe("schema 10", () => {
     expect(store.getAgentReview(next)?.previousSha).toBe("aaa1111");
     store.close();
     const check = new DatabaseSync(path);
-    expect(check.prepare("PRAGMA user_version").get()?.["user_version"]).toBe(10);
+    expect(check.prepare("PRAGMA user_version").get()?.["user_version"]).toBe(11);
     check.close();
+  });
+
+  it("upgrades schema 10 to 11: agent_review gains description_sha (null) and approved (false) on old rows", () => {
+    const path = tempDb();
+    const first = openStore(path);
+    const id = review(first, "g/p!1", "posted", "aaa1111");
+    first.close();
+    const raw = new DatabaseSync(path);
+    raw.exec(
+      "ALTER TABLE agent_review DROP COLUMN description_sha; ALTER TABLE agent_review DROP COLUMN approved; PRAGMA user_version = 10;",
+    );
+    raw.close();
+
+    const store = openStore(path);
+    expect(store.getAgentReview(id)).toMatchObject({ descriptionSha: null, approved: false });
+    const next = store.queueAgentReview("g/p!1", "manual", NOW) ?? 0;
+    store.transitionAgentReview(
+      next,
+      ["queued"],
+      "running",
+      { descriptionSha: "d1", approved: true },
+      NOW,
+    );
+    expect(store.getAgentReview(next)).toMatchObject({ descriptionSha: "d1", approved: true });
+    store.close();
+    const check = new DatabaseSync(path);
+    expect(check.prepare("PRAGMA user_version").get()?.["user_version"]).toBe(11);
+    check.close();
+  });
+
+  it("hasAgentReviewAt matches the commit and the description, taking an old row without a hash as the same description", () => {
+    const store = openStore(":memory:");
+    const old = review(store, "g/p!1", "posted", "aaa1111");
+    expect(store.hasAgentReviewAt("g/p!1", "aaa1111", "d1")).toBe(true);
+    expect(store.hasAgentReviewAt("g/p!1", "bbb2222", "d1")).toBe(false);
+    store.transitionAgentReview(old, ["posted"], "posted", { descriptionSha: "d1" }, NOW);
+    expect(store.hasAgentReviewAt("g/p!1", "aaa1111", "d1")).toBe(true);
+    expect(store.hasAgentReviewAt("g/p!1", "aaa1111", "d2")).toBe(false);
+    review(store, "g/p!2", "failed", "ccc3333");
+    expect(store.hasAgentReviewAt("g/p!2", "ccc3333", "d1")).toBe(false);
+    store.close();
   });
 
   it("rereviewBases returns the newest posted or discarded review per MR and ignores later failed and skipped rows", () => {

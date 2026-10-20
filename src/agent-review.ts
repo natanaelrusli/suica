@@ -10,6 +10,7 @@ import { myReviewState } from "./events.ts";
 import type { Exec } from "./exec.ts";
 import { execFailure } from "./exec.ts";
 import type { Notification } from "./format.ts";
+import { descriptionSha } from "./gitlab.ts";
 import type { GraphqlRunner, PostJsonRunner, PostRunner, RestRunner } from "./gitlab.ts";
 import { extractFindings, placeFinding, summaryWithout } from "./inline-review.ts";
 import type { Finding, ThreadPosition } from "./inline-review.ts";
@@ -480,7 +481,8 @@ export async function runAgentReview(deps: ReviewDeps, row: AgentReviewRow): Pro
 
     workDir = mkdtempSync(join(tmpdir(), "suica-review-"));
     const headSha = await checkout(deps, detail, join(workDir, "repo"));
-    if (store.hasAgentReviewAt(row.mrKey, headSha))
+    const descriptionHash = descriptionSha(detail.description);
+    if (store.hasAgentReviewAt(row.mrKey, headSha, descriptionHash))
       throw new Skip("this commit was already reviewed");
     writeFileSync(join(workDir, "mr.diff"), renderDiff(detail.files));
     writeFileSync(join(workDir, "mr.md"), renderMrFile(detail));

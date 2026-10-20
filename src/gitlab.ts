@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -54,6 +55,7 @@ fragment MrFields on MergeRequest {
   draft
   createdAt
   diffHeadSha
+  description
   project { fullPath }
   author { username name }
   reviewers { nodes { username name mergeRequestInteraction { reviewState } } }
@@ -82,6 +84,7 @@ const mrSchema = z.object({
   draft: z.boolean(),
   createdAt: z.string().nullable().optional(),
   diffHeadSha: z.string().nullable().optional(),
+  description: z.string().nullable().optional(),
   project: z.object({ fullPath: z.string() }),
   author: personSchema.nullable(),
   reviewers: z.object({ nodes: z.array(reviewerSchema) }),
@@ -108,6 +111,13 @@ const responseSchema = z.object({
   errors: z.array(z.object({ message: z.string() })).optional(),
 });
 
+/** The hash kept instead of a description: an empty description hashes too, so a cleared one counts. */
+export function descriptionSha(description: string | null): string {
+  return createHash("sha256")
+    .update(description ?? "")
+    .digest("hex");
+}
+
 function toMergeRequest(node: z.infer<typeof mrSchema>): MergeRequest {
   return {
     key: `${node.project.fullPath}!${node.iid}`,
@@ -118,6 +128,7 @@ function toMergeRequest(node: z.infer<typeof mrSchema>): MergeRequest {
     draft: node.draft,
     createdAt: node.createdAt ?? null,
     headSha: node.diffHeadSha ?? null,
+    descriptionSha: node.description === undefined ? null : descriptionSha(node.description),
     author: node.author ?? GHOST,
     reviewers: node.reviewers.nodes.map((reviewer) => ({
       username: reviewer.username,

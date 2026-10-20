@@ -29,6 +29,7 @@ export function mr(
     draft: false,
     createdAt: null,
     headSha: `sha-${iid}-a`,
+    descriptionSha: null,
     author: person("author", "Author"),
     reviewers: [],
     notes: [],

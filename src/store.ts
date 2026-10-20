@@ -94,6 +94,10 @@ export interface AgentReviewRow {
   readonly headSha: string | null;
   /** The commit of the posted review this one re-reviews; null for a first review. */
   readonly previousSha: string | null;
+  /** SHA-256 of the MR description the review read; null until the run, and on older rows. */
+  readonly descriptionSha: string | null;
+  /** True when the agent approved the MR after posting this review. */
+  readonly approved: boolean;
   /** The review as the model wrote it, before it is sanitised for GitLab. */
   readonly body: string | null;
   /** Why it failed or was skipped, or a note about posting. */
@@ -109,6 +113,8 @@ export interface AgentReviewFields {
   readonly cli?: string;
   readonly headSha?: string;
   readonly previousSha?: string;
+  readonly descriptionSha?: string;
+  readonly approved?: boolean;
   readonly body?: string;
   readonly detail?: string;
 }
@@ -191,8 +197,11 @@ export interface Store {
   loadReviewHeads(): Map<string, ReviewHead>;
   /** Replaces every row in one transaction; only the poll loop writes them. */
   saveReviewHeads(heads: ReadonlyMap<string, ReviewHead>): void;
-  /** True when this commit already has a review that is ready, being posted or posted. */
-  hasAgentReviewAt(mrKey: string, headSha: string): boolean;
+  /**
+   * True when this commit already has a review that is ready, being posted or posted, of the same
+   * description (a row without a description hash, from an older version, counts as the same).
+   */
+  hasAgentReviewAt(mrKey: string, headSha: string, descriptionSha: string): boolean;
   /** Only from one of `from`; false when the row was elsewhere, so two callers never both win. */
   transitionAgentReview(
     id: number,
@@ -213,7 +222,12 @@ export interface Store {
   close(): void;
 }
 
-const SCHEMA_VERSION = 10;
+const SCHEMA_VERSION = 11;
+/** The description a review read, so a description-only change counts as an update, and whether the agent approved after it. */
+const SCHEMA_V11_COLUMNS: readonly (readonly [string, string])[] = [
+  ["description_sha", "TEXT"],
+  ["approved", "INTEGER NOT NULL DEFAULT 0"],
+];
 /** The head of each MR waiting for the Owner's review, so a push is re-reviewed once it settles. */
 const SCHEMA_V10 = `
 CREATE TABLE IF NOT EXISTS review_head (
@@ -441,6 +455,8 @@ function toAgentReview(row: Row): AgentReviewRow {
     cli: nullableText(row, "cli"),
     headSha: nullableText(row, "head_sha"),
     previousSha: nullableText(row, "previous_sha"),
+    descriptionSha: nullableText(row, "description_sha"),
+    approved: row["approved"] === 1,
     body: nullableText(row, "body"),
     detail: text(row, "detail"),
     createdAt: integer(row, "created_at"),
@@ -499,6 +515,13 @@ function initSchema(db: DatabaseSync): void {
       db.exec("ALTER TABLE agent_review ADD COLUMN previous_sha TEXT");
     }
     db.exec(SCHEMA_V10);
+  }
+  if (version < 11) {
+    for (const [column, type] of SCHEMA_V11_COLUMNS) {
+      if (!hasColumn(db, "agent_review", column)) {
+        db.exec(`ALTER TABLE agent_review ADD COLUMN ${column} ${type}`);
+      }
+    }
   }
   if (version !== SCHEMA_VERSION) db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 }
@@ -796,13 +819,15 @@ export function openStore(path: string): Store {
       restrictPermissions(path);
     },
 
-    hasAgentReviewAt(mrKey, headSha) {
+    hasAgentReviewAt(mrKey, headSha, descriptionSha) {
       return (
         db
           .prepare(
-            "SELECT 1 FROM agent_review WHERE mr_key = ? AND head_sha = ? AND status IN ('ready', 'posting', 'posted')",
+            `SELECT 1 FROM agent_review WHERE mr_key = ? AND head_sha = ?
+               AND (description_sha IS NULL OR description_sha = ?)
+               AND status IN ('ready', 'posting', 'posted')`,
           )
-          .get(mrKey, headSha) !== undefined
+          .get(mrKey, headSha, descriptionSha) !== undefined
       );
     },
 
@@ -810,7 +835,8 @@ export function openStore(path: string): Store {
       const result = db
         .prepare(
           `UPDATE agent_review SET status = ?, cli = COALESCE(?, cli), head_sha = COALESCE(?, head_sha),
-             previous_sha = COALESCE(?, previous_sha), body = COALESCE(?, body), detail = COALESCE(?, detail), mr_title = COALESCE(?, mr_title),
+             previous_sha = COALESCE(?, previous_sha), description_sha = COALESCE(?, description_sha),
+             approved = COALESCE(?, approved), body = COALESCE(?, body), detail = COALESCE(?, detail), mr_title = COALESCE(?, mr_title),
              model = COALESCE(?, model), started_at = COALESCE(?, started_at), updated_at = ?
            WHERE id = ? AND status IN (${from.map(() => "?").join(", ")})`,
         )
@@ -819,6 +845,8 @@ export function openStore(path: string): Store {
           fields.cli ?? null,
           fields.headSha ?? null,
           fields.previousSha ?? null,
+          fields.descriptionSha ?? null,
+          fields.approved === undefined ? null : fields.approved ? 1 : 0,
           fields.body ?? null,
           fields.detail ?? null,
           fields.mrTitle ?? null,
@@ -911,7 +939,7 @@ export function openStore(path: string): Store {
       }
       const postedReviews = new Map<string, PostedReview>();
       for (const row of rows(
-        `SELECT id, mr_key, updated_at, body, previous_sha FROM agent_review WHERE id IN
+        `SELECT id, mr_key, updated_at, body, previous_sha, approved FROM agent_review WHERE id IN
            (SELECT MAX(id) FROM agent_review WHERE status = 'posted' AND body IS NOT NULL GROUP BY mr_key)`,
       )) {
         postedReviews.set(text(row, "mr_key"), {
@@ -919,6 +947,7 @@ export function openStore(path: string): Store {
           postedAt: integer(row, "updated_at"),
           body: text(row, "body"),
           rereview: row["previous_sha"] !== null,
+          approved: row["approved"] === 1,
         });
       }
       return {

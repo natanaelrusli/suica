@@ -245,7 +245,10 @@ export async function dispatchQueued(
     if (row.status === "pending" || !inHours) continue;
     let text: string;
     try {
-      text = renderTemplate(deps.templates[row.variant], valuesFor(row, snapshot.me.name, deps.config.agentName));
+      text = renderTemplate(
+        deps.templates[row.variant],
+        valuesFor(row, snapshot.me.name, deps.config.agentName),
+      );
     } catch {
       deps.store.transitionOutbox(row.id, "queued", "failed", { detail: "template" }, nowMs);
       continue;

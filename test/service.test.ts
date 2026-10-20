@@ -20,6 +20,7 @@ const teamsConfig: ServiceDeps["config"] = {
   rereviewAfterMinutes: 10,
   maxMessagesPerReviewer: 2,
   people: {},
+  agentName: "Suica",
 };
 
 function setup(overrides: Partial<ServiceDeps> = {}) {

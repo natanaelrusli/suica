@@ -20,6 +20,8 @@ function base(status: AgentReviewStatus, headSha: string | null, mrKey = "g/p!1"
     cli: null,
     headSha,
     previousSha: null,
+    descriptionSha: null,
+    approved: false,
     body: null,
     detail: "",
     createdAt: NOW - 60 * MINUTE,
