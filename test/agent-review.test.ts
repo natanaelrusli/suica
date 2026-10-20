@@ -1267,6 +1267,9 @@ describe("postAgentReview and discardAgentReview", () => {
     const APPROVING = parseConfig(
       "gitlab:\n  hostname: gitlab.example\nreview:\n  approve: true\n",
     );
+    const NOT_APPROVING = parseConfig(
+      "gitlab:\n  hostname: gitlab.example\nreview:\n  approve: false\n",
+    );
     /** Post deps where the approve call is recorded apart from the note, and can be refused. */
     function approvingDeps(
       h: ReturnType<typeof harness>,
@@ -1318,7 +1321,7 @@ describe("postAgentReview and discardAgentReview", () => {
       expect(b.approvals).toEqual([]);
 
       const off = await readyWith(CLEAN_REREVIEW, true);
-      const c = approvingDeps(off.h, { config: CONFIG });
+      const c = approvingDeps(off.h, { config: NOT_APPROVING });
       await postAgentReview(c.deps, off.id);
       expect(c.approvals).toEqual([]);
       expect(off.h.db.getAgentReview(off.id)?.approved).toBe(false);

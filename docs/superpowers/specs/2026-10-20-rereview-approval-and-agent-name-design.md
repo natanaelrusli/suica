@@ -40,7 +40,7 @@ Most of item 1 exists: a push to an MR with a posted Agent Review queues an Agen
 
 ### Approval (item 1)
 
-1. **Switch.** `review.approve` (new key, boolean, default `false`, _my call_: approving on GitLab as the Owner is outward-facing, so it is opt-in; the README says so in the Agent Review section). The approval needs nothing else: with `review.post: approval` it follows the Owner's **Post to GitLab…**; with `review.post: auto` the whole chain is automatic.
+1. **Switch.** `review.approve` (new key, boolean, default `true`: the Owner chose it on when asked on 2026-10-20; it was first built opt-in). The approval needs nothing else: with `review.post: approval` it follows the Owner's **Post to GitLab…**; with `review.post: auto` the whole chain is automatic.
 2. **When.** Right after a review is posted (`postAgentReview` returns `posted`), when the review is a re-review (`previousSha` set) and clean. Not for a first review.
 3. **Clean** means: `countFindings` totals zero, and the `## Previous review` section has no open item. An item is open unless its text says it is fixed and does not say not fixed, partly fixed, partially fixed or unfixed (_my call_: conservative, since the wording comes from a model; an item without the word "fixed" counts as open).
 4. **How.** `approveMergeRequest(key, headSha)` as the Owner. `approved` is recorded on the review row; `head-changed`, `failed` and `bad-request` leave it unapproved and write one sentence in the row's `detail` ("Not approved: the source branch moved" and so on). No retry; the Owner can approve from the MR page.
