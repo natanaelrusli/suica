@@ -564,6 +564,23 @@ describe("runAgentReview", () => {
     expect(h.notifications.map((n) => n.title)).toEqual(["Review agen siap"]);
   });
 
+  it("logs the code of a failed notification, never its text", async () => {
+    const h = harness();
+    const lines: string[] = [];
+    const deps: ReviewDeps = {
+      ...h.deps,
+      notifier: {
+        notify: () =>
+          Promise.reject(Object.assign(new Error("terminal-notifier: Add thing"), { code: 2 })),
+      },
+      log: createLogger({ write: (line) => lines.push(line), minLevel: "debug" }),
+    };
+    await runAgentReview(deps, h.queue());
+    const failed = lines.find((line) => line.includes("agent review notification failed"));
+    expect(JSON.parse(failed ?? "{}")).toMatchObject({ attributes: { code: "2" } });
+    expect(failed).not.toContain("Add thing");
+  });
+
   it("runs codex with the skill text pasted in when model.cli picks it", async () => {
     const home = tempDir();
     const dir = join(home, ".claude/plugins/cache/m/madhani/1.0.0/skills/madhani-code-review");

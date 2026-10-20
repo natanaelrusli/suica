@@ -313,8 +313,11 @@ function changedLines(detail: MrDetailJson): number {
 async function notifyQuietly(deps: ReviewDeps, notification: Notification): Promise<void> {
   try {
     await deps.notifier.notify(notification);
-  } catch {
-    deps.log.warn("agent review notification failed");
+  } catch (error) {
+    // Never log the error message: process errors embed the notification text.
+    deps.log.warn("agent review notification failed", {
+      code: String(execFailure(error).code ?? "unknown"),
+    });
   }
 }
 

@@ -25,7 +25,7 @@ describe("createNotifier", () => {
     const { calls, exec } = recordingExec();
     await createNotifier(exec).notify({ title: "T", body: "B", url: "https://x/y" });
     expect(calls).toEqual([
-      ["terminal-notifier", "-title", "T", "-message", "B", "-open", "https://x/y"],
+      ["terminal-notifier", "-title", "\\T", "-message", "\\B", "-open", "https://x/y"],
     ]);
   });
 
@@ -33,14 +33,22 @@ describe("createNotifier", () => {
     const { calls, exec } = recordingExec();
     await createNotifier(exec).notify({ title: "T", body: "B", url: "suica://message/12" });
     expect(calls).toEqual([
-      ["terminal-notifier", "-title", "T", "-message", "B", "-open", "suica://message/12"],
+      ["terminal-notifier", "-title", "\\T", "-message", "\\B", "-open", "suica://message/12"],
+    ]);
+  });
+
+  it("escapes the first character of the title and message, which terminal-notifier would misread", async () => {
+    const { calls, exec } = recordingExec();
+    await createNotifier(exec).notify({ title: "(T)", body: "[ABC-1] fix", url: "https://x/y" });
+    expect(calls).toEqual([
+      ["terminal-notifier", "-title", "\\(T)", "-message", "\\[ABC-1] fix", "-open", "https://x/y"],
     ]);
   });
 
   it("omits -open when there is no URL", async () => {
     const { calls, exec } = recordingExec();
     await createNotifier(exec).notify({ title: "T", body: "B" });
-    expect(calls[0]).toEqual(["terminal-notifier", "-title", "T", "-message", "B"]);
+    expect(calls[0]).toEqual(["terminal-notifier", "-title", "\\T", "-message", "\\B"]);
   });
 
   it("falls back to osascript and passes the text as arguments, never as script source", async () => {

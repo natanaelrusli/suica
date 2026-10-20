@@ -9,6 +9,14 @@ export interface Notifier {
 const NOTIFY_TIMEOUT_MS = 10_000;
 
 /**
+ * terminal-notifier reads option values through NSUserDefaults, which misreads a value starting
+ * with `[`, `(`, `{` or a quote and exits 2. It strips one leading backslash, so always add one.
+ */
+function escapeValue(value: string): string {
+  return `\\${value}`;
+}
+
+/**
  * `terminal-notifier` when installed (a click opens the MR), otherwise `osascript`
  * (no click-through). Text always travels as process arguments, never inside script source.
  */
@@ -19,7 +27,13 @@ export function createNotifier(exec: Exec = defaultExec): Notifier {
       try {
         await exec(
           "terminal-notifier",
-          ["-title", title, "-message", body, ...(url === undefined ? [] : ["-open", url])],
+          [
+            "-title",
+            escapeValue(title),
+            "-message",
+            escapeValue(body),
+            ...(url === undefined ? [] : ["-open", url]),
+          ],
           { timeoutMs: NOTIFY_TIMEOUT_MS },
         );
         return;
