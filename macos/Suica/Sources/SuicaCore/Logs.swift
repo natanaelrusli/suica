@@ -117,10 +117,15 @@ public struct LogTail: Equatable, Sendable {
 /// The Logs page: the end of the agent's output or error log, read again when the file changes.
 @MainActor @Observable
 public final class LogsModel {
-    public static let maxBytes = 512 * 1024
+    /// Only the last entries are kept, so the page parses and lays out a few hundred rows, not
+    /// thousands, each time the agent writes.
+    public static let maxEntries = 500
+    /// Enough for `maxEntries` lines of about 180 bytes, the agent's usual line, with room to spare.
+    public static let maxBytes = 128 * 1024
 
     public var stream: LogStream = .output
     public private(set) var entries: [LogEntry] = []
+    /// Earlier entries were left out, by `maxBytes` or `maxEntries`.
     public private(set) var truncated = false
     /// The file does not exist yet.
     public private(set) var missing = false
@@ -149,9 +154,10 @@ public final class LogsModel {
         lastRead = (stream, folder, size, modified)
         do {
             let tail = try LogTail.read(url, maxBytes: Self.maxBytes)
+            let parsed = tail.map { LogParser.entries($0.text) } ?? []
             missing = tail == nil
-            truncated = tail?.truncated ?? false
-            entries = tail.map { LogParser.entries($0.text) } ?? []
+            truncated = (tail?.truncated ?? false) || parsed.count > Self.maxEntries
+            entries = Array(parsed.suffix(Self.maxEntries))
             errorText = nil
         } catch {
             errorText = Copy.logReadFailed(error.localizedDescription)

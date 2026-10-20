@@ -557,7 +557,7 @@ public enum Copy {
     public static let logEmpty = "Nothing logged yet."
     public static let logNoMatches = "No entries match the search."
     public static func logMissing(_ file: String) -> String { "\(file) does not exist yet." }
-    public static func logTruncated(_ kilobytes: Int) -> String { "Showing the last \(kilobytes) KB of the file." }
+    public static func logTruncated(_ entries: Int) -> String { "Showing the latest \(entries) entries at most." }
     public static func logReadFailed(_ reason: String) -> String { "Could not read the log: \(reason)" }
     public static let logFolderUnknown = "The logs folder is not known until the agent's status loads."
     public static let editConfig = "Edit config"
