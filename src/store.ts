@@ -187,6 +187,8 @@ export interface Store {
   /** The review running now, if any, and the queue in the order it runs. */
   agentReviewActivity(): { running: AgentReviewRow | undefined; queued: AgentReviewRow[] };
   countAgentReviews(trigger: AgentReviewTrigger, since: number): number;
+  /** Puts a running review back in the queue, as if it never started. */
+  requeueAgentReview(id: number, now: number): boolean;
   nextQueuedAgentReview(): AgentReviewRow | undefined;
   getAgentReview(id: number): AgentReviewRow | undefined;
   /** The newest review of each MR. */
@@ -736,6 +738,16 @@ export function openStore(path: string): Store {
           toAgentReview,
         ),
       };
+    },
+
+    requeueAgentReview(id, now) {
+      return (
+        db
+          .prepare(
+            "UPDATE agent_review SET status = 'queued', started_at = NULL, updated_at = ? WHERE id = ? AND status = 'running'",
+          )
+          .run(now, id).changes > 0
+      );
     },
 
     countAgentReviews(trigger, since) {

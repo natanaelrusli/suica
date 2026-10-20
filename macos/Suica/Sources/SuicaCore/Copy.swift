@@ -66,7 +66,7 @@ public enum Copy {
         case "notice.refindings":
             "To the Author, after an Agent Re-review is posted on their MR, with its new findings per severity."
         case "notice.reapproved":
-            "To the Author, after a clean Agent Re-review is posted and the agent approved their MR (review.approve)."
+            "To the Author, after an Agent Re-review is posted and the agent approved their MR (review.approve)."
         default: ""
         }
     }
@@ -205,7 +205,7 @@ public enum Copy {
         "The agent has not reviewed this MR. It reviews with the skill set in review.skill, read-only, on a temporary checkout, and nothing is posted until you approve it."
     public static func agentReviewStatus(_ status: String) -> String {
         switch status {
-        case "queued": "Queued: starts after the agent's next poll"
+        case "queued": "Queued: starts in a few seconds"
         case "running": "Reviewing…"
         case "ready": "Ready: read it, then post or discard"
         case "posting": "Posting…"
@@ -244,13 +244,11 @@ public enum Copy {
     public static let readyToApprove = "Ready to approve: only minor findings left"
     /// The list's badge for an MR that changed since the agent's posted review.
     public static func changedSinceReview(_ change: ChangedSinceReview) -> String {
-        let what =
-            switch (change.code, change.description) {
-            case (true, true): "code and description"
-            case (true, false): "code"
-            default: "description"
-            }
-        return "Changed since the agent's review: \(what)"
+        switch (change.code, change.description) {
+        case (true, true): "Code and description changed since review"
+        case (true, false): "Code changed since review"
+        default: "Description changed since review"
+        }
     }
     // Agent Review activity (Overview and menu bar)
     public static let agentReviewHeading = "Agent Review"
@@ -292,7 +290,7 @@ public enum Copy {
     }
     public static func agentReviewOutcome(_ code: String) -> String {
         switch code {
-        case "queued": "Review queued. It starts after the agent's next poll."
+        case "queued": "Review queued. It starts in a few seconds."
         case "already-queued": "A review of this MR is already queued or running."
         case "posted": "Review posted to GitLab."
         case "discarded": "Review discarded."

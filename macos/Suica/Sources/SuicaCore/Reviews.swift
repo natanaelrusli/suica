@@ -94,7 +94,7 @@ public struct ReviewSummary: Codable, Equatable, Identifiable, Sendable {
     public let reviewers: [ReviewerInfo]
     /// Nil when the agent never reviewed it, or from an agent without Agent Review.
     public let agentReview: AgentReviewInfo?
-    /// Set when the MR changed since the agent's posted review and no newer review is open; absent from an older CLI.
+    /// Set when the MR changed since the agent's posted review, no newer review is open and you have not approved it; absent from an older CLI.
     public let changedSinceReview: ChangedSinceReview?
     /// Only minor findings are left on an unchanged MR nobody approved yet; false from an older CLI.
     public let readyToApprove: Bool
@@ -358,8 +358,8 @@ public protocol ReviewsClient: Sendable {
 
 // MARK: - Model
 
-/// The Review requests page: the list, the selected MR and its details. Details are cached per
-/// MR until the list is refreshed or the MR is reloaded.
+/// The Review requests page: the list, the selected MR and its details. Each refresh reads the
+/// selected MR again, so new comments and pushes show up, and forgets the other MRs' details.
 @MainActor @Observable
 public final class ReviewsModel {
     /// The last good list: a failed refresh does not clear it.
@@ -452,8 +452,8 @@ public final class ReviewsModel {
         } catch {
             approvalNotices[key] = MenuModel.message(for: error)
         }
-        await loadDetail(key)
         approvingKeys.remove(key)
+        // The approved MR is the selected one, so the refresh reads it again too.
         await refresh()
     }
 
@@ -483,15 +483,15 @@ public final class ReviewsModel {
             list = fresh
             errorText = nil
             let keys = Set(fresh.mergeRequests.map(\.key))
-            details = details.filter { keys.contains($0.key) }
             if let selected = selectedKey, !keys.contains(selected) { selectedKey = nil }
             // The first row on screen, so it is one that waits for the Owner when there is one.
             if selectedKey == nil { selectedKey = fresh.sections.first?.items.first?.key }
+            details = details.filter { $0.key == selectedKey }
         } catch {
             guard mine == latestRefresh else { return }
             errorText = MenuModel.message(for: error)
         }
-        if let key = selectedKey, details[key] == nil { await loadDetail(key) }
+        if let key = selectedKey { await loadDetail(key, keepingNotice: true) }
     }
 
     public func select(_ key: String?) async {
@@ -501,9 +501,9 @@ public final class ReviewsModel {
     }
 
     /// Fetches the MR again even when it is cached; the latest load per MR is the one stored.
-    public func loadDetail(_ key: String) async {
-        // A reload of your own drops the last approval's outcome; the one after approving keeps it.
-        if !approvingKeys.contains(key) { approvalNotices[key] = nil }
+    /// A reload of your own drops the last approval's outcome; a refresh keeps it.
+    public func loadDetail(_ key: String, keepingNotice: Bool = false) async {
+        if !keepingNotice && !approvingKeys.contains(key) { approvalNotices[key] = nil }
         let mine = (latestDetail[key] ?? 0) + 1
         latestDetail[key] = mine
         loadingKeys.insert(key)

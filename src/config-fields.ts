@@ -222,8 +222,8 @@ export const CONFIG_FIELDS: readonly ConfigField[] = [
   {
     path: ["review", "approve"],
     type: "bool",
-    label: "Approve after a clean re-review",
-    help: "Approve the MR as you at the reviewed commit once an Agent Re-review with no new findings and every previous finding fixed is posted",
+    label: "Approve automatically when ready",
+    help: "Approve the MR as you at the reviewed commit, and resolve your threads, once a posted Agent Review leaves only Minor or Nit findings. Off: approve with one click in the app",
   },
   {
     path: ["review", "skill"],

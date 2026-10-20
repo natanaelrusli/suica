@@ -243,6 +243,23 @@ describe("readyToApprove", () => {
   });
 });
 
+describe("buildReviewList once you approved", () => {
+  it("does not mark an MR you approved as changed since the agent's review", () => {
+    const posted: AgentReviewRow = { ...POSTED_NINE, headSha: "sha-9-a" };
+    const failed: AgentReviewRow = { ...POSTED_NINE, id: 6, status: "failed", headSha: null };
+    const list = (state: "APPROVED" | "UNREVIEWED") =>
+      buildReviewList(
+        snapshot({
+          reviewRequested: [mr(9, { headSha: "sha-9-b", reviewers: [reviewer("me", state)] })],
+        }),
+        new Map([["g/p!9", failed]]),
+        new Map([["g/p!9", posted]]),
+      ).mergeRequests[0];
+    expect(list("UNREVIEWED")?.changedSinceReview).toEqual({ code: true, description: false });
+    expect(list("APPROVED")?.changedSinceReview).toBeNull();
+  });
+});
+
 describe("changedSinceReview", () => {
   const base = (overrides: Partial<AgentReviewRow> = {}): AgentReviewRow => ({
     ...POSTED_NINE,

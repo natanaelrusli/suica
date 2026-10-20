@@ -25,7 +25,7 @@ export const configSchema = z
         activeSeconds: positiveInt.default(120),
         idleSeconds: positiveInt.default(300),
         idleAfterSeconds: positiveInt.default(300),
-        maxBackoffSeconds: positiveInt.default(900),
+        maxBackoffSeconds: positiveInt.default(300),
       })
       .strict()
       .default({}),
@@ -87,8 +87,9 @@ export const configSchema = z
         post: z.enum(["approval", "auto"]).default("approval"),
         // comment: one MR note; inline: findings on a line of the diff become threads there.
         postAs: z.enum(["comment", "inline"]).default("comment"),
-        // Approve the MR as the Owner once a clean Agent Re-review is posted; the Owner asked for it on.
-        approve: z.boolean().default(true),
+        // Approve the MR as the Owner once a review that is ready to approve is posted. Off: the
+        // Owner approves with one click in the app.
+        approve: z.boolean().default(false),
         // A skill name only, as typed after the slash: it ends up in a prompt and a file path.
         skill: z
           .string()

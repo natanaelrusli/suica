@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buildPrompt,
   createReviewWorker,
@@ -15,6 +15,7 @@ import {
   renderThread,
   runAgentReview,
   sanitizeForGitLab,
+  tickEvery,
 } from "../src/agent-review.ts";
 import type { ReviewDeps } from "../src/agent-review.ts";
 import { parseConfig } from "../src/config.ts";
@@ -330,6 +331,9 @@ const SINCE_DIFFS = [
 const PREVIOUS_REVIEW = "# Code review\n## Findings\n1. Major `a.ts:1` — old problem.\n";
 const CLEAN_REREVIEW =
   "# Re-review\n## Previous review\n- Major `a.ts:1` old problem — fixed, the guard is there.\n## Findings\nNone.\n";
+const MINOR_REVIEW =
+  "# Review\n## Findings\n### Minor\n1. `a.ts:1` naming.\n### Nit\n1. `a.ts:2` spacing.\n";
+const MAJOR_REVIEW = "# Review\n## Findings\n### Major\n1. `a.ts:1` wrong total.\n";
 const OPEN_REREVIEW =
   "# Re-review\n## Previous review\n- Major `a.ts:1` old problem — not fixed.\n## Findings\nNone.\n";
 
@@ -891,6 +895,21 @@ describe("runAgentReview", () => {
     expect(h.notifications).toEqual([]);
   });
 
+  it("queues a review again when the agent shuts down during the run, without notifying", async () => {
+    const h = harness();
+    const queued = h.queue();
+    const shutdown = new AbortController();
+    const exec: Exec = (file, args, options) => {
+      if (file !== "/bin/claude") return h.deps.exec(file, args, options);
+      shutdown.abort();
+      return Promise.reject(Object.assign(new Error("aborted"), { code: "ABORT_ERR" }));
+    };
+    await runAgentReview({ ...h.deps, exec, signal: shutdown.signal }, queued);
+    expect(h.db.getAgentReview(queued.id)).toMatchObject({ status: "queued", startedAt: null });
+    expect(h.db.nextQueuedAgentReview()?.id).toBe(queued.id);
+    expect(h.notifications).toEqual([]);
+  });
+
   it("does nothing for a row that is no longer queued", async () => {
     const h = harness();
     const queued = h.queue();
@@ -1141,6 +1160,23 @@ describe("createReviewWorker", () => {
     await worker.idle();
     expect(h.db.latestAgentReviews().get("g/p!7")?.status).toBe("ready");
     expect(h.calls.filter((call) => call.file === "/bin/claude")).toHaveLength(1);
+  });
+
+  it("starts a review queued between polls within one tick, and stops ticking when aborted", async () => {
+    const h = harness();
+    const worker = createReviewWorker(h.deps);
+    const controller = new AbortController();
+    tickEvery(worker, 5, controller.signal);
+    h.db.queueAgentReview("g/p!7", "manual", NOW);
+    await vi.waitFor(() => {
+      expect(h.db.latestAgentReviews().get("g/p!7")?.status).toBe("ready");
+    });
+    await worker.idle();
+    controller.abort();
+
+    h.db.queueAgentReview("g/p!8", "manual", NOW);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(h.db.nextQueuedAgentReview()?.mrKey).toBe("g/p!8");
   });
 });
 
@@ -1450,16 +1486,24 @@ describe("postAgentReview and discardAgentReview", () => {
       expect(untouched.resolved).toEqual([]);
     });
 
-    it("does not approve a re-review with an open previous item, a first review, or with review.approve off", async () => {
+    it("approves a first review with only Minor or Nit findings", async () => {
+      const { h, id } = await readyWith(MINOR_REVIEW, false);
+      const { deps, approvals } = approvingDeps(h);
+      expect(await postAgentReview(deps, id)).toBe("posted");
+      expect(approvals).toHaveLength(1);
+      expect(h.db.getAgentReview(id)?.approved).toBe(true);
+    });
+
+    it("does not approve with a serious finding or open previous item, or with review.approve off", async () => {
       const open = await readyWith(OPEN_REREVIEW, true);
       const a = approvingDeps(open.h);
       expect(await postAgentReview(a.deps, open.id)).toBe("posted");
       expect(a.approvals).toEqual([]);
       expect(open.h.db.getAgentReview(open.id)).toMatchObject({ approved: false, detail: "" });
 
-      const first = await readyWith(CLEAN_REREVIEW, false);
-      const b = approvingDeps(first.h);
-      await postAgentReview(b.deps, first.id);
+      const major = await readyWith(MAJOR_REVIEW, false);
+      const b = approvingDeps(major.h);
+      await postAgentReview(b.deps, major.id);
       expect(b.approvals).toEqual([]);
 
       const off = await readyWith(CLEAN_REREVIEW, true);
@@ -1467,6 +1511,15 @@ describe("postAgentReview and discardAgentReview", () => {
       await postAgentReview(c.deps, off.id);
       expect(c.approvals).toEqual([]);
       expect(off.h.db.getAgentReview(off.id)?.approved).toBe(false);
+    });
+
+    it("is off by default, so approving stays one click in the app", async () => {
+      const { h, id } = await readyWith(CLEAN_REREVIEW, true);
+      const { deps, approvals } = approvingDeps(h, {
+        config: parseConfig("gitlab:\n  hostname: gitlab.example\n"),
+      });
+      await postAgentReview(deps, id);
+      expect(approvals).toEqual([]);
     });
 
     it("notes a refused approval on the posted review and does not retry", async () => {

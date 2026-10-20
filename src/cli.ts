@@ -220,8 +220,8 @@ async function reviewsJson(): Promise<number> {
 }
 
 /**
- * `suica review queue|post|discard|cancel`: the background agent runs queued reviews after its next
- * poll; post and discard act on a review that waits for the Owner, and cancel stops a queued or
+ * `suica review queue|post|discard|cancel`: the background agent starts a queued review within a few
+ * seconds; post and discard act on a review that waits for the Owner, and cancel stops a queued or
  * running one. `post` takes `--inline` or `--comment`, else `review.postAs`. Each prints
  * `{"status": …}`.
  */

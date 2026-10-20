@@ -173,6 +173,30 @@ actor FakeReviewsClient: ReviewsClient {
     #expect(model.selectedDetail?.key == "g/p!1")
 }
 
+@MainActor @Test func refreshReadsTheSelectedMRAgainAndForgetsTheOthers() async throws {
+    let client = FakeReviewsClient(lists: [.success(list("g/p!1", "g/p!2"))])
+    await client.setDetail("g/p!1", .success(try detail("g/p!1")))
+    await client.setDetail("g/p!2", .success(try detail("g/p!2")))
+    let model = ReviewsModel(client: client)
+    await model.refresh()
+    await model.select("g/p!2")
+    await model.refresh()
+    #expect(await client.detailCalls == ["g/p!1", "g/p!2", "g/p!2"])
+    #expect(model.details["g/p!1"] == nil)
+    #expect(model.selectedDetail?.key == "g/p!2")
+}
+
+@MainActor @Test func aBackgroundRefreshKeepsTheApprovalOutcome() async throws {
+    let client = FakeReviewsClient(lists: [.success(list("g/p!1"))])
+    await client.setDetail("g/p!1", .success(try detail("g/p!1")))
+    let model = ReviewsModel(client: client)
+    await model.refresh()
+    await model.approve("g/p!1")
+    let notice = model.approvalNotices["g/p!1"]
+    await model.refresh()
+    #expect(model.approvalNotices["g/p!1"] == notice)
+}
+
 @MainActor @Test func aFailedRefreshKeepsTheListAndAGoneMRIsDropped() async throws {
     let client = FakeReviewsClient(lists: [
         .success(list("g/p!1", "g/p!2")), .failure(.timedOut), .success(list("g/p!2")),
@@ -460,9 +484,9 @@ private func withAgent(_ status: String?) -> ReviewListDocument {
     #expect(list.mergeRequests.first?.changedSinceReview == nil)
     let changed = try #require(list.mergeRequests.last?.changedSinceReview)
     #expect(changed == ChangedSinceReview(code: true, description: false))
-    #expect(Copy.changedSinceReview(changed) == "Changed since the agent's review: code")
-    #expect(Copy.changedSinceReview(ChangedSinceReview(code: false, description: true)) == "Changed since the agent's review: description")
-    #expect(Copy.changedSinceReview(ChangedSinceReview(code: true, description: true)) == "Changed since the agent's review: code and description")
+    #expect(Copy.changedSinceReview(changed) == "Code changed since review")
+    #expect(Copy.changedSinceReview(ChangedSinceReview(code: false, description: true)) == "Description changed since review")
+    #expect(Copy.changedSinceReview(ChangedSinceReview(code: true, description: true)) == "Code and description changed since review")
     // The row offers Re-review only while no review is queued, running, ready or being posted.
     #expect(list.mergeRequests.last?.offersRereview == true)
     let open = ReviewSummary(

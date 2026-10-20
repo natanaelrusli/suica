@@ -421,6 +421,19 @@ describe("review notices (flow C)", () => {
     expect(later.intents).toEqual([]);
   });
 
+  it("announces an approved first review with its findings, then the approval", () => {
+    const state = withRound(round(), {
+      ...posted(4),
+      body: "## Findings\n### Minor\n1. `a.ts:1` naming.",
+      approved: true,
+    });
+    const current = snapshot({
+      reviewRequested: [theirs("APPROVED", [note("a", ME), note("b", ME)])],
+    });
+    const result = plan({ snapshot: current, state });
+    expect(result.intents.map((i) => i.variant)).toEqual(["notice.findings", "notice.approved"]);
+  });
+
   it("announces each Agent Review once and still notices a later approval", () => {
     const result = plan({
       snapshot: snapshot({ reviewRequested: [theirs("APPROVED", [note("a", ME)])] }),
