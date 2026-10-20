@@ -343,6 +343,16 @@ public enum Copy {
         default: "Description changed since review"
         }
     }
+    /// The row's line on why an automatic re-review has not run; nil for a reason this app does not know.
+    public static func rereviewWaiting(_ waiting: RereviewWaiting, dueTime: String?) -> String? {
+        switch waiting.reason {
+        case "waiting": dueTime.map { "Auto re-review due at \($0)" } ?? "Auto re-review waits after the last push"
+        case "daily-cap": "Auto re-review held: daily review cap reached"
+        case "approved": "No auto re-review: approved"
+        case "draft": "No auto re-review while it is a draft"
+        default: nil
+        }
+    }
     // Agent Review activity (Overview and menu bar)
     public static let agentReviewHeading = "Agent Review"
     public static let reviewingNow = "Reviewing now"

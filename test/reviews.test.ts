@@ -192,6 +192,7 @@ describe("buildReviewList", () => {
         ["g/p!9", POSTED_NINE],
       ]),
       new Map([["g/p!9", POSTED_NINE]]),
+      new Map([["g/p!9", { reason: "waiting", dueAt: 1792152800000 }]]),
     );
     expect(list).toEqual(golden("reviews.v1.json"));
   });

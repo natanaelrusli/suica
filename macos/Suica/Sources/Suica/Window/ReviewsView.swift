@@ -184,6 +184,15 @@ private struct ReviewRow: View {
                     }
                 }
             }
+            if let waiting = mr.rereviewWaiting,
+                let line = Copy.rereviewWaiting(
+                    waiting, dueTime: waiting.dueDate?.formatted(date: .omitted, time: .shortened))
+            {
+                Label(line, systemImage: "clock")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if shownState != nil || showsApprovals {
                 HStack(spacing: 4) {
                     if let shownState {

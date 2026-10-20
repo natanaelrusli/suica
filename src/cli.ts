@@ -17,7 +17,12 @@ import {
   parseMrKey,
   resolveOwnThreads,
 } from "./reviews.ts";
-import { cancelAgentReview, discardAgentReview, postAgentReview } from "./agent-review.ts";
+import {
+  cancelAgentReview,
+  discardAgentReview,
+  postAgentReview,
+  rereviewWaitingReasons,
+} from "./agent-review.ts";
 import { parseTemplateRequest, saveTemplate, showTemplates } from "./template-edit.ts";
 import { defaultTemplatesPath } from "./teams/templates.ts";
 import type { TemplateSaveJson } from "./template-edit.ts";
@@ -211,7 +216,12 @@ async function reviewsJson(): Promise<number> {
   const store = openStore(config.statePath ?? defaultStatePath());
   try {
     store.recoverStalePostings(Date.now());
-    const document = buildReviewList(snapshot, store.latestAgentReviews(), store.rereviewBases());
+    const document = buildReviewList(
+      snapshot,
+      store.latestAgentReviews(),
+      store.rereviewBases(),
+      rereviewWaitingReasons(store, config, snapshot, Date.now()),
+    );
     process.stdout.write(`${JSON.stringify(document)}\n`);
     return 0;
   } finally {

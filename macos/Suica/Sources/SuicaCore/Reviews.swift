@@ -101,6 +101,21 @@ public struct ChangedSinceReview: Codable, Equatable, Sendable {
     }
 }
 
+/// Why no automatic Agent Re-review ran yet although the head moved past the last posted review.
+public struct RereviewWaiting: Codable, Equatable, Sendable {
+    /// `waiting`, `daily-cap`, `approved` or `draft`; a newer CLI may send others.
+    public let reason: String
+    /// Epoch milliseconds when the wait after the last push ends; set for `waiting` only.
+    public let dueAt: Int?
+
+    public init(reason: String, dueAt: Int? = nil) {
+        self.reason = reason
+        self.dueAt = dueAt
+    }
+
+    public var dueDate: Date? { dueAt.map { Date(timeIntervalSince1970: Double($0) / 1000) } }
+}
+
 public struct ReviewSummary: Codable, Equatable, Identifiable, Sendable {
     public let key: String
     public let title: String
@@ -116,6 +131,8 @@ public struct ReviewSummary: Codable, Equatable, Identifiable, Sendable {
     public let changedSinceReview: ChangedSinceReview?
     /// Only minor findings are left on an unchanged MR nobody approved yet; false from an older CLI.
     public let readyToApprove: Bool
+    /// Why an automatic re-review has not run yet; nil when none waits, and from an older CLI.
+    public let rereviewWaiting: RereviewWaiting?
 
     public var id: String { key }
 
@@ -135,7 +152,7 @@ public struct ReviewSummary: Codable, Equatable, Identifiable, Sendable {
     public init(
         key: String, title: String, url: String, draft: Bool, createdAt: String? = nil, author: Person,
         reviewers: [ReviewerInfo], agentReview: AgentReviewInfo? = nil, changedSinceReview: ChangedSinceReview? = nil,
-        readyToApprove: Bool = false
+        readyToApprove: Bool = false, rereviewWaiting: RereviewWaiting? = nil
     ) {
         self.key = key
         self.title = title
@@ -147,10 +164,12 @@ public struct ReviewSummary: Codable, Equatable, Identifiable, Sendable {
         self.agentReview = agentReview
         self.changedSinceReview = changedSinceReview
         self.readyToApprove = readyToApprove
+        self.rereviewWaiting = rereviewWaiting
     }
 
     private enum CodingKeys: String, CodingKey {
-        case key, title, url, draft, createdAt, author, reviewers, agentReview, changedSinceReview, readyToApprove
+        case key, title, url, draft, createdAt, author, reviewers, agentReview, changedSinceReview, readyToApprove,
+            rereviewWaiting
     }
 
     public init(from decoder: any Decoder) throws {
@@ -165,6 +184,7 @@ public struct ReviewSummary: Codable, Equatable, Identifiable, Sendable {
         agentReview = try container.decodeIfPresent(AgentReviewInfo.self, forKey: .agentReview)
         changedSinceReview = try container.decodeIfPresent(ChangedSinceReview.self, forKey: .changedSinceReview)
         readyToApprove = try container.decodeIfPresent(Bool.self, forKey: .readyToApprove) ?? false
+        rereviewWaiting = try container.decodeIfPresent(RereviewWaiting.self, forKey: .rereviewWaiting)
     }
 }
 

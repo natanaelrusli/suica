@@ -2,7 +2,14 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSy
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
-import { byAge, coversHead, fetchSinceDiff, planRereviews } from "./agent-rereview.ts";
+import {
+  byAge,
+  coversHead,
+  fetchSinceDiff,
+  planRereviews,
+  rereviewWaiting,
+} from "./agent-rereview.ts";
+import type { RereviewWaitingJson } from "./agent-rereview.ts";
 import type { Config } from "./config.ts";
 import { APPROVED, UNREVIEWED } from "./domain.ts";
 import type { Snapshot } from "./domain.ts";
@@ -720,7 +727,7 @@ export function queueAutomaticReviews(
   const candidates = [...first, ...due];
   for (const mr of candidates) {
     const now = deps.now();
-    if (store.countAgentReviews("auto", now - DAY_MS) >= config.review.maxPerDay) {
+    if (dailyCapReached(store, config, now)) {
       log.warn("agent review daily cap reached", { waiting: candidates.length });
       break;
     }
@@ -733,6 +740,45 @@ export function queueAutomaticReviews(
     }
   }
   store.saveReviewHeads(plan.heads);
+}
+
+/** True when automatic reviews in the last 24 hours reached `review.maxPerDay`. */
+function dailyCapReached(
+  store: Pick<Store, "countAgentReviews">,
+  config: Pick<Config, "review">,
+  now: number,
+): boolean {
+  return store.countAgentReviews("auto", now - DAY_MS) >= config.review.maxPerDay;
+}
+
+/**
+ * Why each review-requested MR waits for an automatic Agent Re-review, from the tracking the agent
+ * saved at its last poll; empty when `review.auto` is off. See `rereviewWaiting`.
+ */
+export function rereviewWaitingReasons(
+  store: Pick<
+    Store,
+    "loadReviewHeads" | "rereviewBases" | "latestAgentReviews" | "countAgentReviews"
+  >,
+  config: Pick<Config, "review">,
+  snapshot: Snapshot,
+  now: number,
+): Map<string, RereviewWaitingJson> {
+  if (!config.review.auto) return new Map();
+  return rereviewWaiting({
+    mrs: snapshot.reviewRequested,
+    heads: store.loadReviewHeads(),
+    bases: store.rereviewBases(),
+    latest: store.latestAgentReviews(),
+    now,
+    afterMs: config.review.rereviewAfterMinutes * MINUTE_MS,
+    approved: new Set(
+      snapshot.reviewRequested
+        .filter((mr) => myReviewState(snapshot, mr) === APPROVED)
+        .map((mr) => mr.key),
+    ),
+    capReached: dailyCapReached(store, config, now),
+  });
 }
 
 export interface ReviewWorker {

@@ -539,3 +539,20 @@ private func withAgent(_ status: String?) -> ReviewListDocument {
     await model.approve("g/p!1")
     #expect(model.approvedCount == 1)
 }
+
+@Test func theListSaysWhyAnAutomaticRereviewHasNotRun() throws {
+    let list = try decodeDocument(ReviewListDocument.self, from: contract("reviews.v1.json"))
+    #expect(list.mergeRequests.first?.rereviewWaiting == nil)
+    let waiting = try #require(list.mergeRequests.last?.rereviewWaiting)
+    #expect(waiting == RereviewWaiting(reason: "waiting", dueAt: 1_792_152_800_000))
+    #expect(waiting.dueDate == Date(timeIntervalSince1970: 1_792_152_800))
+    #expect(Copy.rereviewWaiting(waiting, dueTime: "15:20") == "Auto re-review due at 15:20")
+    #expect(Copy.rereviewWaiting(RereviewWaiting(reason: "daily-cap"), dueTime: nil) == "Auto re-review held: daily review cap reached")
+    #expect(Copy.rereviewWaiting(RereviewWaiting(reason: "approved"), dueTime: nil) == "No auto re-review: approved")
+    #expect(Copy.rereviewWaiting(RereviewWaiting(reason: "draft"), dueTime: nil) == "No auto re-review while it is a draft")
+    #expect(Copy.rereviewWaiting(RereviewWaiting(reason: "later"), dueTime: nil) == nil)
+    let older = Data("""
+        {"key": "g/p!2", "title": "t", "url": "https://x", "draft": false, "author": {"username": "a", "name": "A"}, "reviewers": []}
+        """.utf8)
+    #expect(try JSONDecoder().decode(ReviewSummary.self, from: older).rereviewWaiting == nil)
+}
