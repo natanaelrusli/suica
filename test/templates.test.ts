@@ -7,6 +7,10 @@ import {
   TemplateError,
   describeFindings,
   escapeMarkdown,
+  firstName,
+  greetingAt,
+  pickVariant,
+  splitVariants,
   loadTemplates,
   markdownLink,
   renderTemplate,
@@ -31,9 +35,11 @@ const values = {
   "mr.iid": "7",
   "mr.project": "g/p",
   "person.name": "Alice",
+  "person.firstName": "Alice",
   "owner.name": "Nata",
   "agent.name": "Bahlil",
   "review.findings": "",
+  "time.greeting": "pagi",
 };
 
 describe("validateTemplate", () => {
@@ -221,5 +227,79 @@ describe("loadTemplates", () => {
     mkdirSync(directory, { recursive: true });
     writeFileSync(join(directory, "nudge.txt"), "Halo {{who}}");
     expect(() => loadTemplates(directory)).toThrow(/nudge\.txt.*who/);
+  });
+});
+
+describe("emoji shortcodes", () => {
+  it("expands a known shortcode in the template, never in a value", () => {
+    const tricky = { ...values, "mr.title": ":tada:" };
+    expect(renderTemplate(":wave: {{mr.title}} :rocket:", tricky)).toBe("👋 :tada: 🚀");
+  });
+
+  it("keeps an unknown name and a time as written", () => {
+    expect(renderTemplate("jam 10:30: :not_an_emoji:", values)).toBe("jam 10:30: :not_an_emoji:");
+  });
+});
+
+describe("images", () => {
+  it("accepts an https GIF and refuses any other scheme", () => {
+    expect(() => validateTemplate("x", "![party](https://media.example/p.gif)")).not.toThrow();
+    for (const url of [
+      "http://a.example/p.gif",
+      "data:image/gif;base64,AA",
+      "//a.example/p.gif",
+      "",
+    ]) {
+      expect(() => validateTemplate("x", `![p](${url})`)).toThrow(/https/);
+    }
+  });
+});
+
+describe("variants", () => {
+  const text =
+    "Halo {{person.name}}\n--- or ---\nHai {{person.name}} :wave:\n  --- or ---  \nPermisi";
+
+  it("splits on a line that is exactly the separator", () => {
+    expect(splitVariants(text).map((each) => each.trim())).toEqual([
+      "Halo {{person.name}}",
+      "Hai {{person.name}} :wave:",
+      "Permisi",
+    ]);
+    expect(splitVariants("a --- or --- b")).toHaveLength(1);
+  });
+
+  it("picks the same variant for the same key, and spreads keys over the variants", () => {
+    expect(pickVariant(text, "nudge:g/p!1:alice")).toBe(pickVariant(text, "nudge:g/p!1:alice"));
+    const picked = new Set(
+      Array.from({ length: 30 }, (_, i) => pickVariant(text, `key-${i}`).trim()),
+    );
+    expect(picked.size).toBe(3);
+  });
+
+  it("validates every variant on its own", () => {
+    expect(() => validateTemplate("x", "ok\n--- or ---\n{{nope}}")).toThrow(/nope/);
+    expect(() => validateTemplate("x", "ok\n--- or ---\n  ")).toThrow(/empty/);
+  });
+});
+
+describe("person.firstName and time.greeting", () => {
+  it("takes the first word of the name", () => {
+    expect(firstName("  Rina Wijaya ")).toBe("Rina");
+    expect(firstName("Budi")).toBe("Budi");
+  });
+
+  it("greets by the local hour", () => {
+    const at = (hour: number): string => greetingAt(new Date(2026, 9, 20, hour, 30));
+    expect([at(3), at(4), at(10), at(11), at(14), at(15), at(17), at(18), at(23)]).toEqual([
+      "malam",
+      "pagi",
+      "pagi",
+      "siang",
+      "siang",
+      "sore",
+      "sore",
+      "malam",
+      "malam",
+    ]);
   });
 });

@@ -9,7 +9,9 @@ import type { Snapshot } from "./domain.ts";
 import { myReviewState } from "./events.ts";
 import type { Exec } from "./exec.ts";
 import { execFailure } from "./exec.ts";
-import type { Notification } from "./format.ts";
+import { DEFAULT_ALERTS } from "./alerts.ts";
+import type { AlertName, AlertTemplates } from "./alerts.ts";
+import { clean, renderAlert } from "./format.ts";
 import { descriptionSha } from "./gitlab.ts";
 import type { GraphqlRunner, PostJsonRunner, PostRunner, RestRunner } from "./gitlab.ts";
 import {
@@ -303,7 +305,12 @@ export interface ReviewDeps {
   /** Post with `review.post: auto`; without them a ready review always waits for the Owner. */
   readonly post?: PostRunner;
   readonly postJson?: PostJsonRunner;
+  /** The Owner's notification texts; the built-in ones when absent. */
+  readonly alerts?: AlertTemplates;
 }
+
+const ALERT_MR_TITLE_MAX = 80;
+const ALERT_REASON_MAX = 120;
 
 class Skip extends Error {
   constructor(message: string) {
@@ -321,9 +328,18 @@ function changedLines(detail: MrDetailJson): number {
     .filter((line) => /^[+-](?![+-]{2} )/.test(line)).length;
 }
 
-async function notifyQuietly(deps: ReviewDeps, notification: Notification): Promise<void> {
+async function notifyQuietly(
+  deps: ReviewDeps,
+  name: AlertName,
+  mrTitle: string,
+  reason?: string,
+): Promise<void> {
+  const values = {
+    "mr.title": clean(mrTitle, ALERT_MR_TITLE_MAX),
+    "review.reason": clean(reason ?? "", ALERT_REASON_MAX),
+  };
   try {
-    await deps.notifier.notify(notification);
+    await deps.notifier.notify(renderAlert(deps.alerts ?? DEFAULT_ALERTS, name, values));
   } catch (error) {
     // Never log the error message: process errors embed the notification text.
     deps.log.warn("agent review notification failed", {
@@ -600,21 +616,15 @@ export async function runAgentReview(baseDeps: ReviewDeps, row: AgentReviewRow):
       const approved = store.getAgentReview(row.id)?.approved === true;
       await notifyQuietly(
         deps,
-        outcome === "posted"
-          ? {
-              title: "Review agen diposting",
-              body: `${mrTitle.slice(0, 80)}: sudah diposting ke GitLab${approved ? " dan MR di-approve" : ""}.`,
-            }
-          : {
-              title: "Review agen gagal diposting",
-              body: `${mrTitle.slice(0, 80)}: periksa GitLab, lalu posting dari Suica.`,
-            },
+        outcome !== "posted"
+          ? "alert.review-post-failed"
+          : approved
+            ? "alert.review-approved"
+            : "alert.review-posted",
+        mrTitle,
       );
     } else {
-      await notifyQuietly(deps, {
-        title: "Review agen siap",
-        body: `${mrTitle.slice(0, 80)}: periksa di Suica, lalu posting ke GitLab.`,
-      });
+      await notifyQuietly(deps, "alert.review-ready", mrTitle);
     }
   } catch (error) {
     // A restart of the agent is not the review's fault: it runs again after the restart.
@@ -646,10 +656,12 @@ export async function runAgentReview(baseDeps: ReviewDeps, row: AgentReviewRow):
       mr_key: row.mrKey,
       reason: error instanceof Error ? error.name : "unknown",
     });
-    await notifyQuietly(deps, {
-      title: skipped ? "Review agen dilewati" : "Review agen gagal",
-      body: `${mrTitle.slice(0, 60)}: ${reason.slice(0, 120)}`,
-    });
+    await notifyQuietly(
+      deps,
+      skipped ? "alert.review-skipped" : "alert.review-failed",
+      mrTitle.slice(0, 60),
+      reason.slice(0, ALERT_REASON_MAX),
+    );
   } finally {
     clearInterval(watch);
     if (workDir !== undefined) rmSync(workDir, { recursive: true, force: true });

@@ -13,7 +13,7 @@ import {
 } from "../src/teams/dispatch.ts";
 import type { DispatchDeps, SendMode } from "../src/teams/dispatch.ts";
 import type { TeamsGateway } from "../src/teams/gateway.ts";
-import { DEFAULT_TEMPLATES } from "../src/teams/templates.ts";
+import { DEFAULT_TEMPLATES, greetingAt, pickVariant } from "../src/teams/templates.ts";
 import type { RereviewReviewer } from "../src/teams/types.ts";
 import { ME, mr, person, reviewer, snapshot } from "./builders.ts";
 import { NOW, intent, teamsPlan } from "./teams-builders.ts";
@@ -323,6 +323,23 @@ describe("dispatchQueued", () => {
     await dispatchQueued(h.deps, own());
     expect(h.sent[0]?.text).toContain("evil second line");
     expect(h.sent[0]?.text).not.toContain("‮");
+  });
+
+  it("writes each message from the variant its dedupe key picks, with emoji and the new placeholders", async () => {
+    const h = setup();
+    const nudge =
+      "{{time.greeting}} {{person.firstName}} :wave:\n--- or ---\nHai {{person.firstName}} :rocket:";
+    const deps = { ...h.deps, templates: { ...DEFAULT_TEMPLATES, nudge } };
+    const keys = Array.from({ length: 6 }, (_, i) => i + 1);
+    enqueue(h.store, ...keys);
+    await dispatchQueued(deps, own());
+    const greeting = greetingAt(new Date(WORKING));
+    expect(h.sent.map((each) => each.text)).toEqual(
+      keys.map((slot) =>
+        pickVariant(nudge, `k:${slot}`).includes("Hai") ? "Hai Bob 🚀" : `${greeting} Bob 👋`,
+      ),
+    );
+    expect(new Set(h.sent.map((each) => each.text)).size).toBe(2);
   });
 });
 

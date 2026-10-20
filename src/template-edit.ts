@@ -1,7 +1,16 @@
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
+import {
+  ALERT_NAMES,
+  ALERT_PLACEHOLDERS,
+  DEFAULT_ALERTS,
+  isAlertName,
+  validateAlert,
+} from "./alerts.ts";
+import type { AlertName } from "./alerts.ts";
 import { writeAtomically } from "./config-edit.ts";
+import { EMOJI } from "./emoji.ts";
 import {
   DEFAULT_TEMPLATES,
   PLACEHOLDERS,
@@ -20,7 +29,11 @@ import type { TemplateName } from "./teams/types.ts";
 const MAX_TEMPLATE_CHARS = 4000;
 
 export interface TemplateJson {
-  readonly name: TemplateName;
+  readonly name: TemplateName | AlertName;
+  /** "teams" for a Teams message, "alert" for a notification to the Owner (title, then body). */
+  readonly group: "teams" | "alert";
+  /** The placeholders this template may use. */
+  readonly placeholders: readonly string[];
   /** The text the agent uses: the file's when there is one, else the built-in one. */
   readonly text: string;
   /** True when `<name>.txt` replaces the built-in template. */
@@ -33,8 +46,17 @@ export interface TemplatesDocJson {
   readonly version: 1;
   /** The templates folder. */
   readonly path: string;
+  /** The Teams templates' placeholders, kept for apps that predate `group`. */
   readonly placeholders: readonly string[];
   readonly templates: readonly TemplateJson[];
+  /** The `:name:` shortcodes templates may use. */
+  readonly emoji: Readonly<Record<string, string>>;
+}
+
+const ALL_NAMES = [...TEMPLATE_NAMES, ...ALERT_NAMES] as const;
+
+function defaultText(name: TemplateName | AlertName): string {
+  return isAlertName(name) ? DEFAULT_ALERTS[name] : DEFAULT_TEMPLATES[name];
 }
 
 export function showTemplates(directory: string): TemplatesDocJson {
@@ -42,22 +64,26 @@ export function showTemplates(directory: string): TemplatesDocJson {
     version: 1,
     path: directory,
     placeholders: PLACEHOLDERS,
-    templates: TEMPLATE_NAMES.map((name) => {
+    templates: ALL_NAMES.map((name) => {
       const file = join(directory, `${name}.txt`);
       const custom = existsSync(file);
+      const alert = isAlertName(name);
       return {
         name,
-        text: custom ? readFileSync(file, "utf8") : DEFAULT_TEMPLATES[name],
+        group: alert ? "alert" : "teams",
+        placeholders: alert ? ALERT_PLACEHOLDERS[name] : PLACEHOLDERS,
+        text: custom ? readFileSync(file, "utf8") : defaultText(name),
         custom,
-        defaultText: DEFAULT_TEMPLATES[name],
+        defaultText: defaultText(name),
       };
     }),
+    emoji: EMOJI,
   };
 }
 
 const requestSchema = z
   .object({
-    name: z.enum(TEMPLATE_NAMES),
+    name: z.enum(ALL_NAMES),
     /** Null removes the file, so the built-in template applies again. */
     text: z.string().max(MAX_TEMPLATE_CHARS).nullable(),
   })
@@ -91,7 +117,9 @@ export function saveTemplate(
     return { status: "reset" };
   }
   try {
-    validateTemplate(`${request.name}.txt`, request.text);
+    const label = `${request.name}.txt`;
+    if (isAlertName(request.name)) validateAlert(label, request.name, request.text);
+    else validateTemplate(label, request.text);
   } catch (error) {
     if (error instanceof TemplateError) return { status: "invalid", message: error.message };
     throw error;
