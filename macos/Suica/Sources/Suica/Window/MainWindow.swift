@@ -24,14 +24,24 @@ struct NoticeBox: View {
 struct Card<Content: View>: View {
     let title: String
     let symbol: String
+    /// A link in the heading's corner to the page with the rest, as "Statistics →".
+    var link: CardLink?
     @ViewBuilder let content: Content
     @Environment(\.metrics) private var metrics
 
     var body: some View {
         VStack(alignment: .leading, spacing: metrics.gap * 0.6) {
-            Label(title, systemImage: symbol)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.secondary)
+            HStack {
+                Label(title, systemImage: symbol)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                if let link {
+                    Spacer(minLength: 8)
+                    Button(link.title, action: link.action)
+                        .buttonStyle(.link)
+                        .font(.caption)
+                }
+            }
             content
         }
         .padding(metrics.padding)
@@ -39,6 +49,11 @@ struct Card<Content: View>: View {
         .background(.background.secondary, in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.separator.opacity(0.5)))
     }
+}
+
+struct CardLink {
+    let title: String
+    let action: () -> Void
 }
 
 /// A small figure with a coloured icon, as at the top of Overview and Statistics. With an action it
@@ -246,7 +261,7 @@ struct MainWindow: View {
 
     @ViewBuilder private func sectionPage(_ item: SidebarItem) -> some View {
         switch item.section {
-        case .overview: OverviewView(window: window, editor: editor, navigator: navigator)
+        case .overview: OverviewView(window: window, editor: editor, reviews: reviews, navigator: navigator)
         case .reviews: ReviewsView(model: reviews)
         case .messages: MessagesView(window: window)
         case .statistics: StatisticsView(window: window)

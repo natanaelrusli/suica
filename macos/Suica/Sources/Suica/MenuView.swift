@@ -147,12 +147,15 @@ struct MenuView: View {
 
     @ViewBuilder private var lists: some View {
         if let teams = model.state?.teams {
-            Picker(Copy.panelLists, selection: $tab) {
-                Text(Copy.needsYouTab(teams.attention.count + teams.attentionHidden)).tag(PanelTab.needsYou)
-                Text(Copy.recentTab(teams.recent.count)).tag(PanelTab.recent)
+            // Drawn by hand: a segmented picker keeps its natural width instead of filling the panel.
+            HStack(spacing: 2) {
+                tabButton(.needsYou, Copy.needsYouTab(teams.attention.count + teams.attentionHidden))
+                tabButton(.recent, Copy.recentTab(teams.recent.count))
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
+            .padding(2)
+            .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel(Copy.panelLists)
             ScrollView {
                 VStack(alignment: .leading, spacing: 8) {
                     switch tab {
@@ -177,6 +180,25 @@ struct MenuView: View {
         } else {
             Spacer(minLength: 0)
         }
+    }
+
+    private func tabButton(_ value: PanelTab, _ title: String) -> some View {
+        let selected = tab == value
+        return Button {
+            tab = value
+        } label: {
+            Text(title)
+                .font(.callout.weight(selected ? .semibold : .regular))
+                .foregroundStyle(selected ? .primary : .secondary)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 5)
+                .background(
+                    selected ? AnyShapeStyle(.background) : AnyShapeStyle(.clear), in: RoundedRectangle(cornerRadius: 6)
+                )
+                .contentShape(RoundedRectangle(cornerRadius: 6))
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     private func empty(_ text: String) -> some View {

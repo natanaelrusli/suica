@@ -432,9 +432,6 @@ public enum Copy {
     // MARK: Message rows
 
     public static let youApprovedMr = "You approved this MR in GitLab"
-    public static let trackedShort = "Tracked"
-    public static let toReviewShort = "To review"
-    public static let needsYouShort = "Needs you"
     public static func recentHeading(_ count: Int) -> String { "Recent (\(count))" }
 
     // MARK: Menu bar panel
@@ -444,6 +441,30 @@ public enum Copy {
     public static func needsYouTab(_ count: Int) -> String { "Needs you · \(count)" }
     public static func recentTab(_ count: Int) -> String { "Recent · \(count)" }
     public static let recentEmpty = "Nothing was sent or skipped lately."
+    // MARK: Overview widgets
+
+    public static let openLogs = "Open logs"
+    public static let editConfig = "Edit config"
+    public static let readyToApproveShort = "Ready to approve"
+    public static let readyToApproveCaption = "Only minor findings left"
+    public static let tokensToday = "Tokens today"
+    public static let waitingForReviewHeading = "Waiting for your review"
+    public static let agentReviewShort = "Agent review"
+    public static let readyToPostHeading = "Ready to post"
+    public static let reviewSettings = "Settings"
+    public static let weekHeading = "Last 7 days"
+    public static let tokensHeading = "Tokens"
+    public static let systemHeading = "System"
+    public static func allItems(_ count: Int) -> String { "All \(count) →" }
+    public static func linkTo(_ title: String) -> String { "\(title) →" }
+    public static func moreInMessages(_ count: Int) -> String { "\(count) more in Messages" }
+    public static func weekSummary(requests: Int, nudges: Int, pollSuccess: Double?) -> String {
+        let polls = pollSuccess.map { " · \(Int(($0 * 100).rounded()))% of polls ok" } ?? ""
+        return "\(requests) review requests · \(nudges) nudges sent\(polls)"
+    }
+    public static func tokenTotals(day: String, week: String, month: String) -> String {
+        "24 h \(day) · 7 d \(week) · 30 d \(month)"
+    }
     public static let pauseShort = "Pause"
     public static let resumeShort = "Resume"
     public static let reviewsShort = "Reviews"
