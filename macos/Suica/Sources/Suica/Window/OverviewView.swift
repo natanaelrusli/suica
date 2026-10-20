@@ -132,11 +132,11 @@ struct OverviewView: View {
             }
             .help(Copy.refresh)
             Button {
-                NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: status.paths.logs)])
+                show(.logs)
             } label: {
                 Label(Copy.openLogs, systemImage: "doc.text")
             }
-            .help(DisplayText.clean(status.paths.logs, max: 300))
+            .help(Copy.openLogs)
             Button {
                 show(.configuration)
             } label: {

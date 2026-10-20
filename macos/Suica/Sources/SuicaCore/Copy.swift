@@ -442,6 +442,19 @@ public enum Copy {
     // MARK: Overview widgets
 
     public static let openLogs = "Open logs"
+
+    // MARK: Logs
+
+    public static let logs = "Logs"
+    public static let logOutput = "Output"
+    public static let logErrors = "Errors"
+    public static let searchLogs = "Search the log"
+    public static let logEmpty = "Nothing logged yet."
+    public static let logNoMatches = "No entries match the search."
+    public static func logMissing(_ file: String) -> String { "\(file) does not exist yet." }
+    public static func logTruncated(_ kilobytes: Int) -> String { "Showing the last \(kilobytes) KB of the file." }
+    public static func logReadFailed(_ reason: String) -> String { "Could not read the log: \(reason)" }
+    public static let logFolderUnknown = "The logs folder is not known until the agent's status loads."
     public static let editConfig = "Edit config"
     public static let readyToApproveShort = "Ready to approve"
     public static let readyToApproveCaption = "Only minor findings left"

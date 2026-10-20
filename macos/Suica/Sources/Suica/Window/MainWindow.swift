@@ -266,6 +266,7 @@ struct MainWindow: View {
         case .messages: MessagesView(window: window)
         case .statistics: StatisticsView(window: window)
         case .usage: UsageView(window: window)
+        case .logs: LogsView(window: window)
         case .configuration: ConfigurationView(window: window, editor: editor, category: item.category)
         case .appearance: AppearanceView(settings: settings)
         }
