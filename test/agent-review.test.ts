@@ -999,7 +999,7 @@ describe("queueAutomaticReviews", () => {
       queueAutomaticReviews(
         { store: db, config: auto, log: silent, now: () => at },
         snapshot({
-          reviewRequested: [mr(1, { headSha, reviewers: [reviewer("me", "APPROVED")] })],
+          reviewRequested: [mr(1, { headSha, reviewers: [reviewer("me", "REVIEWED")] })],
         }),
         [],
       );
@@ -1009,6 +1009,28 @@ describe("queueAutomaticReviews", () => {
     poll("sha-1-b", NOW + 10 * MINUTE);
     expect(queuedKeys(db)).toEqual(["g/p!1"]);
     expect(db.loadReviewHeads().get("g/p!1")?.queuedHead).toBe("sha-1-b");
+  });
+
+  it("stops re-reviewing an MR once you approved it, and spends none of the daily cap on it", () => {
+    const db = store();
+    posted(db, "g/p!1", "sha-1-a");
+    const poll = (state: string, at: number) =>
+      queueAutomaticReviews(
+        { store: db, config: auto, log: silent, now: () => at },
+        snapshot({
+          reviewRequested: [mr(1, { headSha: "sha-1-b", reviewers: [reviewer("me", state)] })],
+        }),
+        [],
+      );
+    db.saveReviewHeads(
+      new Map([["g/p!1", { head: "sha-1-b", changedAt: NOW - DAY, queuedHead: "sha-1-a" }]]),
+    );
+    poll("APPROVED", NOW);
+    expect(queuedKeys(db)).toEqual([]);
+    expect(db.countAgentReviews("auto", NOW - DAY)).toBe(0);
+    // Approval taken back (say GitLab reset it): the push is due again.
+    poll("REVIEWED", NOW + MINUTE);
+    expect(queuedKeys(db)).toEqual(["g/p!1"]);
   });
 
   it("does not queue at once when GitLab asks again for an MR whose last review was posted", () => {
@@ -1087,7 +1109,7 @@ describe("queueAutomaticReviews", () => {
       queueAutomaticReviews(
         { store: db, config: auto, log: silent, now: () => at },
         snapshot({
-          reviewRequested: [mr(1, { headSha: "sha-1-c", reviewers: [reviewer("me", "APPROVED")] })],
+          reviewRequested: [mr(1, { headSha: "sha-1-c", reviewers: [reviewer("me", "REVIEWED")] })],
         }),
         [],
       );

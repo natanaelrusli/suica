@@ -2,6 +2,7 @@
 export type ReviewState = string;
 
 export const UNREVIEWED: ReviewState = "UNREVIEWED";
+export const APPROVED: ReviewState = "APPROVED";
 
 export interface Person {
   readonly username: string;
