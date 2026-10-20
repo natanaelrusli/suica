@@ -14,10 +14,11 @@ struct ReviewsView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .task { await model.refresh() }
-        // While a review is queued, running or being posted, read the list again until it is done.
+        // Reads the list and the selected MR again while the page is open, more often while a
+        // review is queued, running or being posted.
         .task(id: model.hasActiveAgentReview) {
-            while model.hasActiveAgentReview {
-                do { try await Task.sleep(for: .seconds(15)) } catch { return }
+            while true {
+                do { try await Task.sleep(for: .seconds(model.hasActiveAgentReview ? 15 : 30)) } catch { return }
                 await model.refresh()
             }
         }
