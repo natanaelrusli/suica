@@ -6,9 +6,6 @@ public enum Copy {
     public static let running = "Polling"
     public static let paused = "Paused"
     public static func tracked(_ count: Int) -> String { "\(count) of your MRs are tracked" }
-    public static func waitingForYou(_ count: Int) -> String {
-        "\(count) MRs are waiting for your review"
-    }
     public static let attentionHeading = "Needs your attention"
     public static let attentionEmpty = "Nothing is waiting for you."
     public static func moreHidden(_ count: Int) -> String {
@@ -140,7 +137,6 @@ public enum Copy {
     public static let defaultOption = "Default"
     public static let teamsOn = "Teams is on"
     public static let teamsOff = "Teams is off"
-    public static func needsAttention(_ count: Int) -> String { "\(count) need your attention" }
     public static func pid(_ pid: Int) -> String { "pid \(pid)" }
     public static func pollIntervals(active: Int, idle: Int) -> String {
         "Every \(active) s while MRs are active, \(idle) s when idle"
@@ -476,6 +472,79 @@ public enum Copy {
         case "not-installed": agentNotInstalled
         case "nothing": "Nothing to do."
         default: "Done."
+        }
+    }
+
+    // Appearance
+    public static let appearance = "Appearance"
+    public static let settingsMenu = "Settings…"
+    public static let goMenu = "Go"
+    public static let workGroup = "Work"
+    public static let insightsGroup = "Insights"
+    public static let settingsGroup = "Settings"
+    public static let accentHeading = "Accent colour"
+    public static let accentHint = "Buttons, selections, links and highlights in the popover and this window."
+    public static let lookHeading = "Look"
+    public static let modeHeading = "Light or dark"
+    public static let densityHeading = "Density"
+    public static let densityHint = "Compact fits more rows and cards on screen."
+    public static let motionHeading = "Animation"
+    public static let motionHint = "Full slides, springs and bounces. Fades only and Off keep things still."
+    public static let systemReducesMotion =
+        "Reduce motion is on in System Settings → Accessibility → Display, so the app only fades."
+    public static let menuBarHeading = "Menu bar"
+    public static let menuBarBadgePicker = "Beside the penguin"
+    public static let menuBarBadgeHint = "Shown while messages need you."
+    public static let popoverCounters = "Show Tracked, To review and Needs you in the popover"
+    public static let startPagePicker = "Open the window on"
+    public static let windowHeading = "Window"
+    public static let resetAppearance = "Restore defaults"
+    public static let appearanceNote =
+        "These choices belong to this app on this Mac. They apply at once and are not part of the agent's config file."
+    public static let previewHeading = "Preview"
+    public static let previewSample = "A sample tile in the chosen colour"
+    public static func openSection(_ title: String) -> String { "Open \(title)" }
+
+    public static func title(_ value: AccentTheme) -> String {
+        switch value {
+        case .glacier: "Glacier"
+        case .system: "System"
+        case .suica: "Suica green"
+        case .tangerine: "Tangerine"
+        case .watermelon: "Watermelon"
+        case .grape: "Grape"
+        case .graphite: "Graphite"
+        }
+    }
+
+    public static func title(_ value: AppearanceMode) -> String {
+        switch value {
+        case .system: "System"
+        case .light: "Light"
+        case .dark: "Dark"
+        }
+    }
+
+    public static func title(_ value: Density) -> String {
+        switch value {
+        case .comfortable: "Comfortable"
+        case .compact: "Compact"
+        }
+    }
+
+    public static func title(_ value: MotionLevel) -> String {
+        switch value {
+        case .full: "Full"
+        case .reduced: "Fades only"
+        case .off: "Off"
+        }
+    }
+
+    public static func title(_ value: MenuBarBadge) -> String {
+        switch value {
+        case .count: "Number"
+        case .dot: "Dot"
+        case .hidden: "Nothing"
         }
     }
 }

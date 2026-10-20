@@ -84,7 +84,7 @@ struct ReviewsView: View {
                 .padding(.horizontal, 6)
                 .padding(.vertical, 1)
                 .foregroundStyle(section.group == .waiting ? Color.white : Color.secondary)
-                .background(section.group == .waiting ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.quaternary), in: Capsule())
+                .background(section.group == .waiting ? AnyShapeStyle(.tint) : AnyShapeStyle(.quaternary), in: Capsule())
         }
         .accessibilityElement(children: .combine)
     }
@@ -134,7 +134,7 @@ private struct ReviewRow: View {
                 Text(DisplayText.clean(mr.author.name, max: 60)).lineLimit(1)
                 Text("·").foregroundStyle(.tertiary)
                 // The key gives way first: the author and the project's own name stay readable.
-                Text(Self.shortKey(mr.key)).lineLimit(1).truncationMode(.head).layoutPriority(-1)
+                Text(DisplayText.shortKey(mr.key)).lineLimit(1).truncationMode(.head).layoutPriority(-1)
             }
             .font(.caption)
             .foregroundStyle(.secondary)
@@ -174,17 +174,17 @@ private struct ReviewRow: View {
 
     /// Only when someone besides you reviews it; "0/1 approved" about yourself is noise.
     private var showsApprovals: Bool { mr.approvals.total > (myState == nil ? 0 : 1) }
-
-    /// `group/sub/project!12` as `project!12`.
-    static func shortKey(_ key: String) -> String {
-        DisplayText.clean(String(key.split(separator: "/").last ?? Substring(key)), max: 60)
-    }
 }
 
 /// A small coloured label.
 struct Badge: View {
     let text: String
-    let tint: Color
+    let tint: AnyShapeStyle
+
+    init(text: String, tint: some ShapeStyle) {
+        self.text = text
+        self.tint = AnyShapeStyle(tint)
+    }
 
     var body: some View {
         Text(text)
@@ -256,12 +256,12 @@ private struct MergeRequestDetailView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(DisplayText.clean(detail.title, max: 300))
-                    .font(.title2.weight(.semibold))
-                    .textSelection(.enabled)
-                Spacer()
-                if loading { ProgressView().controlSize(.small) }
+            // The title gets the full width; the actions sit on their own row beneath it, so a long
+            // title is never squeezed into a narrow column beside them.
+            Text(DisplayText.clean(detail.title, max: 300))
+                .font(.title2.weight(.semibold))
+                .textSelection(.enabled)
+            HStack(spacing: 8) {
                 if model.isApprovedByMe(detail) {
                     Badge(text: Copy.approvedByYou, tint: .green)
                 } else if model.canApprove(detail) {
@@ -288,12 +288,16 @@ private struct MergeRequestDetailView: View {
                 if let url = DisplayText.safeURL(detail.url) {
                     Link(destination: url) { Label(Copy.openInGitLab, systemImage: "arrow.up.right.square") }
                 }
+                Spacer(minLength: 0)
+                if loading { ProgressView().controlSize(.small) }
             }
             if let error { NoticeBox(text: error, tint: .red) }
             if let notice = model.approvalNotices[detail.key] { NoticeBox(text: notice, tint: .secondary) }
             HStack(spacing: 6) {
                 if detail.draft { Badge(text: Copy.draft, tint: .gray) }
-                Text(DisplayText.clean(detail.key, max: 120)).textSelection(.enabled)
+                Text(DisplayText.shortKey(detail.key))
+                    .textSelection(.enabled)
+                    .help(DisplayText.clean(detail.key, max: 120))
                 Text("·").foregroundStyle(.tertiary)
                 Text(Copy.byAuthor(DisplayText.clean(detail.author.name, max: 60)))
                 if let date = detail.updatedDate {
@@ -321,7 +325,7 @@ private struct MergeRequestDetailView: View {
                     Text("+\(additions)").font(.caption.monospacedDigit()).foregroundStyle(.green)
                     Text("−\(deletions)").font(.caption.monospacedDigit()).foregroundStyle(.red)
                 }
-                ForEach(detail.labels, id: \.self) { Badge(text: DisplayText.clean($0, max: 40), tint: .accentColor) }
+                ForEach(detail.labels, id: \.self) { Badge(text: DisplayText.clean($0, max: 40), tint: .tint) }
             }
             if !detail.reviewers.isEmpty {
                 FlowRow {
@@ -348,12 +352,13 @@ private struct MergeRequestDetailView: View {
 }
 
 enum ReviewTint {
-    static func agent(_ status: String) -> Color {
+    /// A ready review takes the accent colour, so it follows Appearance → Accent colour.
+    static func agent(_ status: String) -> AnyShapeStyle {
         switch status {
-        case "ready": .accentColor
-        case "posted": .green
-        case "failed": .red
-        default: .secondary
+        case "ready": AnyShapeStyle(.tint)
+        case "posted": AnyShapeStyle(.green)
+        case "failed": AnyShapeStyle(.red)
+        default: AnyShapeStyle(.secondary)
         }
     }
 
@@ -442,6 +447,7 @@ private struct ChangesTab: View {
     let detail: MergeRequestDetail
     @State private var collapsed: Set<String> = []
     @State private var parsed: [String: [DiffLine]] = [:]
+    @Environment(\.motionLevel) private var motion
 
     var body: some View {
         ScrollView {
@@ -469,7 +475,7 @@ private struct ChangesTab: View {
     private func fileHeader(_ file: DiffFile) -> some View {
         let open = !collapsed.contains(file.id)
         return Button {
-            withAnimation(Motion.content) {
+            withMotion(Motion.content, motion) {
                 if open { collapsed.insert(file.id) } else { collapsed.remove(file.id) }
             }
         } label: {
@@ -564,13 +570,14 @@ private struct DiffLineRow: View {
 private struct CommentsTab: View {
     let detail: MergeRequestDetail
     @State private var showActivity = false
+    @Environment(\.motionLevel) private var motion
 
     private var shown: [MRDiscussion] { showActivity ? detail.discussions : detail.comments }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-                Toggle(Copy.showActivity, isOn: $showActivity.animation(Motion.content))
+                Toggle(Copy.showActivity, isOn: $showActivity.animation(Motion.animation(Motion.content, motion)))
                     .toggleStyle(.switch)
                     .controlSize(.small)
                 if detail.discussionsTruncated {

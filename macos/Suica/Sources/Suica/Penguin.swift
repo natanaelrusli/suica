@@ -44,7 +44,13 @@ struct AppIconView: View {
 struct Chip: View {
     let text: String
     let symbol: String
-    let tint: Color
+    let tint: AnyShapeStyle
+
+    init(text: String, symbol: String, tint: some ShapeStyle) {
+        self.text = text
+        self.symbol = symbol
+        self.tint = AnyShapeStyle(tint)
+    }
 
     var body: some View {
         Label(text, systemImage: symbol)

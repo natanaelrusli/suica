@@ -5,14 +5,16 @@ import SwiftUI
 struct OverviewView: View {
     let window: WindowModel
     let editor: ConfigEditorModel
+    let navigator: Navigator
     @State private var wide = false
+    @Environment(\.metrics) private var metrics
     @State private var confirmingAutoPost = false
 
     private var menu: MenuModel { window.menu }
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: metrics.gap) {
                 if let text = window.errorText { NoticeBox(text: text, tint: .red) }
                 if let text = window.banner { NoticeBox(text: text, tint: .secondary) }
                 if let status = window.status {
@@ -34,13 +36,13 @@ struct OverviewView: View {
                         Card(title: Copy.agentReviewHeading, symbol: "checkmark.bubble") { reviewSection(review) }
                     }
                     if wide {
-                        HStack(alignment: .top, spacing: 16) {
-                            VStack(spacing: 16) {
+                        HStack(alignment: .top, spacing: metrics.gap) {
+                            VStack(spacing: metrics.gap) {
                                 agent
                                 reviews
                                 polling
                             }
-                            VStack(spacing: 16) {
+                            VStack(spacing: metrics.gap) {
                                 model
                                 files
                             }
@@ -56,7 +58,7 @@ struct OverviewView: View {
                     ProgressView(Copy.loading)
                 }
             }
-            .padding(20)
+            .padding(metrics.gap + 4)
             .motion(value: window.errorText)
             .motion(value: window.banner)
             .motion(value: window.status)
@@ -74,27 +76,42 @@ struct OverviewView: View {
         let lastPoll = status.lastPoll.map {
             Date(timeIntervalSince1970: TimeInterval($0.at) / 1000).formatted(.relative(presentation: .named))
         }
-        return LazyVGrid(columns: [GridItem(.adaptive(minimum: 190), spacing: 12, alignment: .top)], spacing: 12) {
+        return LazyVGrid(
+            columns: [GridItem(.adaptive(minimum: 190), spacing: metrics.gap * 0.75, alignment: .top)],
+            spacing: metrics.gap * 0.75
+        ) {
             StatTile(
                 title: Copy.agentHeading,
                 value: agent.running
                     ? Copy.agentRunningShort : (agent.loaded ? Copy.agentStoppedShort : Copy.agentMissingShort),
                 symbol: "cpu", tint: agent.running ? .green : .orange,
-                caption: agent.pid.map(Copy.pid))
+                caption: agent.pid.map(Copy.pid)
+            )
+            .staggeredEntrance(0)
             StatTile(
                 title: Copy.pollingHeading, value: paused ? Copy.paused : Copy.running,
                 symbol: paused ? "pause.fill" : "arrow.triangle.2.circlepath",
                 tint: paused ? .orange : (status.lastPoll?.status == "failed" ? .red : .blue),
-                caption: lastPoll.map { Copy.lastPoll($0, ok: status.lastPoll?.status == "ok") })
+                caption: lastPoll.map { Copy.lastPoll($0, ok: status.lastPoll?.status == "ok") }
+            )
+            .staggeredEntrance(1)
             StatTile(
                 title: Copy.reviewRequests, value: menu.state.map { "\($0.reviewRequested)" } ?? "–",
                 symbol: "person.crop.circle.badge.questionmark", tint: .purple,
-                caption: menu.state.map { Copy.tracked($0.trackedAuthored) })
+                caption: menu.state.map { Copy.tracked($0.trackedAuthored) },
+                action: { navigator.selection = .section(.reviews) }
+            )
+            .help(Copy.openSection(WindowSection.reviews.title))
+            .staggeredEntrance(2)
             StatTile(
                 title: Copy.attentionHeading,
                 value: status.teamsEnabled == false ? Copy.teamsOffShort : "\(menu.badgeCount)",
                 symbol: "tray.full", tint: menu.badgeCount > 0 ? .red : .teal,
-                caption: status.teamsEnabled == true ? Copy.teamsOn : nil)
+                caption: status.teamsEnabled == true ? Copy.teamsOn : nil,
+                action: status.teamsEnabled == false ? nil : { navigator.selection = .section(.messages) }
+            )
+            .help(status.teamsEnabled == false ? Copy.teamsOff : Copy.openSection(WindowSection.messages.title))
+            .staggeredEntrance(3)
         }
     }
 
@@ -269,16 +286,9 @@ struct OverviewView: View {
             }
             Divider()
             lastPollLine(status.lastPoll)
-            if let state = menu.state {
-                Text("\(Copy.tracked(state.trackedAuthored)) · \(Copy.waitingForYou(state.reviewRequested))")
-                    .foregroundStyle(.secondary)
-            }
-            if let teams = status.teamsEnabled {
-                Text(
-                    teams
-                        ? "\(Copy.teamsOn) · \(Copy.needsAttention(menu.badgeCount))" : Copy.teamsOff
-                )
-                .foregroundStyle(.secondary)
+            // What is tracked, waiting and needs you is in the tiles above; only say Teams is off.
+            if status.teamsEnabled == false {
+                Text(Copy.teamsOff).foregroundStyle(.secondary)
             }
         }
         .font(.callout)

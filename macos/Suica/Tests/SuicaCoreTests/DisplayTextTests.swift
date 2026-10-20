@@ -51,7 +51,6 @@ import Testing
 
 @Test func copyHelpersFormatTheirArguments() {
     #expect(Copy.tracked(4) == "4 of your MRs are tracked")
-    #expect(Copy.waitingForYou(5) == "5 MRs are waiting for your review")
     #expect(Copy.moreHidden(50) == "and 50 more (see suica pending --all)")
     #expect(Copy.confirmTitle("Bob") == "Send this message to Bob?")
     #expect(Copy.kindLabel("nudge") == "Nudge")

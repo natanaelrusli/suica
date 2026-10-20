@@ -7,7 +7,7 @@ import SwiftUI
 struct TemplatesView: View {
     let model: TemplateEditorModel
     let window: WindowModel
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.motionLevel) private var motion
 
     var body: some View {
         Group {
@@ -46,7 +46,7 @@ struct TemplatesView: View {
                     HStack(spacing: 4) {
                         Text(Copy.templateTitle(template.name)).fontWeight(.medium).lineLimit(1)
                         if model.isDirty(template) {
-                            Circle().fill(Color.accentColor).frame(width: 6, height: 6)
+                            Circle().fill(.tint).frame(width: 6, height: 6)
                                 .accessibilityLabel(Copy.unsavedChanges)
                         }
                     }
@@ -135,7 +135,7 @@ struct TemplatesView: View {
             .tint(.orange)
             .disabled(window.restarting)
         }
-        .transition(Motion.reveal(reduceMotion: reduceMotion))
+        .transition(Motion.reveal(motion))
     }
 
     /// Shows the folder in Finder; the files are plain text and can be edited there too.

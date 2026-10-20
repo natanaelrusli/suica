@@ -78,6 +78,8 @@ struct SuicaApp: App {
     @State private var editor: ConfigEditorModel
     @State private var reviews: ReviewsModel
     @State private var templates: TemplateEditorModel
+    @State private var appearance = AppearanceSettings()
+    @State private var navigator = Navigator()
 
     init() {
         let agent: any AgentClient
@@ -110,19 +112,27 @@ struct SuicaApp: App {
 
     var body: some Scene {
         MenuBarExtra {
-            MenuView(model: model)
+            MenuView(model: model, settings: appearance, navigator: navigator)
+                .appearance(appearance)
         } label: {
             Image(nsImage: PenguinGlyph.image)
                 .modifier(OpenWindowOnLink(window: window))
-            if model.badgeCount > 0 { Text("\(model.badgeCount)") }
+            if let badge = appearance.menuBarBadge.label(for: model.badgeCount) { Text(badge) }
         }
         .menuBarExtraStyle(.window)
 
         Window(Copy.appName, id: "main") {
-            MainWindow(window: window, editor: editor, reviews: reviews, templates: templates)
+            MainWindow(
+                window: window, editor: editor, reviews: reviews, templates: templates, settings: appearance,
+                navigator: navigator
+            )
+            .appearance(appearance)
         }
         .defaultSize(width: 1100, height: 720)
         .handlesExternalEvents(matching: [])
-        .commands { SidebarCommands() }
+        .commands {
+            SidebarCommands()
+            NavigationCommands(navigator: navigator)
+        }
     }
 }

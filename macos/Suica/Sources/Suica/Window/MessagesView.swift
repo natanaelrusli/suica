@@ -5,6 +5,7 @@ import SwiftUI
 /// MRs you reviewed for others.
 struct MessagesView: View {
     @Bindable var window: WindowModel
+    @Environment(\.motionLevel) private var motion
 
     private var model: MenuModel { window.menu }
     private var group: MessageGroup { window.messageGroup }
@@ -14,7 +15,7 @@ struct MessagesView: View {
             list
                 // A `suica://message/<id>` link selects a row: bring it into view.
                 .onChange(of: window.selectedMessageId, initial: true) { _, id in
-                    if let id { withAnimation(Motion.content) { proxy.scrollTo(id, anchor: .center) } }
+                    if let id { withMotion(Motion.content, motion) { proxy.scrollTo(id, anchor: .center) } }
                 }
         }
         // Back to Your MRs, with nothing selected, the next time the page opens.
@@ -27,7 +28,7 @@ struct MessagesView: View {
     private var list: some View {
         List {
             if let teams = model.state?.teams {
-                Picker("", selection: $window.messageGroup.animation(Motion.content)) {
+                Picker("", selection: $window.messageGroup.animation(Motion.animation(Motion.content, motion))) {
                     Text(label(Copy.yourMRs, .yours, teams)).tag(MessageGroup.yours)
                     Text(label(Copy.othersMRs, .others, teams)).tag(MessageGroup.others)
                 }

@@ -29,6 +29,11 @@ public enum DisplayText {
     }
 
     /// The first letters of the first and last word, as Teams shows a person without a photo.
+    /// `group/sub/project!12` as `project!12`, cleaned.
+    public static func shortKey(_ key: String) -> String {
+        clean(String(key.split(separator: "/").last ?? Substring(key)), max: 60)
+    }
+
     public static func initials(_ name: String) -> String {
         let words = clean(name, max: 200).split(separator: " ").filter { $0.first?.isLetter == true }
         guard let first = words.first?.first else { return "?" }

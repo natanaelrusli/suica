@@ -10,14 +10,15 @@ struct ItemRow: View {
     let onAction: (ItemAction) -> Void
     let onConfirm: () -> Void
     let onCancel: () -> Void
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.motionLevel) private var motion
+    @Environment(\.metrics) private var metrics
 
     private var name: String { DisplayText.clean(item.recipientName) }
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             kindIcon
-            VStack(alignment: .leading, spacing: 5) {
+            VStack(alignment: .leading, spacing: metrics.rowSpacing) {
                 HStack(alignment: .firstTextBaseline) {
                     Text("\(Copy.kindLabel(item.kind)) → \(name)").fontWeight(.semibold).lineLimit(1)
                     Spacer(minLength: 6)
@@ -37,7 +38,7 @@ struct ItemRow: View {
                         Text(Copy.teamsPreviewHeading).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                         TeamsMessagePreview(recipient: item.recipientName, text: text)
                     }
-                    .transition(Motion.reveal(reduceMotion: reduceMotion))
+                    .transition(Motion.reveal(motion))
                 } else if item.state == .pending, let text = item.text {
                     // Drawn as Teams shows it: Markdown, one cleaned line per line of the message.
                     MarkdownText.inline(DisplayText.cleanLines(text), projectURL: nil)
@@ -52,17 +53,18 @@ struct ItemRow: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(.background.opacity(0.6), in: RoundedRectangle(cornerRadius: 6))
                         .overlay(alignment: .leading) {
-                            Rectangle().fill(Color.accentColor.opacity(0.6)).frame(width: 3)
+                            Rectangle().fill(.tint.opacity(0.6)).frame(width: 3)
                         }
                         .clipShape(RoundedRectangle(cornerRadius: 6))
                 }
                 actions
             }
         }
-        .padding(10)
+        .padding(metrics.padding - 4)
         .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 10))
+        .hoverLift(cornerRadius: 10)
         .overlay {
-            if highlighted { RoundedRectangle(cornerRadius: 10).strokeBorder(Color.accentColor, lineWidth: 2) }
+            if highlighted { RoundedRectangle(cornerRadius: 10).strokeBorder(.tint, lineWidth: 2) }
         }
         .motion(value: highlighted)
         .motion(value: confirming)
@@ -115,14 +117,21 @@ struct ItemRow: View {
             if !title.isEmpty {
                 Text(title).font(.callout).foregroundStyle(.secondary).lineLimit(1)
             }
+            // The project and number only, on one line: the full path is on hover.
             HStack(spacing: 4) {
-                if let url = DisplayText.safeURL(item.mrUrl) {
-                    Link(DisplayText.clean(item.mrKey), destination: url)
-                } else {
-                    Text(DisplayText.clean(item.mrKey)).foregroundStyle(.secondary)
+                let key = DisplayText.shortKey(item.mrKey)
+                Group {
+                    if let url = DisplayText.safeURL(item.mrUrl) {
+                        Link(key, destination: url)
+                    } else {
+                        Text(key).foregroundStyle(.secondary)
+                    }
                 }
+                .lineLimit(1)
+                .truncationMode(.head)
+                .help(DisplayText.clean(item.mrKey))
                 Text("·").foregroundStyle(.tertiary)
-                Text(updated).foregroundStyle(.secondary)
+                Text(updated).foregroundStyle(.secondary).lineLimit(1).layoutPriority(1)
             }
             .font(.caption)
         }
@@ -168,13 +177,13 @@ struct ItemRow: View {
         }
     }
 
-    private func tint(for outcome: ItemOutcome) -> Color {
+    /// Sent with your approval takes the accent colour, so it follows Appearance → Accent colour.
+    private func tint(for outcome: ItemOutcome) -> AnyShapeStyle {
         switch outcome {
-        case .approvedByYou: .blue
-        case .sentAutomatically: .secondary
-        case .dryRun: .purple
-        case .failed: .red
-        case .sent, .skippedByYou, .noLongerNeeded, .skipped: .secondary
+        case .approvedByYou: AnyShapeStyle(.tint)
+        case .dryRun: AnyShapeStyle(.purple)
+        case .failed: AnyShapeStyle(.red)
+        case .sentAutomatically, .sent, .skippedByYou, .noLongerNeeded, .skipped: AnyShapeStyle(.secondary)
         }
     }
 
@@ -190,7 +199,7 @@ struct ItemRow: View {
                 }
             }
             .padding(.top, 2)
-            .transition(Motion.reveal(reduceMotion: reduceMotion))
+            .transition(Motion.reveal(motion))
         } else if !item.actions.isEmpty {
             HStack {
                 ForEach(Array(item.actions.enumerated()), id: \.offset) { _, action in

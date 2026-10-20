@@ -10,7 +10,7 @@ struct ConfigurationView: View {
     /// Bumped by Discard so fields that hold text the model never saw start over too.
     @State private var generation = 0
     @State private var query = ""
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.motionLevel) private var motion
 
     var body: some View {
         Group {
@@ -76,7 +76,7 @@ struct ConfigurationView: View {
         .motion(value: query)
         .safeAreaInset(edge: .bottom) {
             if hasUnsavedInput {
-                unsavedBar.transition(Motion.slide(from: .bottom, reduceMotion: reduceMotion))
+                unsavedBar.transition(Motion.slide(from: .bottom, motion))
             }
         }
         .motion(value: hasUnsavedInput)
@@ -92,7 +92,7 @@ struct ConfigurationView: View {
     private var unsavedBar: some View {
         HStack(spacing: 10) {
             Image(systemName: editor.invalidInputKeys.isEmpty ? "pencil.circle.fill" : "exclamationmark.circle.fill")
-                .foregroundStyle(editor.invalidInputKeys.isEmpty ? Color.accentColor : Color.red)
+                .foregroundStyle(editor.invalidInputKeys.isEmpty ? AnyShapeStyle(.tint) : AnyShapeStyle(.red))
                 .accessibilityHidden(true)
             Text(editor.invalidInputKeys.isEmpty ? Copy.unsavedChanges : Copy.fixInvalidInput)
             Spacer()
