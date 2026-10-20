@@ -9,6 +9,8 @@ struct MenuView: View {
     let settings: AppearanceSettings
     let navigator: Navigator
     @State private var tab: PanelTab = .recent
+    /// Set once the Owner picks a tab, so the opening refresh does not switch it back.
+    @State private var tabPicked = false
     /// The outcome of a Cancel pressed here; the Reviews page's own banner is not repeated.
     @State private var cancelNotice: String?
     @Environment(\.openWindow) private var openWindow
@@ -28,7 +30,10 @@ struct MenuView: View {
             if let text = model.errorText {
                 NoticeBox(text: text, tint: .red)
             }
-            if let text = model.banner ?? cancelNotice {
+            if let text = model.banner {
+                NoticeBox(text: text, tint: .secondary)
+            }
+            if let text = cancelNotice {
                 NoticeBox(text: text, tint: .secondary)
             }
             lists
@@ -58,10 +63,11 @@ struct MenuView: View {
         // Runs each time the panel opens.
         .task {
             cancelNotice = nil
-            let known = model.state != nil
+            tabPicked = false
             tab = PanelTab.opening(badgeCount: model.badgeCount)
             await model.refresh()
-            if !known { tab = PanelTab.opening(badgeCount: model.badgeCount) }
+            // A message that arrived since the last refresh can change where the panel should open.
+            if !tabPicked { tab = PanelTab.opening(badgeCount: model.badgeCount) }
             await window.refreshStatus()
         }
     }
@@ -186,6 +192,7 @@ struct MenuView: View {
         let selected = tab == value
         return Button {
             tab = value
+            tabPicked = true
         } label: {
             Text(title)
                 .font(.callout.weight(selected ? .semibold : .regular))

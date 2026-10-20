@@ -102,3 +102,16 @@ private func stats(days: [DayStats], ok: Int, failed: Int) -> StatsDocument {
     #expect(await client.statusCalls == 2)
     #expect(await client.statsCalls == 0)
 }
+
+@MainActor @Test func aStatusReadThatFinishesAfterAFullRefreshDoesNotOverwriteIt() async {
+    let gate = Gate()
+    let client = FakeDashboardClient(statuses: [.success(makeStatus(running: false)), .success(makeStatus())])
+    await client.holdFirstStatus(gate)
+    let window = WindowModel(client: client, menu: MenuModel(client: FakeClient(states: [.success(makeState())])))
+    let slow = Task { await window.refreshStatus() }
+    while await client.statusCalls < 1 { await Task.yield() }
+    await window.refresh()
+    await gate.open()
+    await slow.value
+    #expect(window.status?.agent.running == true)
+}

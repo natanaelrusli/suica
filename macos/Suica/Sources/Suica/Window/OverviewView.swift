@@ -64,6 +64,8 @@ struct OverviewView: View {
                 Button(Copy.postAsComment) { reviewAction { await reviews.postAgentReview(key, inline: false) } }
             }
             Button(Copy.cancel, role: .cancel) {}
+        } message: {
+            Text(Copy.postConfirmMessage)
         }
     }
 
@@ -73,6 +75,7 @@ struct OverviewView: View {
 
     /// Runs an Agent Review action, shows its outcome here and reads the status again.
     private func reviewAction(_ run: @escaping () async -> Void) {
+        reviewNotice = nil
         Task {
             await run()
             reviewNotice = reviews.agentBanner
@@ -90,7 +93,15 @@ struct OverviewView: View {
 
     // MARK: Quick actions and tiles
 
+    /// Labelled buttons when they fit, the icons alone (named on hover) in a narrow window.
     private func quickActions(_ status: StatusDocument) -> some View {
+        ViewThatFits(in: .horizontal) {
+            quickActionRow(status).labelStyle(.titleAndIcon)
+            quickActionRow(status).labelStyle(.iconOnly)
+        }
+    }
+
+    private func quickActionRow(_ status: StatusDocument) -> some View {
         HStack(spacing: 8) {
             Button {
                 Task {
@@ -100,12 +111,14 @@ struct OverviewView: View {
             } label: {
                 Label(menu.isPaused ? Copy.resume : Copy.pause, systemImage: menu.isPaused ? "play.fill" : "pause.fill")
             }
+            .help(menu.isPaused ? Copy.resume : Copy.pause)
             .disabled(menu.state == nil)
             Button {
                 Task { if await window.restartAgent() { editor.restartHandled() } }
             } label: {
                 Label(Copy.restartAgent, systemImage: "arrow.counterclockwise")
             }
+            .help(Copy.restartAgent)
             .disabled(window.restarting)
             if window.restarting { ProgressView().controlSize(.small) }
             Button {
@@ -117,6 +130,7 @@ struct OverviewView: View {
             } label: {
                 Label(Copy.refresh, systemImage: "arrow.clockwise")
             }
+            .help(Copy.refresh)
             Button {
                 NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: status.paths.logs)])
             } label: {
@@ -128,6 +142,7 @@ struct OverviewView: View {
             } label: {
                 Label(Copy.editConfig, systemImage: "gearshape")
             }
+            .help(Copy.editConfig)
         }
         .buttonStyle(.bordered)
         .controlSize(.regular)
@@ -141,8 +156,9 @@ struct OverviewView: View {
             Date(timeIntervalSince1970: TimeInterval($0.at) / 1000).formatted(.relative(presentation: .named))
         }
         return LazyVGrid(
-            // Three by two at every width, so the six never wrap unevenly.
-            columns: Array(repeating: GridItem(.flexible(), spacing: metrics.gap * 0.75, alignment: .top), count: 3),
+            // Three by two, or two by three in a narrow window, so the six never wrap unevenly.
+            columns: Array(
+                repeating: GridItem(.flexible(), spacing: metrics.gap * 0.75, alignment: .top), count: wide ? 3 : 2),
             spacing: metrics.gap * 0.75
         ) {
             StatTile(
@@ -489,6 +505,12 @@ struct OverviewView: View {
             if agent.running, let pid = agent.pid {
                 Text(Copy.pid(pid)).font(.caption).foregroundStyle(.secondary)
             }
+            Spacer()
+            if window.restarting { ProgressView().controlSize(.small) }
+            Button(Copy.restartAgent) {
+                Task { if await window.restartAgent() { editor.restartHandled() } }
+            }
+            .disabled(window.restarting)
         }
     }
 
