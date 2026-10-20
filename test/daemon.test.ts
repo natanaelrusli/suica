@@ -14,6 +14,7 @@ const log = createLogger({ write: () => undefined });
 async function run(options: {
   statuses: (PollStatus | "crash")[];
   idleSeconds?: number;
+  logs?: string[];
 }): Promise<number[]> {
   const controller = new AbortController();
   const delays: number[] = [];
@@ -31,7 +32,10 @@ async function run(options: {
       if (delays.length === options.statuses.length) controller.abort();
       return Promise.resolve();
     },
-    log,
+    log:
+      options.logs === undefined
+        ? log
+        : createLogger({ write: (line) => options.logs?.push(line), minLevel: "info" }),
     signal: controller.signal,
   });
   return delays;
@@ -48,5 +52,15 @@ describe("runDaemon", () => {
 
   it("treats a crashing poll as a failure instead of dying", async () => {
     expect(await run({ statuses: ["crash", "ok"] })).toEqual([240, 120]);
+  });
+
+  it("logs when polling is paused and resumed, once per change", async () => {
+    const logs: string[] = [];
+    await run({ statuses: ["ok", "paused", "paused", "failed", "ok", "paused"], logs });
+    expect(logs.map((line) => (JSON.parse(line) as { message: string }).message)).toEqual([
+      "polling paused",
+      "polling resumed",
+      "polling paused",
+    ]);
   });
 });

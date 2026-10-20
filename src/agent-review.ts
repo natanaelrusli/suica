@@ -578,6 +578,16 @@ export async function runAgentReview(baseDeps: ReviewDeps, row: AgentReviewRow):
       headSha,
       ...(rereview === undefined ? {} : { rereview }),
     });
+    log.info("agent review started", {
+      id: row.id,
+      mr_key: row.mrKey,
+      trigger: row.trigger,
+      cli: cliId,
+      ...(deps.config.review.model === undefined ? {} : { model: deps.config.review.model }),
+      changed_lines: lines,
+      rereview: rereview !== undefined,
+      incremental: rereview?.incremental ?? false,
+    });
     store.appendAgentReviewActivity(row.id, deps.now(), `Starting ${CLI_NAMES[cliId] ?? cliId}`);
     const result = await runCli(deps, cliId, path, prompt, workDir, (text) => {
       store.appendAgentReviewActivity(row.id, deps.now(), text);
@@ -608,7 +618,12 @@ export async function runAgentReview(baseDeps: ReviewDeps, row: AgentReviewRow):
       id: row.id,
       mr_key: row.mrKey,
       cli: cliId,
+      ...(model === undefined ? {} : { model }),
+      rereview: rereview !== undefined,
       duration_ms: deps.now() - started,
+      ...(result.tokens === null
+        ? {}
+        : { input_tokens: result.tokens.inputTokens, output_tokens: result.tokens.outputTokens }),
     });
     if (
       deps.config.review.post === "auto" &&
@@ -662,6 +677,9 @@ export async function runAgentReview(baseDeps: ReviewDeps, row: AgentReviewRow):
       id: row.id,
       mr_key: row.mrKey,
       reason: error instanceof Error ? error.name : "unknown",
+      // Skip and RunFailure texts are the agent's own; any other error's text could hold anything.
+      ...(error instanceof Skip || error instanceof RunFailure ? { detail: error.message } : {}),
+      duration_ms: deps.now() - started,
     });
     await notifyQuietly(
       deps,
@@ -731,10 +749,11 @@ export function queueAutomaticReviews(
       log.warn("agent review daily cap reached", { waiting: candidates.length });
       break;
     }
-    const queued =
-      store.queueAgentReview(mr.key, "auto", now, mr.title) !== undefined ||
-      latest.get(mr.key)?.status === "queued";
-    const tracked = plan.due.includes(mr) ? plan.heads.get(mr.key) : undefined;
+    const id = store.queueAgentReview(mr.key, "auto", now, mr.title);
+    const rereview = plan.due.includes(mr);
+    if (id !== undefined) log.info("agent review queued", { id, mr_key: mr.key, rereview });
+    const queued = id !== undefined || latest.get(mr.key)?.status === "queued";
+    const tracked = rereview ? plan.heads.get(mr.key) : undefined;
     if (queued && tracked !== undefined) {
       plan.heads.set(mr.key, { ...tracked, queuedHead: tracked.head });
     }

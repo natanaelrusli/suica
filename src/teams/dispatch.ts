@@ -53,7 +53,8 @@ export interface DispatchResult {
 }
 
 export type DeliverOutcome =
-  | { readonly status: "sent" | "unresolved" | "busy" }
+  | { readonly status: "sent" | "busy" }
+  | { readonly status: "unresolved"; readonly reason: "no-match" | "ambiguous" }
   | {
       readonly status: "failed" | "retry-later" | "lookup-error";
       readonly failure: TeamsFailureKind;
@@ -83,6 +84,37 @@ export function modeFor(
   if (row.variant === "notice.approved") return config.modes.approved;
   if (row.kind === "notice") return config.modes.notice;
   return row.kind === "rereview" ? config.modes.rereview : config.modes.nudge;
+}
+
+/** What every per-message log line says about the row; never the recipient, a person's username. */
+function rowAttributes(row: OutboxRow): Record<string, string | number> {
+  return { id: row.id, kind: row.kind, variant: row.variant, mr_key: row.mrKey };
+}
+
+/** One line per delivery attempt, so the log shows what happened to each message. */
+function logOutcome(log: Logger, row: OutboxRow, outcome: DeliverOutcome): void {
+  const attributes = rowAttributes(row);
+  switch (outcome.status) {
+    case "sent":
+      log.info("teams message sent", attributes);
+      return;
+    case "busy":
+      log.debug("teams message already being sent", attributes);
+      return;
+    case "unresolved":
+      log.warn("teams recipient not found", { ...attributes, reason: outcome.reason });
+      return;
+    case "lookup-error":
+      log.warn("teams recipient lookup failed", { ...attributes, reason: outcome.failure });
+      return;
+    case "retry-later":
+      // Repeats every poll while Teams is down; the failure itself is reported once per streak.
+      log.debug("teams message postponed", { ...attributes, reason: outcome.failure });
+      return;
+    case "failed":
+      log.warn("teams message failed", { ...attributes, reason: outcome.failure });
+      return;
+  }
 }
 
 function failureKind(error: unknown): TeamsFailureKind {
@@ -194,7 +226,7 @@ export async function deliver(
       { detail: resolution.reason, text },
       deps.now(),
     );
-    return { status: "unresolved" };
+    return { status: "unresolved", reason: resolution.reason };
   }
   // Leaving `pending` is only possible through `suica send`, so it is the Owner's approval.
   const approval = from === "pending" ? { approved: true as const } : {};
@@ -224,6 +256,7 @@ async function sendBatch(
     await deps.gateway.session(async (api) => {
       for (const { row, text } of batch) {
         const outcome = await deliver(deps, api, row, text);
+        logOutcome(deps.log, row, outcome);
         if (outcome.status === "sent") sent += 1;
         lookupErrors = outcome.status === "lookup-error" ? lookupErrors + 1 : 0;
         if (outcome.status === "lookup-error") failure = outcome.failure;
@@ -254,7 +287,11 @@ export async function dispatchQueued(
 
   for (const row of rows) {
     if (!stillNeeded(deps.store, row, snapshot)) {
-      deps.store.transitionOutbox(row.id, row.status, "skipped", { detail: "obsolete" }, nowMs);
+      if (
+        deps.store.transitionOutbox(row.id, row.status, "skipped", { detail: "obsolete" }, nowMs)
+      ) {
+        deps.log.info("teams message skipped", { ...rowAttributes(row), reason: "obsolete" });
+      }
       continue;
     }
     // A pending row only waits for the Owner; the checks above are all it needs here.
@@ -268,14 +305,18 @@ export async function dispatchQueued(
       );
     } catch {
       deps.store.transitionOutbox(row.id, "queued", "failed", { detail: "template" }, nowMs);
+      deps.log.warn("teams message failed", { ...rowAttributes(row), reason: "template" });
       continue;
     }
     const mode = modeFor(row, deps.config);
     if (mode === "dry-run") {
       deps.store.transitionOutbox(row.id, "queued", "dry-run", { text }, nowMs);
-      deps.log.info("dry-run message recorded", { kind: row.kind });
+      deps.log.info("dry-run message recorded", rowAttributes(row));
     } else if (mode === "approval") {
-      if (deps.store.transitionOutbox(row.id, "queued", "pending", { text }, nowMs)) held.push(row);
+      if (deps.store.transitionOutbox(row.id, "queued", "pending", { text }, nowMs)) {
+        held.push(row);
+        deps.log.info("teams message waiting for approval", rowAttributes(row));
+      }
     } else {
       automatic.push({ row, text });
     }
