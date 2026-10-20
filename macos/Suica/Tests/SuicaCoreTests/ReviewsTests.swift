@@ -403,6 +403,30 @@ private func withAgent(_ status: String?) -> ReviewListDocument {
     #expect(AgentReviewInfo(id: 1, status: "ready", previousSha: "abc").previousSha == "abc")
 }
 
+@Test func theMergeRequestPageOffersAnotherReviewOnlyWhenThereIsSomethingNewToReview() {
+    func mr(_ status: String?, changed: Bool = false) -> ReviewSummary {
+        ReviewSummary(
+            key: "g/p!1", title: "t", url: "https://x", draft: false, author: Person(username: "a", name: "A"),
+            reviewers: [], agentReview: status.map { AgentReviewInfo(id: 1, status: $0) },
+            changedSinceReview: changed ? ChangedSinceReview(code: true, description: false) : nil)
+    }
+    #expect(mr(nil).offersReview)
+    #expect(!mr("posted").offersReview)
+    #expect(mr("posted", changed: true).offersReview)
+    for status in ["failed", "skipped", "discarded"] { #expect(mr(status).offersReview, "\(status)") }
+    for status in ["queued", "running", "ready", "posting"] { #expect(!mr(status, changed: true).offersReview, "\(status)") }
+}
+
+@Test func aMergeRequestReadyToApproveIsMarked() throws {
+    let list = try decodeDocument(ReviewListDocument.self, from: contract("reviews.v1.json"))
+    #expect(list.mergeRequests.map(\.readyToApprove) == [false, false])
+    let older = Data("""
+        {"key": "g/p!2", "title": "t", "url": "https://x", "draft": false, "author": {"username": "a", "name": "A"}, "reviewers": []}
+        """.utf8)
+    #expect(try JSONDecoder().decode(ReviewSummary.self, from: older).readyToApprove == false)
+    #expect(Copy.readyToApprove == "Ready to approve: only minor findings left")
+}
+
 @Test func aRereviewIsLabelled() {
     #expect(Copy.agentRereviewLabel == "Re-review")
 }

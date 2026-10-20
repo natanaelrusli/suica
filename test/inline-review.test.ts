@@ -5,6 +5,7 @@ import {
   diffLines,
   extractFindings,
   isCleanReview,
+  isReadyToApprove,
   placeFinding,
   summaryWithout,
 } from "../src/inline-review.ts";
@@ -217,6 +218,37 @@ describe("countOpenPreviousItems and isCleanReview", () => {
     ].join("\n");
     expect(countOpenPreviousItems(body)).toBe(1);
     expect(countOpenPreviousItems("## Findings\n1. `a.ts:1` x")).toBe(0);
+  });
+});
+
+describe("isReadyToApprove", () => {
+  const body = (previous: readonly string[], findings: readonly string[]) =>
+    ["# Review", "## Previous review", ...previous, "## Findings", ...findings].join("\n");
+
+  it("is true with no findings, or with only Minor and Nit findings left", () => {
+    expect(isReadyToApprove("## Findings\nNone.")).toBe(true);
+    expect(isReadyToApprove(body([], ["### Minor", "1. `a.ts:1` x", "### Nit", "2. y"]))).toBe(
+      true,
+    );
+  });
+
+  it("is false with a Blocker, Major or other finding, or one without a severity", () => {
+    expect(isReadyToApprove(body([], ["### Major", "1. `a.ts:1` x", "### Minor", "2. y"]))).toBe(
+      false,
+    );
+    expect(isReadyToApprove(body([], ["### Blocker", "1. x"]))).toBe(false);
+    expect(isReadyToApprove(body([], ["### Critical", "1. x"]))).toBe(false);
+    expect(isReadyToApprove(body([], ["1. `a.ts:1` no severity"]))).toBe(false);
+  });
+
+  it("counts open previous items: a Minor or Nit one is fine, a Major or unlabelled one is not", () => {
+    const minorOpen = ["- Minor `a.ts:1` the name — not fixed.", "- Nit `b.ts:2` — partly fixed."];
+    expect(isReadyToApprove(body(minorOpen, ["None."]))).toBe(true);
+    expect(isReadyToApprove(body(["- Major `a.ts:1` the guard — not fixed."], ["None."]))).toBe(
+      false,
+    );
+    expect(isReadyToApprove(body(["- `a.ts:1` the guard — not fixed."], ["None."]))).toBe(false);
+    expect(isReadyToApprove(body(["- Major `a.ts:1` the guard — fixed."], ["None."]))).toBe(true);
   });
 });
 

@@ -94,8 +94,18 @@ public struct ReviewSummary: Codable, Equatable, Identifiable, Sendable {
     public let agentReview: AgentReviewInfo?
     /// Set when the MR changed since the agent's posted review and no newer review is open; absent from an older CLI.
     public let changedSinceReview: ChangedSinceReview?
+    /// Only minor findings are left on an unchanged MR nobody approved yet; false from an older CLI.
+    public let readyToApprove: Bool
 
     public var id: String { key }
+
+    /// Another review can find something new: none yet, the last one did not finish (failed,
+    /// skipped or discarded), or the MR changed since the posted one. Never while one is open.
+    public var offersReview: Bool {
+        guard let review = agentReview else { return true }
+        if review.isActive || review.isReady { return false }
+        return review.status != "posted" || changedSinceReview != nil
+    }
 
     /// The row offers Re-review: the MR changed since the posted review and another review can start.
     public var offersRereview: Bool { changedSinceReview != nil && (agentReview?.canRequeue ?? true) }
@@ -104,7 +114,8 @@ public struct ReviewSummary: Codable, Equatable, Identifiable, Sendable {
 
     public init(
         key: String, title: String, url: String, draft: Bool, createdAt: String? = nil, author: Person,
-        reviewers: [ReviewerInfo], agentReview: AgentReviewInfo? = nil, changedSinceReview: ChangedSinceReview? = nil
+        reviewers: [ReviewerInfo], agentReview: AgentReviewInfo? = nil, changedSinceReview: ChangedSinceReview? = nil,
+        readyToApprove: Bool = false
     ) {
         self.key = key
         self.title = title
@@ -115,6 +126,25 @@ public struct ReviewSummary: Codable, Equatable, Identifiable, Sendable {
         self.reviewers = reviewers
         self.agentReview = agentReview
         self.changedSinceReview = changedSinceReview
+        self.readyToApprove = readyToApprove
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case key, title, url, draft, createdAt, author, reviewers, agentReview, changedSinceReview, readyToApprove
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        key = try container.decode(String.self, forKey: .key)
+        title = try container.decode(String.self, forKey: .title)
+        url = try container.decode(String.self, forKey: .url)
+        draft = try container.decode(Bool.self, forKey: .draft)
+        createdAt = try container.decodeIfPresent(String.self, forKey: .createdAt)
+        author = try container.decode(Person.self, forKey: .author)
+        reviewers = try container.decode([ReviewerInfo].self, forKey: .reviewers)
+        agentReview = try container.decodeIfPresent(AgentReviewInfo.self, forKey: .agentReview)
+        changedSinceReview = try container.decodeIfPresent(ChangedSinceReview.self, forKey: .changedSinceReview)
+        readyToApprove = try container.decodeIfPresent(Bool.self, forKey: .readyToApprove) ?? false
     }
 }
 
@@ -354,6 +384,11 @@ public final class ReviewsModel {
     }
 
     public var selectedDetail: MergeRequestDetail? { selectedKey.flatMap { details[$0] } }
+
+    /// The MR page offers Review with agent or Review again; see `ReviewSummary.offersReview`.
+    public func offersReview(for key: String) -> Bool {
+        list?.mergeRequests.first { $0.key == key }?.offersReview ?? true
+    }
 
     public func agentReview(for key: String) -> AgentReviewInfo? {
         list?.mergeRequests.first { $0.key == key }?.agentReview

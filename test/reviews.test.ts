@@ -6,6 +6,7 @@ import {
   approveMergeRequest,
   buildReviewList,
   changedSinceReview,
+  readyToApprove,
   fetchMrDetail,
   MR_DETAIL_QUERY,
   parseDiffs,
@@ -189,6 +190,55 @@ describe("buildReviewList", () => {
       new Map([["g/p!9", POSTED_NINE]]),
     );
     expect(list).toEqual(golden("reviews.v1.json"));
+  });
+});
+
+describe("readyToApprove", () => {
+  const MINOR_ONLY = "## Findings\n### Minor\n1. `a.ts:1` — a name.";
+  const posted = (overrides: Partial<AgentReviewRow> = {}): AgentReviewRow => ({
+    ...POSTED_NINE,
+    headSha: "sha-9-a",
+    descriptionSha: "d1",
+    body: MINOR_ONLY,
+    ...overrides,
+  });
+  const current = (state = "UNREVIEWED", overrides: Partial<MergeRequest> = {}) =>
+    mr(9, {
+      headSha: "sha-9-a",
+      descriptionSha: "d1",
+      reviewers: [reviewer("me", state)],
+      ...overrides,
+    });
+  const ME_ = person("me", "Me");
+
+  it("is true for a posted review with only minor findings left on an unchanged MR you have not approved", () => {
+    expect(readyToApprove(current(), ME_, posted(), posted())).toBe(true);
+  });
+
+  it("is false once you or the agent approved, the MR changed, or a newer review is open", () => {
+    expect(readyToApprove(current("APPROVED"), ME_, posted(), posted())).toBe(false);
+    const approved = posted({ approved: true });
+    expect(readyToApprove(current(), ME_, approved, approved)).toBe(false);
+    expect(
+      readyToApprove(current("UNREVIEWED", { headSha: "sha-9-b" }), ME_, posted(), posted()),
+    ).toBe(false);
+    expect(readyToApprove(current(), ME_, posted({ id: 5, status: "ready" }), posted())).toBe(
+      false,
+    );
+  });
+
+  it("is false with a Major finding, without a posted review, and after a discard", () => {
+    const major = posted({ body: "## Findings\n### Major\n1. x" });
+    expect(readyToApprove(current(), ME_, major, major)).toBe(false);
+    expect(readyToApprove(current(), ME_, undefined, undefined)).toBe(false);
+    const discarded = posted({ status: "discarded" });
+    expect(readyToApprove(current(), ME_, discarded, discarded)).toBe(false);
+  });
+
+  it("still holds when a later run failed without reviewing anything new", () => {
+    expect(
+      readyToApprove(current(), ME_, posted({ id: 5, status: "failed", body: null }), posted()),
+    ).toBe(true);
   });
 });
 

@@ -160,6 +160,11 @@ private struct ReviewRow: View {
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(ReviewTint.agent(review.status))
             }
+            if mr.readyToApprove {
+                Label(Copy.readyToApprove, systemImage: "checkmark.seal")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.green)
+            }
             if let change = mr.changedSinceReview {
                 HStack(spacing: 6) {
                     Label(Copy.changedSinceReview(change), systemImage: "arrow.triangle.2.circlepath")
@@ -295,7 +300,7 @@ private struct MergeRequestDetailView: View {
                     .disabled(model.approvingKeys.contains(detail.key) || loading)
                 }
                 let busy = model.agentBusyKeys.contains(detail.key)
-                if agentReview?.canRequeue ?? true {
+                if model.offersReview(for: detail.key) {
                     Button {
                         tab = .agent
                         Task { await model.queueAgentReview(detail.key) }

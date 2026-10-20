@@ -239,6 +239,7 @@ public enum Copy {
     }
     public static let agentRereviewLabel = "Re-review"
     public static let rereviewNow = "Re-review"
+    public static let readyToApprove = "Ready to approve: only minor findings left"
     /// The list's badge for an MR that changed since the agent's posted review.
     public static func changedSinceReview(_ change: ChangedSinceReview) -> String {
         let what =

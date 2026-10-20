@@ -3,6 +3,7 @@ import { UNREVIEWED } from "./domain.ts";
 import type { MergeRequest, Person, Reviewer, Snapshot } from "./domain.ts";
 import { FetchFailure } from "./gitlab.ts";
 import type { GraphqlRunner, PostRunner, RestRunner } from "./gitlab.ts";
+import { isReadyToApprove } from "./inline-review.ts";
 import type { Logger } from "./log.ts";
 import type { AgentReviewRow, AgentReviewStatus } from "./store.ts";
 
@@ -93,6 +94,11 @@ export interface ReviewSummaryJson {
    * without a description hash (reviewed before the hash was kept) compares the head only.
    */
   readonly changedSinceReview: ChangedSinceReviewJson | null;
+  /**
+   * True when the newest posted Agent Review has only Minor or Nit problems left, the MR has not
+   * changed since, no newer review is open, and neither the Owner nor the agent approved it yet.
+   */
+  readonly readyToApprove: boolean;
 }
 
 /** `suica reviews --json`. */
@@ -137,6 +143,20 @@ export function changedSinceReview(
   return code || description ? { code, description } : null;
 }
 
+/** Pure: see `ReviewSummaryJson.readyToApprove`. */
+export function readyToApprove(
+  mr: Pick<MergeRequest, "headSha" | "descriptionSha" | "reviewers">,
+  me: Person,
+  latest: AgentReviewRow | undefined,
+  base: AgentReviewRow | undefined,
+): boolean {
+  if (base?.status !== "posted" || base.body === null || base.approved) return false;
+  if (latest !== undefined && OPEN_STATUSES.includes(latest.status)) return false;
+  if (base.headSha !== mr.headSha || changedSinceReview(mr, latest, base) !== null) return false;
+  const mine = mr.reviewers.find((each) => each.username === me.username);
+  return mine?.state !== "APPROVED" && isReadyToApprove(base.body);
+}
+
 export function buildReviewList(
   snapshot: Snapshot,
   agentReviews: ReadonlyMap<string, AgentReviewRow> = new Map(),
@@ -157,6 +177,7 @@ export function buildReviewList(
         reviewers: mr.reviewers,
         agentReview: latest === undefined ? null : toAgentReviewJson(latest),
         changedSinceReview: changedSinceReview(mr, latest, bases.get(mr.key)),
+        readyToApprove: readyToApprove(mr, snapshot.me, latest, bases.get(mr.key)),
       };
     }),
   };

@@ -176,7 +176,12 @@ const OPEN = /\b(?:not|partly|partially)\s+fixed\b|\bunfixed\b/i;
  * like `countFindings`: top-level items only, none-items and code fences skipped.
  */
 export function countOpenPreviousItems(markdown: string): number {
-  let open = 0;
+  return openPreviousItems(markdown).length;
+}
+
+/** The text of each open item of the review's Previous section; see `countOpenPreviousItems`. */
+function openPreviousItems(markdown: string): string[] {
+  const open: string[] = [];
   let previousLevel: number | undefined;
   let itemIndent: number | undefined;
   let inFence = false;
@@ -198,9 +203,26 @@ export function countOpenPreviousItems(markdown: string): number {
     itemIndent ??= indent;
     const text = (item[2] ?? "").trim();
     if (indent !== itemIndent || NONE_ITEM.test(text)) continue;
-    if (!FIXED.test(text) || OPEN.test(text)) open += 1;
+    if (!FIXED.test(text) || OPEN.test(text)) open.push(text);
   }
   return open;
+}
+
+/** Severities that do not hold up an approval. */
+const MINOR_SEVERITIES = new Set(["Minor", "Nit"]);
+const MINOR_WORD = /\b(?:minor|nit)\b/i;
+const SERIOUS_WORD = /\b(?:blocker|critical|major)\b/i;
+
+/**
+ * True when only minor problems are left: every finding is under a Minor or Nit subheading, and
+ * every open item of the Previous section names Minor or Nit and nothing more serious. A finding
+ * or open item without a severity counts as serious, since the wording is a model's.
+ */
+export function isReadyToApprove(markdown: string): boolean {
+  return (
+    countFindings(markdown).every((each) => MINOR_SEVERITIES.has(each.severity)) &&
+    openPreviousItems(markdown).every((text) => MINOR_WORD.test(text) && !SERIOUS_WORD.test(text))
+  );
 }
 
 /**
