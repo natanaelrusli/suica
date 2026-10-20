@@ -39,7 +39,7 @@ struct ReviewsView: View {
     private var list: some View {
         List(selection: selection) {
             if let text = model.errorText {
-                NoticeBox(text: text, tint: .red).listRowSeparator(.hidden)
+                NoticeBox(text: text, tint: .red, onClose: model.dismissError).listRowSeparator(.hidden)
             }
             if let list = model.list {
                 let sections = list.sections
@@ -267,6 +267,8 @@ private struct MergeRequestDetailView: View {
                 .padding(.horizontal, 20)
                 .padding(.top, 16)
                 .padding(.bottom, 12)
+                .motion(value: error)
+                .motion(value: model.approvalNotices[detail.key])
             Picker("", selection: $tab) {
                 Text(Copy.descriptionTab).tag(DetailTab.description)
                 Text(Copy.changesTab(detail.files.count)).tag(DetailTab.changes)
@@ -340,7 +342,9 @@ private struct MergeRequestDetailView: View {
                 if loading { ProgressView().controlSize(.small) }
             }
             if let error { NoticeBox(text: error, tint: .red) }
-            if let notice = model.approvalNotices[detail.key] { NoticeBox(text: notice, tint: .secondary) }
+            if let notice = model.approvalNotices[detail.key] {
+                NoticeBox(text: notice, tint: .secondary) { model.dismissApprovalNotice(detail.key) }
+            }
             HStack(spacing: 6) {
                 if detail.draft { Badge(text: Copy.draft, tint: .gray) }
                 Text(DisplayText.shortKey(detail.key))
@@ -485,7 +489,6 @@ private struct DescriptionTab: View {
                 }
             }
             .padding(20)
-            .frame(maxWidth: 900, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
@@ -643,7 +646,6 @@ private struct CommentsTab: View {
                 }
             }
             .padding(20)
-            .frame(maxWidth: 900, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
@@ -727,7 +729,7 @@ private struct AgentReviewTab: View {
         let busy = model.agentBusyKeys.contains(key)
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-                if let banner = model.agentBanner { NoticeBox(text: banner, tint: .secondary) }
+                if let banner = model.agentBanner { NoticeBox(text: banner, tint: .secondary, onClose: model.dismissAgentBanner) }
                 if let review {
                     HStack(spacing: 8) {
                         if review.isActive { ProgressView().controlSize(.small) }
@@ -775,8 +777,8 @@ private struct AgentReviewTab: View {
                 }
             }
             .padding(20)
-            .frame(maxWidth: 900, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .motion(value: model.agentBanner)
         }
         .confirmationDialog(Copy.postConfirmTitle, isPresented: $confirmingPost) {
             Button(Copy.postInline) { Task { await model.postAgentReview(key, inline: true) } }

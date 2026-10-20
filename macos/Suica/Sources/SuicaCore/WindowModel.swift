@@ -39,6 +39,9 @@ public final class WindowModel {
         self.menu = menu
     }
 
+    /// The Owner closed the banner; the next action sets a new one.
+    public func dismissBanner() { banner = nil }
+
     /// Reads status, stats and usage. Each keeps its last good value when its own read fails; the latest
     /// refresh to start is the only one allowed to store anything.
     public func refresh() async {
@@ -129,6 +132,10 @@ public final class WindowModel {
     }
 
     /// Nil removes the key, so the CLI's default model applies.
+    public func setReviewEffort(_ effort: String) async {
+        await saveSetting(["review", "effort"], .string(effort), saved: Copy.reviewSettingSaved)
+    }
+
     public func setReviewModel(_ model: String?) async {
         await saveSetting(["review", "model"], model.map(JSONValue.string) ?? .null, saved: Copy.reviewSettingSaved)
     }

@@ -9,8 +9,6 @@ enum Motion {
     static let page = Animation.smooth(duration: 0.3)
     /// Rows, banners and bars that appear, disappear or change.
     static let content = Animation.snappy(duration: 0.3)
-    /// The sidebar opening or closing.
-    static let sidebar = Animation.smooth(duration: 0.35)
     /// A page switching between one and two columns.
     static let layout = Animation.smooth(duration: 0.35)
     /// A control answering the pointer.
@@ -42,6 +40,15 @@ enum Motion {
     static func slide(from edge: Edge, _ level: MotionLevel) -> AnyTransition {
         switch level {
         case .full: .move(edge: edge).combined(with: .opacity)
+        case .reduced: .opacity
+        case .off: .identity
+        }
+    }
+
+    /// A notice dropping into place from just above, and folding away the same way when closed.
+    static func notice(_ level: MotionLevel) -> AnyTransition {
+        switch level {
+        case .full: .opacity.combined(with: .offset(y: -8)).combined(with: .scale(scale: 0.97, anchor: .top))
         case .reduced: .opacity
         case .off: .identity
         }

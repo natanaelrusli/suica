@@ -7,14 +7,25 @@ import SwiftUI
 struct FieldEditor: View {
     let field: ConfigField
     let editor: ConfigEditorModel
+    /// Which model CLIs are installed and in use, for the Model CLI cards and model suggestions.
+    var modelClis: ModelCliStatus?
 
     private var key: String { field.path.joined(separator: ".") }
     private var isReset: Bool { editor.drafts[key] == .null }
 
+    /// Choices whose options this app can name and explain show that instead of the agent's help.
+    private var explainsItself: Bool {
+        switch field.type {
+        case .level: true
+        case .enum: enumOptions.allSatisfy { Copy.optionDetail(key, $0) != nil }
+        default: false
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             control
-            if !field.help.isEmpty {
+            if !field.help.isEmpty && !explainsItself {
                 Text(DisplayText.clean(field.help, max: 400)).font(.caption).foregroundStyle(.secondary)
             }
             if let note = field.restartNote {
@@ -37,32 +48,49 @@ struct FieldEditor: View {
     @ViewBuilder private var control: some View {
         switch field.type {
         case .string:
-            LabeledContent(field.label) {
-                TextField(field.label, text: stringBinding, prompt: Text(field.placeholder ?? ""))
-                    .labelsHidden()
-                    .textFieldStyle(.roundedBorder)
+            switch field.format {
+            case "hostname":
+                LabeledContent(field.label) { HostInput(field: field, editor: editor) }
+            case "path":
+                LabeledContent(field.label) { PathInput(field: field, editor: editor) }
+            default:
+                LabeledContent(field.label) {
+                    HStack(spacing: 6) {
+                        TextField(field.label, text: stringBinding, prompt: Text(field.placeholder ?? ""))
+                            .labelsHidden()
+                            .textFieldStyle(.roundedBorder)
+                            .multilineTextAlignment(.leading)
+                        if key == "review.model" { modelSuggestions }
+                    }
                     .frame(maxWidth: 360)
+                }
             }
         case .int:
-            IntInput(field: field, editor: editor)
+            if let base = DurationUnit(fieldUnit: field.unit) {
+                LabeledContent(field.label) { DurationInput(field: field, editor: editor, base: base) }
+            } else if let max = field.max, max <= 6 {
+                LabeledContent(field.label) { smallNumberPicker(max: max) }
+            } else {
+                LabeledContent(field.label) { NumberInput(field: field, editor: editor) }
+            }
         case .bool:
             LabeledContent(field.label) {
                 // Off would be a guess while the default applies: Discard brings the control back.
-                Toggle(field.label, isOn: boolBinding).labelsHidden().disabled(isReset)
+                Toggle(field.label, isOn: boolBinding).labelsHidden().toggleStyle(.switch).disabled(isReset)
             }
         case .enum:
-            LabeledContent(field.label) {
-                Picker(field.label, selection: optionBinding) {
-                    if currentOption == nil { Text(Copy.defaultOption).tag(String?.none) }
-                    ForEach(enumOptions, id: \.self) {
-                        Text(DisplayText.clean($0, max: 60)).tag(String?.some($0))
-                    }
+            if key == "model.cli" {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(field.label)
+                    ModelCliCards(selection: optionBinding, options: enumOptions, status: modelClis)
                 }
-                .labelsHidden()
-                .frame(maxWidth: 240)
+            } else {
+                ChoiceInput(key: key, label: field.label, options: enumOptions, selection: optionBinding)
             }
+        case .level:
+            LevelSlider(label: field.label, levels: enumOptions, selection: optionBinding)
         case .clock:
-            ClockInput(field: field, editor: editor)
+            LabeledContent(field.label) { ClockInput(field: field, editor: editor) }
         case .weekdays:
             LabeledContent(field.label) { weekdayToggles }
         case .stringList:
@@ -126,6 +154,45 @@ struct FieldEditor: View {
         return options
     }
 
+    // MARK: Small numbers
+
+    /// One button per value when there are only a few, as Reviews at once (1 to 4).
+    private func smallNumberPicker(max: Int) -> some View {
+        Picker(
+            field.label,
+            selection: Binding<Int?>(
+                get: { if case .int(let number) = editor.value(of: field) { number } else { nil } },
+                set: { if let number = $0 { editor.set(field, .int(number)) } })
+        ) {
+            ForEach(1...max, id: \.self) { Text("\($0)").tag(Int?.some($0)) }
+        }
+        .labelsHidden()
+        .pickerStyle(.segmented)
+        .fixedSize()
+    }
+
+    // MARK: Review model
+
+    /// Claude Code's aliases while it reviews; any name can still be typed.
+    @ViewBuilder private var modelSuggestions: some View {
+        if modelClis?.active == "claude" {
+            Menu {
+                ForEach(["opus", "sonnet", "haiku"], id: \.self) { name in
+                    Button(name) { editor.setText(field, name) }
+                }
+                Divider()
+                Button(Copy.cliDefaultModel) { editor.setText(field, "") }
+            } label: {
+                Image(systemName: "list.bullet")
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help(Copy.modelSuggestions)
+            .accessibilityLabel(Copy.modelSuggestions)
+        }
+    }
+
     // MARK: Weekdays
 
     private var selectedDays: Set<Int> {
@@ -165,120 +232,5 @@ struct FieldEditor: View {
             return ""
         }
         return DisplayText.clean(text, max: 300)
-    }
-}
-
-// MARK: - Integers
-
-/// Digits only: anything else is dropped as it is typed, and an empty box writes nothing.
-private struct IntInput: View {
-    let field: ConfigField
-    let editor: ConfigEditorModel
-    @State private var text: String
-
-    init(field: ConfigField, editor: ConfigEditorModel) {
-        self.field = field
-        self.editor = editor
-        _text = State(initialValue: Self.render(editor.value(of: field)))
-    }
-
-    /// A number that is not a whole `Int` (the agent reports it) is shown as written, to be replaced.
-    private static func render(_ value: JSONValue) -> String {
-        switch value {
-        case .int(let number): return String(number)
-        case .number(let number): return "\(number)"
-        default: return ""
-        }
-    }
-
-    var body: some View {
-        VStack(alignment: .trailing, spacing: 2) {
-            LabeledContent(field.label) {
-                TextField(field.label, text: $text, prompt: Text(field.placeholder ?? ""))
-                    .labelsHidden()
-                    .textFieldStyle(.roundedBorder)
-                    .multilineTextAlignment(.trailing)
-                    .frame(width: 120)
-            }
-            if editor.invalidInputKeys.contains(field.path.joined(separator: ".")) {
-                Text(Copy.invalidNumber).font(.caption).foregroundStyle(.red)
-            }
-        }
-        .onChange(of: text) { _, new in
-            // Nine digits stay far inside Int and far above any setting this agent has.
-            let digits = String(new.filter { $0.isASCII && $0.isNumber }.prefix(9))
-            if digits != new {
-                text = digits
-            } else if let number = Int(digits) {
-                editor.set(field, .int(number))
-            } else {
-                // Empty: not a value, unless the field has none (after "Use default").
-                editor.setInputInvalid(field, editor.value(of: field) != .null)
-            }
-        }
-        // The box was just built from the model, so its text is a value.
-        .onAppear { editor.setInputInvalid(field, false) }
-        .onChange(of: editor.value(of: field)) { _, value in
-            if case .int(let number) = value {
-                if Int(text) != number { text = String(number) }
-            } else {
-                text = Self.render(value)
-            }
-        }
-    }
-}
-
-// MARK: - Clock
-
-/// `HH:MM`, 24-hour. Text that is not a time shows the invalid state and writes nothing.
-private struct ClockInput: View {
-    let field: ConfigField
-    let editor: ConfigEditorModel
-    @State private var text: String
-
-    init(field: ConfigField, editor: ConfigEditorModel) {
-        self.field = field
-        self.editor = editor
-        _text = State(initialValue: Self.render(editor.value(of: field)))
-    }
-
-    private static func render(_ value: JSONValue) -> String {
-        if case .string(let clock) = value { return clock }
-        return ""
-    }
-
-    static func isClock(_ text: String) -> Bool {
-        let parts = text.split(separator: ":", omittingEmptySubsequences: false)
-        guard parts.count == 2, parts.allSatisfy({ $0.count == 2 && $0.allSatisfy { $0.isASCII && $0.isNumber } }),
-            let hours = Int(parts[0]), let minutes = Int(parts[1])
-        else { return false }
-        return hours < 24 && minutes < 60
-    }
-
-    var body: some View {
-        VStack(alignment: .trailing, spacing: 2) {
-            LabeledContent(field.label) {
-                TextField(field.label, text: $text, prompt: Text(field.placeholder ?? "HH:MM"))
-                    .labelsHidden()
-                    .textFieldStyle(.roundedBorder)
-                    .multilineTextAlignment(.trailing)
-                    .frame(width: 100)
-            }
-            if editor.invalidInputKeys.contains(field.path.joined(separator: ".")) {
-                Text(Copy.invalidClock).font(.caption).foregroundStyle(.red)
-            }
-        }
-        .onChange(of: text) { _, new in
-            if Self.isClock(new) {
-                editor.set(field, .string(new))
-            } else {
-                editor.setInputInvalid(field, !(new.isEmpty && editor.value(of: field) == .null))
-            }
-        }
-        .onAppear { editor.setInputInvalid(field, false) }
-        .onChange(of: editor.value(of: field)) { _, value in
-            let shown = Self.render(value)
-            if shown != text { text = shown }
-        }
     }
 }

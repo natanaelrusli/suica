@@ -1,14 +1,22 @@
 import { MODEL_CLI_CHOICES } from "./model-cli.ts";
+import { REVIEW_EFFORTS } from "./review-runner.ts";
 
+/** `level`: an `enum` whose options run from least to most, shown as a slider. */
 export type FieldType =
-  "string" | "int" | "bool" | "enum" | "clock" | "weekdays" | "stringList" | "emailMap";
+  "string" | "int" | "bool" | "enum" | "level" | "clock" | "weekdays" | "stringList" | "emailMap";
 
 export interface ConfigField {
   readonly path: readonly string[];
   readonly type: FieldType;
   readonly label: string;
   readonly help: string;
-  readonly options?: readonly string[]; // enum only
+  readonly options?: readonly string[]; // enum and level only
+  /** int only: what the number counts; seconds, minutes and hours make it a duration. */
+  readonly unit?: string;
+  /** int only, when the schema caps it; every int is at least 1. */
+  readonly max?: number;
+  /** string only: a host name (no scheme) or a file or folder path, for the editor's input. */
+  readonly format?: "hostname" | "path";
   readonly placeholder?: string; // optional keys whose default is computed at runtime
   readonly restartNote?: string;
 }
@@ -22,48 +30,56 @@ export const CONFIG_FIELDS: readonly ConfigField[] = [
     type: "string",
     label: "GitLab host",
     help: "GitLab host passed to glab --hostname",
+    format: "hostname",
   },
   {
     path: ["gitlab", "glabPath"],
     type: "string",
     label: "glab executable",
     help: "glab executable",
+    format: "path",
   },
   {
     path: ["gitlab", "timeoutSeconds"],
     type: "int",
-    label: "glab timeout (seconds)",
+    label: "glab timeout",
     help: "Timeout for one glab call",
+    unit: "seconds",
   },
   {
     path: ["polling", "activeSeconds"],
     type: "int",
-    label: "Active poll interval (seconds)",
+    label: "Active poll interval",
     help: "Poll interval while you are at the Mac",
+    unit: "seconds",
   },
   {
     path: ["polling", "idleSeconds"],
     type: "int",
-    label: "Idle poll interval (seconds)",
+    label: "Idle poll interval",
     help: "Poll interval while idle",
+    unit: "seconds",
   },
   {
     path: ["polling", "idleAfterSeconds"],
     type: "int",
-    label: "Idle after (seconds)",
+    label: "Idle after",
     help: "No keyboard or mouse input for this long counts as idle",
+    unit: "seconds",
   },
   {
     path: ["polling", "maxBackoffSeconds"],
     type: "int",
-    label: "Maximum backoff (seconds)",
+    label: "Maximum backoff",
     help: "Cap for the exponential backoff after failed polls",
+    unit: "seconds",
   },
   {
     path: ["notifications", "summaryThreshold"],
     type: "int",
     label: "Summary threshold",
     help: "More notifications than this in one poll become one summary",
+    unit: "notifications",
   },
   {
     path: ["notifications", "ignoreAuthors"],
@@ -83,18 +99,21 @@ export const CONFIG_FIELDS: readonly ConfigField[] = [
     label: "Teams MCP command",
     help: "Command that starts the Teams MCP server",
     placeholder: "~/.config/teams-mcp/run.sh",
+    format: "path",
   },
   {
     path: ["teams", "startTimeoutSeconds"],
     type: "int",
-    label: "Teams start timeout (seconds)",
+    label: "Teams start timeout",
     help: "Timeout for the Teams MCP to start",
+    unit: "seconds",
   },
   {
     path: ["teams", "callTimeoutSeconds"],
     type: "int",
-    label: "Teams call timeout (seconds)",
+    label: "Teams call timeout",
     help: "Timeout for one Teams MCP call",
+    unit: "seconds",
   },
   {
     path: ["teams", "modes", "nudge"],
@@ -152,26 +171,30 @@ export const CONFIG_FIELDS: readonly ConfigField[] = [
   {
     path: ["teams", "reminderAfterHours"],
     type: "int",
-    label: "Reminder after (hours)",
+    label: "Reminder after",
     help: "Reminder if the Reviewer is still UNREVIEWED this long after the nudge",
+    unit: "hours",
   },
   {
     path: ["teams", "noticeDebounceMinutes"],
     type: "int",
-    label: "Notice debounce (minutes)",
+    label: "Notice debounce",
     help: "Review Notice after this long without further change by you",
+    unit: "minutes",
   },
   {
     path: ["teams", "rereviewAfterMinutes"],
     type: "int",
-    label: "Re-review after (minutes)",
+    label: "Re-review after",
     help: "Re-review Nudge after your latest push has stood this long without a newer one",
+    unit: "minutes",
   },
   {
     path: ["teams", "maxMessagesPerReviewer"],
     type: "int",
     label: "Messages per Reviewer",
     help: "At most this many messages per MR per Reviewer",
+    unit: "messages",
   },
   {
     path: ["teams", "templatesPath"],
@@ -179,6 +202,7 @@ export const CONFIG_FIELDS: readonly ConfigField[] = [
     label: "Templates folder",
     help: "Folder with template files",
     placeholder: "~/.config/suica/templates",
+    format: "path",
   },
   {
     path: ["teams", "people"],
@@ -239,34 +263,47 @@ export const CONFIG_FIELDS: readonly ConfigField[] = [
     placeholder: "CLI default",
   },
   {
+    path: ["review", "effort"],
+    type: "level",
+    label: "Review effort",
+    help: "How hard the CLI thinks during a review: claude --effort, or Codex reasoning effort (max is xhigh there). Higher levels take longer and use more tokens",
+    options: REVIEW_EFFORTS,
+  },
+  {
     path: ["review", "maxChangedLines"],
     type: "int",
-    label: "Largest MR (changed lines)",
+    label: "Largest MR",
     help: "Larger MRs are skipped",
+    unit: "changed lines",
   },
   {
     path: ["review", "maxPerDay"],
     type: "int",
     label: "Automatic reviews per day",
     help: "At most this many automatic reviews in 24 hours; reviews you start yourself do not count",
+    unit: "reviews",
   },
   {
     path: ["review", "rereviewAfterMinutes"],
     type: "int",
-    label: "Re-review after (minutes)",
+    label: "Re-review after",
     help: "Re-review an MR after the Author's latest push has stood this long without a newer one",
+    unit: "minutes",
   },
   {
     path: ["review", "timeoutMinutes"],
     type: "int",
-    label: "Review timeout (minutes)",
+    label: "Review timeout",
     help: "A review run is stopped after this long",
+    unit: "minutes",
   },
   {
     path: ["review", "concurrency"],
     type: "int",
     label: "Reviews at once",
     help: "How many Agent Reviews run at the same time, 1 to 4, each with its own CLI process and checkout",
+    unit: "reviews",
+    max: 4,
   },
   {
     path: ["statePath"],
@@ -275,5 +312,6 @@ export const CONFIG_FIELDS: readonly ConfigField[] = [
     help: "SQLite state file",
     placeholder: "~/Library/Application Support/suica/state.db",
     restartNote: "A new path starts with an empty history and a fresh baseline.",
+    format: "path",
   },
 ];

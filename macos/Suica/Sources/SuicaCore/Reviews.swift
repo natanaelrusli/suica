@@ -427,6 +427,15 @@ public final class ReviewsModel {
         self.client = client
     }
 
+    /// The Owner closed the outcome of the last Agent Review action.
+    public func dismissAgentBanner() { agentBanner = nil }
+
+    /// The Owner closed the error; the next refresh shows it again if it still fails.
+    public func dismissError() { errorText = nil }
+
+    /// The Owner closed the outcome of the last approval of `key`.
+    public func dismissApprovalNotice(_ key: String) { approvalNotices[key] = nil }
+
     public var selectedDetail: MergeRequestDetail? { selectedKey.flatMap { details[$0] } }
 
     /// The MR page offers Review with agent or Review again; see `ReviewSummary.offersReview`.

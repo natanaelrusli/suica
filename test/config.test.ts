@@ -48,6 +48,7 @@ describe("parseConfig", () => {
         postAs: "comment",
         approve: true,
         skill: "madhani:madhani-code-review",
+        effort: "medium",
         maxChangedLines: 800,
         maxPerDay: 10,
         rereviewAfterMinutes: 10,

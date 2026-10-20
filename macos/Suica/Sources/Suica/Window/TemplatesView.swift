@@ -16,6 +16,8 @@ struct TemplatesView: View {
     @State private var showingEmoji = false
     @State private var showingGIF = false
     @FocusState private var alertField: AlertField?
+    /// Room for the preview beside the editor rather than beneath it.
+    @State private var wide = false
 
     private enum AlertField { case title, body }
 
@@ -33,7 +35,7 @@ struct TemplatesView: View {
                 }
             } else if let text = model.banner {
                 VStack(alignment: .leading) {
-                    NoticeBox(text: text, tint: .red)
+                    NoticeBox(text: text, tint: .red, closable: false)
                     Spacer()
                 }
                 .padding(20)
@@ -94,8 +96,8 @@ struct TemplatesView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 if model.restartSuggested { restartBar }
-                if let banner = model.banner { NoticeBox(text: banner, tint: .secondary) }
-                if let issue = model.issue { NoticeBox(text: issue, tint: .red) }
+                if let banner = model.banner { NoticeBox(text: banner, tint: .secondary, onClose: model.dismissBanner) }
+                if let issue = model.issue { NoticeBox(text: issue, tint: .red, onClose: model.dismissIssue) }
                 HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(Copy.templateTitle(template.name)).font(.title2.weight(.semibold))
@@ -112,8 +114,8 @@ struct TemplatesView: View {
                 problems(template)
             }
             .padding(20)
-            .frame(maxWidth: 860, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .tracksWidth(above: 1000, $wide)
             .motion(value: model.restartSuggested)
             .motion(value: model.banner)
             .motion(value: model.issue)
@@ -156,7 +158,7 @@ struct TemplatesView: View {
             set: { model.setVariantText($0, for: template) })
         let faithful = TemplateMarkup.isFaithful(text.wrappedValue)
         let visual = faithful && !markdownView.contains(template.name)
-        return VStack(alignment: .leading, spacing: 10) {
+        return withPreview {
             formatBar(template, text: text, visual: visual, faithful: faithful)
             variantBar(template)
             Group {
@@ -180,6 +182,7 @@ struct TemplatesView: View {
                 Label(Copy.visualUnavailable, systemImage: "info.circle").font(.callout).foregroundStyle(.secondary)
             }
             Text(Copy.templateHint).font(.caption).foregroundStyle(.secondary)
+        } preview: {
             VStack(alignment: .leading, spacing: 4) {
                 Text(Copy.teamsPreviewHeading).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                 TeamsMessagePreview(
@@ -312,7 +315,7 @@ struct TemplatesView: View {
             if alertField == .title { title.wrappedValue += addition } else { body.wrappedValue += addition }
         }
         let preview = AlertPreview.render(model.text(of: template), emoji: model.emoji)
-        return VStack(alignment: .leading, spacing: 10) {
+        return withPreview {
             HStack(spacing: 6) {
                 Menu {
                     ForEach(model.placeholders(for: template), id: \.self) { name in
@@ -346,11 +349,29 @@ struct TemplatesView: View {
                 .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.separator))
                 .accessibilityLabel(Copy.alertBodyField)
             Text(Copy.alertHint).font(.caption).foregroundStyle(.secondary)
+        } preview: {
             VStack(alignment: .leading, spacing: 6) {
                 Text(Copy.alertPreviewHeading).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                 NotificationBannerPreview(title: preview.title, body_: preview.body)
                     .padding(8)
                 Text(Copy.alertPreviewNote).font(.caption2).foregroundStyle(.tertiary)
+            }
+        }
+    }
+
+    /// The editor with its preview beside it when there is room, beneath it otherwise.
+    @ViewBuilder private func withPreview(
+        @ViewBuilder editor: () -> some View, @ViewBuilder preview: () -> some View
+    ) -> some View {
+        if wide {
+            HStack(alignment: .top, spacing: 20) {
+                VStack(alignment: .leading, spacing: 10) { editor() }
+                preview().frame(width: 400, alignment: .leading)
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 10) {
+                editor()
+                preview()
             }
         }
     }

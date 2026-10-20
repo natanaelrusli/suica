@@ -24,6 +24,7 @@
     "post": "approval",
     "postAs": "comment",
     "model": null,
+    "effort": "medium",
     "running": null,
     "runningReviews": [],
     "queued": []

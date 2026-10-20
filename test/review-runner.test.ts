@@ -44,7 +44,21 @@ describe("buildInvocation", () => {
 });
 
 describe("the review effort", () => {
-  it("is medium for claude and codex", () => {
+  it("is passed to claude as is and to codex with max as xhigh", () => {
+    const claude = buildInvocation("claude", "p", "/w", undefined, "max").args;
+    expect(claude.slice(claude.indexOf("--effort"), claude.indexOf("--effort") + 2)).toEqual([
+      "--effort",
+      "max",
+    ]);
+    expect(buildInvocation("codex", "p", "/w", undefined, "max").args).toContain(
+      'model_reasoning_effort="xhigh"',
+    );
+    expect(buildInvocation("codex", "p", "/w", undefined, "low").args).toContain(
+      'model_reasoning_effort="low"',
+    );
+  });
+
+  it("is medium for claude and codex by default", () => {
     const claude = buildInvocation("claude", "p", "/w").args;
     expect(claude.slice(claude.indexOf("--effort"), claude.indexOf("--effort") + 2)).toEqual([
       "--effort",

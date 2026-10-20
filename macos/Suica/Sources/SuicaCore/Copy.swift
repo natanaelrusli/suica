@@ -18,6 +18,9 @@ public enum Copy {
     public static let pause = "Pause polling"
     public static let resume = "Resume polling"
     public static let refresh = "Refresh"
+    public static let closeNotice = "Close"
+    public static let expand = "Show pages"
+    public static let collapse = "Hide pages"
     public static let quit = "Quit"
     public static func confirmTitle(_ name: String) -> String { "Send this message to \(name)?" }
     public static let confirmSend = "Send"
@@ -226,7 +229,6 @@ public enum Copy {
     public static let username = "Username"
     public static let email = "Email"
     public static let invalidNumber = "Enter a whole number."
-    public static let invalidClock = "Use the 24-hour format HH:MM, for example 09:30."
     public static let unsetInFile = "Not set in the file."
     public static let readOnlyField = "This setting can't be edited here."
     public static let configMissing = "No config file yet. Saving creates it."
@@ -375,6 +377,7 @@ public enum Copy {
     public static let postAsHint = "Applies to automatic posting; Post to GitLab… asks each time."
     public static let reviewModelPicker = "Model"
     public static let cliDefaultModel = "CLI default"
+    public static let reviewEffortPicker = "Effort"
     public static let autoPostConfirmTitle = "Post reviews to GitLab automatically?"
     public static let autoPostConfirmMessage =
         "Every review is posted as you as soon as it is written, without you reading it first. It carries the agent label; lines starting with / are escaped and mentions and links are removed."
@@ -476,6 +479,129 @@ public enum Copy {
         "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday",
     ]
 
+    // MARK: Configuration inputs
+
+    /// A choice's name in the form, for the options the agent sends; nil for one this app does not know.
+    public static func optionTitle(_ key: String, _ option: String) -> String? {
+        switch (key, option) {
+        case (_, "dry-run"): "Dry run"
+        case ("review.post", "approval"): postWait
+        case ("review.post", "auto"): postAuto
+        case (_, "approval"): "Ask me first"
+        case (_, "auto") where key == "model.cli": "Auto"
+        case (_, "auto"): "Send automatically"
+        case (_, "comment"): postAsCommentOption
+        case (_, "inline"): postAsInlineOption
+        case (_, "claude"): "Claude Code"
+        case (_, "codex"): "Codex"
+        case (_, "gemini"): "Gemini CLI"
+        default: nil
+        }
+    }
+
+    /// What a choice does, shown under the control while it is picked.
+    public static func optionDetail(_ key: String, _ option: String) -> String? {
+        switch (key, option) {
+        case ("review.post", "approval"): "A ready review waits in the app until you post it."
+        case ("review.post", "auto"): "A ready review is posted to GitLab as you at once."
+        case (_, "comment"): "The whole review is one comment on the MR."
+        case (_, "inline"): "Findings on a line of the diff become threads there; the rest is one comment."
+        case (_, "dry-run"): "Written to the log and never sent."
+        case (_, "approval"): "Waits under Messages until you send it."
+        case ("model.cli", "auto"): "The first installed of Claude Code, Codex and Gemini CLI."
+        case (_, "auto"): "Sent as soon as it is due, inside working hours."
+        case (_, "claude"): "Runs the review skill natively, with read-only tools."
+        case (_, "codex"): "Reviews in its read-only sandbox, with the skill pasted in."
+        case (_, "gemini"): "Teams replies only: Agent Review does not run with it."
+        default: nil
+        }
+    }
+
+    public static func effortTitle(_ level: String) -> String {
+        switch level {
+        case "low": "Low"
+        case "medium": "Medium"
+        case "high": "High"
+        case "xhigh": "Extra high"
+        case "max": "Max"
+        default: level
+        }
+    }
+
+    public static func effortDetail(_ level: String) -> String {
+        switch level {
+        case "low": "Fastest and fewest tokens; may miss subtle problems."
+        case "medium": "Balanced, and enough for most MRs."
+        case "high": "More thorough; takes longer and uses more tokens."
+        case "xhigh": "Much slower and costlier; for tricky changes."
+        case "max": "The slowest and costliest. Codex runs it as Extra high."
+        default: ""
+        }
+    }
+
+    public static func categoryDetail(_ key: String) -> String {
+        switch key {
+        case "gitlab": "Host, glab and its timeout"
+        case "polling": "How often GitLab is read"
+        case "notifications": "Summaries and ignored authors"
+        case "teams": "Messages, modes and hours"
+        case "model": "The coding agent CLI"
+        case "review": "Posting, model and limits"
+        default: "Where the history is kept"
+        }
+    }
+
+    /// The section a setting is listed under on its category's page; nil for a category that is
+    /// one section.
+    public static func configSection(_ path: [String]) -> String? {
+        guard path.count > 1 else { return nil }
+        switch (path[0], path[1]) {
+        case ("teams", "enabled"), ("teams", "command"), ("teams", "startTimeoutSeconds"),
+            ("teams", "callTimeoutSeconds"):
+            return "Connection"
+        case ("teams", "modes"): return "Send modes"
+        case ("teams", "workingHours"): return "Working hours"
+        case ("teams", "reminderAfterHours"), ("teams", "noticeDebounceMinutes"), ("teams", "rereviewAfterMinutes"),
+            ("teams", "maxMessagesPerReviewer"):
+            return "Timing and limits"
+        case ("teams", _): return "People and wording"
+        case ("review", "auto"), ("review", "approve"): return "Automation"
+        case ("review", "post"), ("review", "postAs"): return "Posting"
+        case ("review", "skill"), ("review", "model"), ("review", "effort"): return "Skill and model"
+        case ("review", _): return "Limits"
+        default: return nil
+        }
+    }
+
+    public static let configOverviewHint = "Pick a category. Search looks through every setting."
+    public static let messageTemplatesDetail = "Teams messages and alerts"
+    public static let appearanceDetail = "Look, accent and motion"
+    public static let backToConfiguration = "Back to Configuration"
+    public static func settingsCount(_ count: Int) -> String { count == 1 ? "1 setting" : "\(count) settings" }
+    public static func unsavedCount(_ count: Int) -> String { "\(count) unsaved" }
+    public static func problemCount(_ count: Int) -> String { count == 1 ? "1 problem" : "\(count) problems" }
+
+    /// "changed lines" for 2, "changed line" for 1.
+    public static func unit(_ unit: String, count: Int) -> String {
+        count == 1 && unit.hasSuffix("s") ? String(unit.dropLast()) : unit
+    }
+
+    public static let durationUnitPicker = "Unit"
+    public static let chooseFile = "Choose…"
+    public static let showInFinder = "Show in Finder"
+    public static let openInBrowser = "Open in browser"
+    public static let modelSuggestions = "Suggested models"
+    public static let installed = "Installed"
+    public static let notInstalledShort = "Not installed"
+    public static let inUse = "In use"
+    public static let workingHours = "Working hours"
+    public static let workingHoursFrom = "From"
+    public static let workingHoursTo = "To"
+    public static let workingHoursOrder = "The start must be before the end."
+    public static func workingHoursSpan(_ hours: Int, _ minutes: Int) -> String {
+        minutes == 0 ? "\(hours) h a day" : "\(hours) h \(minutes) min a day"
+    }
+
     // MARK: Statistics
 
     public static let reviewRequests = "Review requests"
@@ -513,9 +639,6 @@ public enum Copy {
     // MARK: Model CLI
 
     public static let modelCliHeading = "Language model"
-    public static let modelCliPicker = "Model CLI"
-    public static let modelCliAuto = "Auto (first installed)"
-    public static func notInstalled(_ name: String) -> String { "\(name) (not installed)" }
     public static func modelCliInUse(_ name: String) -> String { "In use: \(name)" }
     public static let noModelCliInstalled = "None of claude, codex or gemini is installed."
     public static func modelCliMissing(_ name: String) -> String {

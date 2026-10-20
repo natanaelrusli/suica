@@ -60,7 +60,6 @@ struct StatisticsView: View {
             .padding(20)
             .motion(value: window.errorText)
             .motion(value: window.stats)
-            .frame(maxWidth: 1400, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)
             .tracksWidth(above: 980, $wide)
         }
@@ -69,7 +68,11 @@ struct StatisticsView: View {
     // MARK: Tiles
 
     private func countTiles(_ days: [DayStats]) -> some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 190), spacing: 12, alignment: .top)], spacing: 12) {
+        // One row of four when there is room, two by two otherwise, so the tiles always fill the width.
+        LazyVGrid(
+            columns: Array(repeating: GridItem(.flexible(), spacing: 12, alignment: .top), count: wide ? 4 : 2),
+            spacing: 12
+        ) {
             ForEach(series, id: \.name) { style in
                 StatTile(
                     title: style.name, value: "\(days.reduce(0) { $0 + style.value($1) })",

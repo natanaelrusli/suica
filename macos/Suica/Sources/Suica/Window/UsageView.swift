@@ -53,7 +53,6 @@ struct UsageView: View {
             .padding(20)
             .motion(value: window.errorText)
             .motion(value: window.usage)
-            .frame(maxWidth: 1400, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)
             .tracksWidth(above: 980, $wide)
         }
