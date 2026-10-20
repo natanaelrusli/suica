@@ -1,5 +1,5 @@
 import type { Config } from "./config.ts";
-import type { Snapshot } from "./domain.ts";
+import type { Person, Snapshot } from "./domain.ts";
 import { countPendingReviews, detectEvents } from "./events.ts";
 import type { ActivityEvent, PreviousState } from "./events.ts";
 import { execFailure } from "./exec.ts";
@@ -15,7 +15,7 @@ import type { Notification } from "./format.ts";
 import { baselineNotifications, buildNotifications, rereviewNotifications } from "./format.ts";
 import { FetchFailure } from "./gitlab.ts";
 import type { GitlabFailureKind } from "./gitlab.ts";
-import { historyEvents } from "./history.ts";
+import { firstApprovals, historyEvents } from "./history.ts";
 import type { Logger } from "./log.ts";
 import type { Notifier } from "./notifier.ts";
 import type { Store } from "./store.ts";
@@ -48,6 +48,11 @@ export interface PollDeps {
   readonly alerts?: AlertTemplates;
   /** Queues Agent Reviews after the commit; `newRequests` just asked for the Owner's review. May throw. */
   readonly queueReviews?: (snapshot: Snapshot, newRequests: readonly string[]) => void;
+  /**
+   * Looks a username up in GitLab, so the statistics can show the names of people no open MR
+   * shows any more; undefined when GitLab knows no such user. May throw.
+   */
+  readonly lookupPerson?: (username: string) => Promise<Person | undefined>;
   /** Milliseconds since the epoch; the poll log stamps and times each poll with it. */
   readonly now: () => number;
 }
@@ -219,7 +224,11 @@ async function runPoll(deps: PollDeps, start: number): Promise<PollOutcome> {
   if (complete) failures.recover("notifier");
 
   try {
-    store.commit(snapshot, historyEvents(snapshot, previous, events, start));
+    store.commit(
+      snapshot,
+      historyEvents(snapshot, previous, events, start),
+      firstApprovals(events, start),
+    );
   } catch (error) {
     await reportStateFailure(deps, error);
     return { status: "failed", failure: "state" };
@@ -227,6 +236,7 @@ async function runPoll(deps: PollDeps, start: number): Promise<PollOutcome> {
   failures.recover("state");
   queueReviews(deps, snapshot, previous.baselineDone ? events : []);
   await runTeams(deps, snapshot, previous);
+  await lookUpNames(deps);
   log.debug("poll complete", {
     review_requested: snapshot.reviewRequested.length,
     authored: snapshot.authored.length,
@@ -234,6 +244,26 @@ async function runPoll(deps: PollDeps, start: number): Promise<PollOutcome> {
     baseline: !previous.baselineDone,
   });
   return complete ? { status: "ok", failure: null } : { status: "failed", failure: "notifier" };
+}
+
+/** At most this many lookups per poll, so a long history is named over a few polls. */
+const NAME_LOOKUPS_PER_POLL = 10;
+
+/** Best effort: a failed lookup is logged and tried again on the next poll. */
+async function lookUpNames(deps: PollDeps): Promise<void> {
+  const { lookupPerson } = deps;
+  if (lookupPerson === undefined) return;
+  try {
+    for (const username of deps.store.unnamedUsernames(NAME_LOOKUPS_PER_POLL)) {
+      // A username GitLab no longer knows keeps itself as its name, so it is not looked up again.
+      const person = (await lookupPerson(username)) ?? { username, name: username };
+      deps.store.saveNames([person]);
+    }
+  } catch (error) {
+    deps.log.warn("names not looked up", {
+      reason: error instanceof FetchFailure ? error.kind : "unknown",
+    });
+  }
 }
 
 /** Runs one poll and logs it, unless polling is paused. A history problem never changes the result. */

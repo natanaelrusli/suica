@@ -4,6 +4,7 @@ import {
   FetchFailure,
   SNAPSHOT_QUERY,
   descriptionSha,
+  fetchPerson,
   glabPost,
   glabRest,
   glabRunner,
@@ -284,6 +285,29 @@ describe("glabRunner", () => {
   it("treats non-JSON output as a GitLab error", async () => {
     expect(await kindOfRun(() => Promise.resolve({ stdout: "<html>", stderr: "" }))).toBe(
       "gitlab-error",
+    );
+  });
+});
+
+describe("fetchPerson", () => {
+  it("asks for the username, encoded, and returns the exact match", async () => {
+    const paths: string[] = [];
+    const rest = (path: string) => {
+      paths.push(path);
+      return Promise.resolve([
+        { username: "20435x", name: "Someone Else", id: 1 },
+        { username: "20435", name: "Ayu Lestari", id: 2 },
+      ]);
+    };
+    expect(await fetchPerson(rest, "20435")).toEqual({ username: "20435", name: "Ayu Lestari" });
+    await fetchPerson(rest, "a b&c");
+    expect(paths).toEqual(["users?username=20435", "users?username=a%20b%26c"]);
+  });
+
+  it("returns undefined for a user GitLab does not know, and fails on another shape", async () => {
+    expect(await fetchPerson(() => Promise.resolve([]), "gone")).toBeUndefined();
+    await expect(fetchPerson(() => Promise.resolve({ message: "x" }), "x")).rejects.toThrow(
+      FetchFailure,
     );
   });
 });

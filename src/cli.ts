@@ -29,7 +29,7 @@ import type { TemplateSaveJson } from "./template-edit.ts";
 import { createLogger } from "./log.ts";
 import { createRuntime } from "./runtime.ts";
 import type { Runtime } from "./runtime.ts";
-import { buildStats, localDayKey } from "./stats.ts";
+import { RANKING_WINDOW, buildStats, localDayKey } from "./stats.ts";
 import { openStore } from "./store.ts";
 import { formatOutbox } from "./teams/format-outbox.ts";
 import { OUTBOX_STATUSES } from "./teams/types.ts";
@@ -162,9 +162,6 @@ async function statusJson(): Promise<number> {
   return 0;
 }
 
-/** A turnaround counts when it ended within 30 days, so its start can be up to 60 days back. */
-const STATS_HISTORY_MS = 60 * 86_400_000;
-
 /**
  * `suica stats`: reads the config and the state database only. It never creates the runtime, which
  * would load the Teams templates and, while Teams is off, write to the database on every call.
@@ -175,7 +172,10 @@ function statsJson(): number {
   try {
     const now = Date.now();
     const document = buildStats({
-      history: store.loadHistory(now - STATS_HISTORY_MS),
+      // The rankings reach back furthest; a turnaround starts at most 60 days back.
+      history: store.loadHistory(now - RANKING_WINDOW),
+      approvals: store.loadApprovals(now - RANKING_WINDOW),
+      names: store.loadNames(),
       outbox: config.teams.enabled ? store.listOutbox(OUTBOX_STATUSES) : [],
       now,
       days: 14,

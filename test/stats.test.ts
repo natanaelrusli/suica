@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { buildStats, localDayKey } from "../src/stats.ts";
-import type { HistoryEvent, HistoryRows, PollLogEntry } from "../src/store.ts";
+import type { FirstApproval, HistoryEvent, HistoryRows, PollLogEntry } from "../src/store.ts";
 import type { OutboxRow } from "../src/teams/types.ts";
 
 const NOW = Date.UTC(2026, 9, 16, 12);
@@ -15,6 +15,21 @@ function poll(at: number, status: "ok" | "failed", failure: string | null, durat
 }
 function event(kind: HistoryEvent["kind"], mrKey: string, at: number, username = "") {
   return { kind, mrKey, username, at } satisfies HistoryEvent;
+}
+function approval(
+  mrKey: string,
+  openedAt: number,
+  approvedAt: number,
+  approver = "bob",
+): FirstApproval {
+  return {
+    mrKey,
+    title: `Title of ${mrKey}`,
+    url: `https://gitlab.example/${mrKey}`,
+    openedAt,
+    approvedAt,
+    approver: { username: approver, name: approver.toUpperCase() },
+  };
 }
 function outbox(
   id: number,
@@ -46,8 +61,13 @@ function outbox(
   };
 }
 const empty: HistoryRows = { polls: [], events: [] };
-const build = (history: HistoryRows, rows: readonly OutboxRow[] = [], days = 14) =>
-  buildStats({ history, outbox: rows, now: NOW, days, dayKey: utcDay });
+const build = (
+  history: HistoryRows,
+  rows: readonly OutboxRow[] = [],
+  days = 14,
+  approvals: readonly FirstApproval[] = [],
+  names: ReadonlyMap<string, string> = new Map(),
+) => buildStats({ history, approvals, names, outbox: rows, now: NOW, days, dayKey: utcDay });
 
 describe("buildStats", () => {
   it("matches the golden contract file", () => {
@@ -59,7 +79,7 @@ describe("buildStats", () => {
       ],
       events: [
         event("review-requested", "g/p!1", NOW - 26 * H),
-        event("owner-reviewed", "g/p!1", NOW - 26 * H + 90 * M),
+        event("owner-reviewed", "g/p!1", NOW - 26 * H + 90 * M, "alice"),
         event("activity", "g/p!2", NOW - 30 * M),
         event("reviewer-reviewed", "g/p!2", NOW - 20 * M, "bob"),
       ],
@@ -70,9 +90,30 @@ describe("buildStats", () => {
       outbox(3, "nudge", "skipped", NOW - 10 * M),
     ];
     const golden: unknown = JSON.parse(readFileSync("contracts/stats.v1.json", "utf8"));
-    expect(buildStats({ history, outbox: rows, now: NOW, days: 2, dayKey: utcDay })).toEqual(
-      golden,
-    );
+    const approvals = [
+      {
+        mrKey: "g/p!2",
+        title: "Add thing",
+        url: "https://gitlab.example/g/p/-/merge_requests/2",
+        openedAt: NOW - 26 * H,
+        approvedAt: NOW - 20 * M,
+        approver: { username: "bob", name: "Bob" },
+      },
+    ];
+    expect(
+      buildStats({
+        history,
+        approvals,
+        names: new Map([
+          ["alice", "Alice"],
+          ["bob", "Bob"],
+        ]),
+        outbox: rows,
+        now: NOW,
+        days: 2,
+        dayKey: utcDay,
+      }),
+    ).toEqual(golden);
   });
 
   it("returns zeros, a null lastPoll and null turnarounds with no history", () => {
@@ -87,6 +128,9 @@ describe("buildStats", () => {
     );
     expect(stats.ownerAfterRequest).toEqual({ count: 0, medianMinutes: null, p90Minutes: null });
     expect(stats.reviewerAfterNudge).toEqual({ count: 0, medianMinutes: null, p90Minutes: null });
+    expect(stats.peopleIReview).toEqual([]);
+    expect(stats.peopleWhoReviewMe).toEqual([]);
+    expect(stats.slowestApprovals).toEqual([]);
   });
 
   it("lists every day including empty ones, oldest first", () => {
@@ -102,6 +146,8 @@ describe("buildStats", () => {
   it("merges a duplicate day key into one entry", () => {
     const stats = buildStats({
       history: empty,
+      approvals: [],
+      names: new Map(),
       outbox: [],
       now: NOW,
       days: 3,
@@ -248,5 +294,90 @@ describe("localDayKey", () => {
   it("formats a local YYYY-MM-DD", () => {
     const ms = new Date(2026, 0, 5, 23, 59).getTime();
     expect(localDayKey(ms)).toBe("2026-01-05");
+  });
+});
+
+describe("people and approvals in the statistics", () => {
+  it("ranks people by distinct MRs, most first, by name", () => {
+    const history: HistoryRows = {
+      polls: [],
+      events: [
+        event("owner-reviewed", "g/p!1", NOW - 5 * H, "alice"),
+        event("owner-reviewed", "g/p!2", NOW - 4 * H, "carol"),
+        event("owner-reviewed", "g/p!3", NOW - 3 * H, "alice"),
+        // The same MR twice (reviewed again after a new request) counts once.
+        event("owner-reviewed", "g/p!3", NOW - 2 * H, "alice"),
+        event("reviewer-reviewed", "g/p!9", NOW - H, "bob"),
+      ],
+    };
+    const names = new Map([
+      ["alice", "Alice"],
+      ["bob", "Bob"],
+      ["carol", "Carol"],
+    ]);
+    const stats = build(history, [], 14, [], names);
+    expect(stats.peopleIReview).toEqual([
+      { username: "alice", name: "Alice", mergeRequests: 2 },
+      { username: "carol", name: "Carol", mergeRequests: 1 },
+    ]);
+    expect(stats.peopleWhoReviewMe).toEqual([{ username: "bob", name: "Bob", mergeRequests: 1 }]);
+  });
+
+  it("leaves out rows without a person and rows older than 90 days, and falls back to the username", () => {
+    const history: HistoryRows = {
+      polls: [],
+      events: [
+        event("reviewer-reviewed", "g/p!1", NOW - 91 * D, "old"),
+        event("owner-reviewed", "g/p!2", NOW - 2 * H),
+        event("reviewer-reviewed", "g/p!3", NOW - H, "dave"),
+      ],
+    };
+    const stats = build(history);
+    expect(stats.peopleIReview).toEqual([]);
+    expect(stats.peopleWhoReviewMe).toEqual([{ username: "dave", name: "dave", mergeRequests: 1 }]);
+  });
+
+  it("keeps the ten people with the most MRs, ties by name", () => {
+    const events = Array.from({ length: 12 }, (_, i) =>
+      event("reviewer-reviewed", `g/p!${i}`, NOW - H, `user${String(i).padStart(2, "0")}`),
+    );
+    events.push(event("reviewer-reviewed", "g/p!99", NOW - H, "user11"));
+    const ranked = build({ polls: [], events }).peopleWhoReviewMe;
+    expect(ranked).toHaveLength(10);
+    expect(ranked[0]).toEqual({ username: "user11", name: "user11", mergeRequests: 2 });
+    expect(ranked.slice(1).map((person) => person.username)).toEqual(
+      ["00", "01", "02", "03", "04", "05", "06", "07", "08"].map((n) => `user${n}`),
+    );
+  });
+
+  it("lists the slowest first approvals in the last 90 days, longest first, at most ten", () => {
+    const approvals = [
+      approval("g/p!1", NOW - 3 * H, NOW - H),
+      approval("g/p!2", NOW - 30 * H, NOW - 2 * H, "carol"),
+      approval("g/p!3", NOW - 100 * D, NOW - 91 * D),
+      approval("g/p!4", NOW - 2 * H, NOW + H),
+      ...Array.from({ length: 10 }, (_, i) => approval(`g/q!${i}`, NOW - 10 * M, NOW - 5 * M)),
+    ];
+    const slowest = build(empty, [], 14, approvals).slowestApprovals;
+    expect(slowest).toHaveLength(10);
+    expect(slowest[0]).toEqual({
+      mrKey: "g/p!2",
+      title: "Title of g/p!2",
+      url: "https://gitlab.example/g/p!2",
+      openedAt: NOW - 30 * H,
+      approvedAt: NOW - 2 * H,
+      minutes: 28 * 60,
+      approver: { username: "carol", name: "CAROL" },
+    });
+    expect(slowest[1]?.mrKey).toBe("g/p!1");
+    expect(slowest.map((row) => row.mrKey)).not.toContain("g/p!3");
+    expect(slowest.map((row) => row.mrKey)).not.toContain("g/p!4");
+  });
+
+  it("never reports a negative wait for an MR approved before GitLab says it was opened", () => {
+    const slowest = build(empty, [], 14, [
+      approval("g/p!1", NOW - H, NOW - 2 * H),
+    ]).slowestApprovals;
+    expect(slowest[0]?.minutes).toBe(0);
   });
 });

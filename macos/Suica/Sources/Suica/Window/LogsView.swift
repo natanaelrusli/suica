@@ -18,7 +18,7 @@ struct LogsView: View {
             toolbar
             if let folder {
                 if let text = model.errorText { NoticeBox(text: text, tint: .red) }
-                if model.truncated { NoticeBox(text: Copy.logTruncated(LogsModel.maxBytes / 1024), tint: .secondary) }
+                if model.truncated { NoticeBox(text: Copy.logTruncated(LogsModel.maxEntries), tint: .secondary) }
                 entries(folder: folder)
             } else if window.errorText != nil {
                 NoticeBox(text: Copy.logFolderUnknown, tint: .red)

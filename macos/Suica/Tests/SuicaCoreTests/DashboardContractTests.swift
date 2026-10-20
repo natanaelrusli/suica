@@ -80,6 +80,12 @@ private func data(_ text: String) -> Data { Data(text.utf8) }
     #expect(stats.days.last?.failed == 0)
     #expect(stats.ownerAfterRequest == Turnaround(count: 1, medianMinutes: 90, p90Minutes: 90))
     #expect(stats.reviewerAfterNudge.medianMinutes == 120)
+    #expect(stats.peopleIReview == [PersonCount(username: "alice", name: "Alice", mergeRequests: 1)])
+    #expect(stats.peopleWhoReviewMe == [PersonCount(username: "bob", name: "Bob", mergeRequests: 1)])
+    let approval = try #require(stats.slowestApprovals?.first)
+    #expect(approval.mrKey == "g/p!2" && approval.minutes == 1540)
+    #expect(approval.approvedAt - approval.openedAt == 1540 * 60_000)
+    #expect(approval.approver == Person(username: "bob", name: "Bob"))
 }
 
 @Test func statsWithNoDataDecodesNullTurnarounds() throws {
@@ -92,6 +98,8 @@ private func data(_ text: String) -> Data { Data(text.utf8) }
     let stats = try decodeDocument(StatsDocument.self, from: data(json))
     #expect(stats.lastPoll == nil && stats.days.isEmpty)
     #expect(stats.ownerAfterRequest.medianMinutes == nil && stats.ownerAfterRequest.p90Minutes == nil)
+    // An older agent sends no rankings.
+    #expect(stats.peopleIReview == nil && stats.peopleWhoReviewMe == nil && stats.slowestApprovals == nil)
 }
 
 @Test func usageMatchesTheGoldenFile() throws {

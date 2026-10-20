@@ -288,6 +288,17 @@ func makeBrokenConfigStatus() -> StatusDocument {
     #expect(await agent.sendCalls == [7])
 }
 
+@Test func approvedByShowsTheNameWithTheUsername() {
+    #expect(Copy.approvedBy("Ayu Lestari", username: "20435") == "First approved by Ayu Lestari (@20435)")
+    #expect(Copy.approvedBy("20435", username: "20435") == "First approved by @20435")
+}
+
+@Test func durationFormatting() {
+    #expect(Copy.duration(90) == "1 h 30 min")
+    #expect(Copy.duration(24 * 60) == "1 d")
+    #expect(Copy.duration(3 * 24 * 60 + 5 * 60 + 59) == "3 d 5 h")
+}
+
 @Test func minutesFormatting() {
     #expect(Copy.minutes(45) == "45 min")
     #expect(Copy.minutes(0) == "0 min")

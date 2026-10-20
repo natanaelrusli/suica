@@ -162,8 +162,7 @@ struct MainWindow: View {
 
     private var title: String {
         let base = "\(Copy.appName) · \(current.section.title)"
-        if current == .templates { return "\(base) · \(Copy.messageTemplates)" }
-        return current.category.map { "\(base) · \($0.title)" } ?? base
+        return current.subtitle.map { "\(base) · \($0)" } ?? base
     }
 
     var body: some View {
@@ -269,7 +268,12 @@ struct MainWindow: View {
         case .overview: OverviewView(window: window, editor: editor, reviews: reviews, navigator: navigator)
         case .reviews: ReviewsView(model: reviews)
         case .messages: MessagesView(window: window)
-        case .statistics: StatisticsView(window: window)
+        case .statistics:
+            if let page = item.statisticsPage {
+                StatisticsPageView(window: window, page: page)
+            } else {
+                StatisticsView(window: window)
+            }
         case .usage: UsageView(window: window)
         case .logs: LogsView(window: window)
         case .configuration: ConfigurationView(window: window, editor: editor, category: item.category)
