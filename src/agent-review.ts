@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { z } from "zod";
 import { byAge, coversHead, fetchSinceDiff, planRereviews } from "./agent-rereview.ts";
 import type { Config } from "./config.ts";
-import { UNREVIEWED } from "./domain.ts";
+import { APPROVED, UNREVIEWED } from "./domain.ts";
 import type { Snapshot } from "./domain.ts";
 import { myReviewState } from "./events.ts";
 import type { Exec } from "./exec.ts";
@@ -651,7 +651,8 @@ export async function runAgentReview(baseDeps: ReviewDeps, row: AgentReviewRow):
  * never reviewed, and an MR that just asked for the Owner's review again, unless its last review was
  * posted and its head is tracked (a push can ask again; the re-review's wait decides then; an MR
  * re-added after a push has no tracked head, so it is queued at once) or its newest review is
- * ready, being posted or posted at its head. Re-reviews follow, as `planRereviews` finds them. When
+ * ready, being posted or posted at its head. Re-reviews follow, as `planRereviews` finds them,
+ * except of an MR the Owner approved. When
  * a review is already open, the head counts as queued only if that review is still queued, since
  * it checks out the head when it starts; a running one has its checkout, so the head stays due and
  * is re-reviewed after the run unless the run covered it. A failed, skipped or discarded review is
@@ -689,7 +690,9 @@ export function queueAutomaticReviews(
     now: deps.now(),
     afterMs: config.review.rereviewAfterMinutes * MINUTE_MS,
   });
-  const candidates = [...first, ...plan.due];
+  // Once the Owner approved an MR it is theirs to follow: a push no longer queues a re-review.
+  const due = plan.due.filter((mr) => myReviewState(snapshot, mr) !== APPROVED);
+  const candidates = [...first, ...due];
   for (const mr of candidates) {
     const now = deps.now();
     if (store.countAgentReviews("auto", now - DAY_MS) >= config.review.maxPerDay) {
