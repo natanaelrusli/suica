@@ -15,10 +15,10 @@ struct ReviewsView: View {
         }
         .task { await model.refresh() }
         // Reads the list and the selected MR again while the page is open, more often while a
-        // review is queued, running or being posted.
-        .task(id: model.hasActiveAgentReview) {
+        // review is queued, running or being posted (see `refreshSeconds`).
+        .task(id: model.refreshSeconds) {
             while true {
-                do { try await Task.sleep(for: .seconds(model.hasActiveAgentReview ? 15 : 30)) } catch { return }
+                do { try await Task.sleep(for: .seconds(model.refreshSeconds)) } catch { return }
                 await model.refresh()
             }
         }
@@ -748,6 +748,7 @@ private struct AgentReviewTab: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
+                    if review.status == "running" { ActivityFeed(lines: review.activity ?? []) }
                     if !review.detail.isEmpty {
                         NoticeBox(
                             text: DisplayText.clean(review.detail, max: 400),
@@ -774,6 +775,47 @@ private struct AgentReviewTab: View {
             Button(Copy.cancel, role: .cancel) {}
         } message: {
             Text(Copy.postConfirmMessage)
+        }
+    }
+}
+
+/// A running review's steps, oldest first and newest kept in view.
+private struct ActivityFeed: View {
+    let lines: [ReviewActivityLine]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(Copy.activityHeading).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 4) {
+                        if lines.isEmpty {
+                            Text(Copy.activityStarting).foregroundStyle(.secondary)
+                        }
+                        ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
+                            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                                Text(line.date.formatted(date: .omitted, time: .standard))
+                                    .foregroundStyle(.tertiary)
+                                Text(DisplayText.clean(line.text, max: 200))
+                                    .foregroundStyle(line.text.hasPrefix("Thinking:") ? .secondary : .primary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .id(index)
+                        }
+                    }
+                    .font(.system(.caption, design: .monospaced))
+                    .textSelection(.enabled)
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxHeight: 260)
+                .onAppear { proxy.scrollTo(lines.count - 1, anchor: .bottom) }
+                .onChange(of: lines.count) { _, count in
+                    withAnimation { proxy.scrollTo(count - 1, anchor: .bottom) }
+                }
+            }
+            .background(.background.secondary, in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.separator.opacity(0.5)))
         }
     }
 }

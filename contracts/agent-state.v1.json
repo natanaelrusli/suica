@@ -11,7 +11,8 @@
       "mrTitle": "Add thing",
       "cli": "claude",
       "model": "opus",
-      "startedAt": 1792148400000
+      "startedAt": 1792148400000,
+      "latestActivity": "Reading src/a.ts"
     },
     "queued": [
       {

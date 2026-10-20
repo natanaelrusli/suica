@@ -89,7 +89,8 @@ func outcomeSaysWhetherYouApproved(status: String, detail: String, approved: Boo
     let state = try decodeAgentState(goldenData())
     let running = try #require(state.agentReview?.running)
     #expect(running == RunningReview(
-        id: 4, mrKey: "g/p!7", mrTitle: "Add thing", cli: "claude", model: "opus", startedAt: 1_792_148_400_000))
+        id: 4, mrKey: "g/p!7", mrTitle: "Add thing", cli: "claude", model: "opus", startedAt: 1_792_148_400_000,
+        latestActivity: "Reading src/a.ts"))
     #expect(state.agentReview?.queued == [QueuedReview(id: 5, mrKey: "g/p!8", mrTitle: nil)])
 }
 

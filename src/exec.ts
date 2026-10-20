@@ -12,6 +12,8 @@ export interface ExecOptions {
   readonly cwd?: string;
   /** Kills the child when aborted. */
   readonly signal?: AbortSignal;
+  /** Called with each complete line of stdout as it arrives; stdout is still returned whole. */
+  readonly onStdoutLine?: (line: string) => void;
 }
 
 export type Exec = (
@@ -24,13 +26,24 @@ const execFileAsync = promisify(execFile);
 const MAX_BUFFER_BYTES = 16 * 1024 * 1024;
 
 export const defaultExec: Exec = async (file, args, options) => {
-  const { stdout, stderr } = await execFileAsync(file, [...args], {
+  const running = execFileAsync(file, [...args], {
     timeout: options.timeoutMs,
     ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
     ...(options.signal === undefined ? {} : { signal: options.signal }),
     maxBuffer: MAX_BUFFER_BYTES,
     encoding: "utf8",
   });
+  const onLine = options.onStdoutLine;
+  let partial = "";
+  if (onLine !== undefined) {
+    running.child.stdout?.on("data", (chunk: string) => {
+      const lines = (partial + chunk).split("\n");
+      partial = lines.pop() ?? "";
+      for (const line of lines) onLine(line);
+    });
+  }
+  const { stdout, stderr } = await running;
+  if (onLine !== undefined && partial !== "") onLine(partial);
   return { stdout, stderr };
 };
 

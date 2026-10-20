@@ -24,6 +24,7 @@ function base(status: AgentReviewStatus, headSha: string | null, mrKey = "g/p!1"
     approved: false,
     body: null,
     detail: "",
+    activity: [],
     createdAt: NOW - 60 * MINUTE,
     updatedAt: NOW - 60 * MINUTE,
   };

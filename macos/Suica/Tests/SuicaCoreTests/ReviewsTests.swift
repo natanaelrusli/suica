@@ -98,6 +98,7 @@ actor FakeReviewsClient: ReviewsClient {
     #expect(agent.model == "claude-opus-5-5" && agent.startedAt == 1_792_148_500_000)
     #expect(agent.headSha?.hasPrefix("01234567") == true && agent.body?.hasPrefix("# Code review") == true)
     #expect(!agent.isActive && !agent.canRequeue)
+    #expect(agent.activity == [])
     #expect(agent.previousSha == nil)
     let rereview = try #require(reviews.mergeRequests.last?.agentReview)
     #expect(rereview.previousSha == "0123456789abcdef0123456789abcdef01234567")
@@ -508,4 +509,20 @@ private func withAgent(_ status: String?) -> ReviewListDocument {
     #expect(ReviewSummary(
         key: "g/p!1", title: "t", url: "https://x", draft: false, author: Person(username: "a", name: "A"),
         reviewers: []).createdDate == nil)
+}
+
+@Test func aRunningReviewsActivityDecodesAndAnOlderCliHasNone() throws {
+    let running = #"{"id":1,"status":"running","detail":"","createdAt":0,"updatedAt":0,"activity":[{"at":1792148400000,"text":"Reading src/a.ts"}]}"#
+    let review = try JSONDecoder().decode(AgentReviewInfo.self, from: Data(running.utf8))
+    #expect(review.activity == [ReviewActivityLine(at: 1_792_148_400_000, text: "Reading src/a.ts")])
+    let older = #"{"id":1,"status":"running","detail":"","createdAt":0,"updatedAt":0}"#
+    #expect(try JSONDecoder().decode(AgentReviewInfo.self, from: Data(older.utf8)).activity == nil)
+}
+
+@MainActor @Test func thePageRefreshesEvery3SecondsWhileAReviewRuns() async {
+    for (status, seconds) in [("running", 3), ("queued", 15), ("posting", 15), ("ready", 30)] {
+        let model = ReviewsModel(client: FakeReviewsClient(lists: [.success(withAgent(status))]))
+        await model.refresh()
+        #expect(model.refreshSeconds == seconds, "\(status)")
+    }
 }

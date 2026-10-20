@@ -1,6 +1,7 @@
 import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { z } from "zod";
 import type { Snapshot } from "./domain.ts";
 import { myReviewState, reviewerKey } from "./events.ts";
 import type { PreviousState } from "./events.ts";
@@ -103,8 +104,15 @@ export interface AgentReviewRow {
   readonly body: string | null;
   /** Why it failed or was skipped, or a note about posting. */
   readonly detail: string;
+  /** What the run did, newest last: the last `ACTIVITY_LINES` lines, written while it runs. */
+  readonly activity: readonly ActivityLine[];
   readonly createdAt: number;
   readonly updatedAt: number;
+}
+
+export interface ActivityLine {
+  readonly at: number;
+  readonly text: string;
 }
 
 export interface AgentReviewFields {
@@ -189,6 +197,8 @@ export interface Store {
   countAgentReviews(trigger: AgentReviewTrigger, since: number): number;
   /** Puts a running review back in the queue, as if it never started. */
   requeueAgentReview(id: number, now: number): boolean;
+  /** Adds a line to a running review's activity; does nothing once it stopped running. */
+  appendAgentReviewActivity(id: number, at: number, text: string): void;
   nextQueuedAgentReview(): AgentReviewRow | undefined;
   getAgentReview(id: number): AgentReviewRow | undefined;
   /** The newest review of each MR. */
@@ -225,7 +235,10 @@ export interface Store {
   close(): void;
 }
 
-const SCHEMA_VERSION = 11;
+const SCHEMA_VERSION = 12;
+/** What a running review is doing, as a JSON array of `ActivityLine`. */
+const SCHEMA_V12 = "ALTER TABLE agent_review ADD COLUMN activity TEXT NOT NULL DEFAULT '[]'";
+const ACTIVITY_LINES = 50;
 /** The description a review read, so a description-only change counts as an update, and whether the agent approved after it. */
 const SCHEMA_V11_COLUMNS: readonly (readonly [string, string])[] = [
   ["description_sha", "TEXT"],
@@ -442,6 +455,19 @@ function nullableText(row: Row, column: string): string | null {
   return typeof value === "string" ? value : null;
 }
 
+const activitySchema = z.array(z.object({ at: z.number(), text: z.string() }));
+
+/** A column that does not read as activity counts as none: it is only ever shown. */
+function parseActivity(value: unknown): ActivityLine[] {
+  if (typeof value !== "string") return [];
+  try {
+    const parsed = activitySchema.safeParse(JSON.parse(value));
+    return parsed.success ? parsed.data : [];
+  } catch {
+    return [];
+  }
+}
+
 function toAgentReview(row: Row): AgentReviewRow {
   const status = text(row, "status");
   const trigger = text(row, "trigger");
@@ -463,6 +489,7 @@ function toAgentReview(row: Row): AgentReviewRow {
     approved: row["approved"] === 1,
     body: nullableText(row, "body"),
     detail: text(row, "detail"),
+    activity: parseActivity(row["activity"]),
     createdAt: integer(row, "created_at"),
     updatedAt: integer(row, "updated_at"),
   };
@@ -527,6 +554,7 @@ function initSchema(db: DatabaseSync): void {
       }
     }
   }
+  if (version < 12 && !hasColumn(db, "agent_review", "activity")) db.exec(SCHEMA_V12);
   if (version !== SCHEMA_VERSION) db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 }
 
@@ -744,9 +772,21 @@ export function openStore(path: string): Store {
       return (
         db
           .prepare(
-            "UPDATE agent_review SET status = 'queued', started_at = NULL, updated_at = ? WHERE id = ? AND status = 'running'",
+            "UPDATE agent_review SET status = 'queued', started_at = NULL, activity = '[]', updated_at = ? WHERE id = ? AND status = 'running'",
           )
           .run(now, id).changes > 0
+      );
+    },
+
+    appendAgentReviewActivity(id, at, text) {
+      const row = db
+        .prepare("SELECT activity FROM agent_review WHERE id = ? AND status = 'running'")
+        .get(id);
+      if (row === undefined) return;
+      const activity = [...parseActivity(row["activity"]), { at, text }].slice(-ACTIVITY_LINES);
+      db.prepare("UPDATE agent_review SET activity = ? WHERE id = ? AND status = 'running'").run(
+        JSON.stringify(activity),
+        id,
       );
     },
 

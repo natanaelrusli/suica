@@ -25,6 +25,8 @@ import type { DetectedCli, ModelCliId } from "./model-cli.ts";
 import type { Notifier } from "./notifier.ts";
 import {
   buildInvocation,
+  describeClaudeEvent,
+  describeCodexEvent,
   parseClaudeOutput,
   parseCodexOutput,
   RunFailure,
@@ -336,13 +338,20 @@ async function runCli(
   path: string,
   prompt: string,
   workDir: string,
+  /** Each step of the run, as the Owner sees it. */
+  onActivity: (text: string) => void,
 ): Promise<RunResult> {
   const invocation = buildInvocation(cli, prompt, workDir, deps.config.review.model);
+  const describe = (line: string): string[] =>
+    cli === "claude" ? describeClaudeEvent(line, workDir) : describeCodexEvent(line);
   let stdout: string;
   try {
     ({ stdout } = await deps.exec(path, invocation.args, {
       timeoutMs: deps.config.review.timeoutMinutes * 60_000,
       cwd: workDir,
+      onStdoutLine: (line) => {
+        for (const text of describe(line)) onActivity(text);
+      },
       ...(deps.signal === undefined ? {} : { signal: deps.signal }),
     }));
   } catch (error) {
@@ -529,6 +538,7 @@ export async function runAgentReview(baseDeps: ReviewDeps, row: AgentReviewRow):
     }
 
     workDir = mkdtempSync(join(tmpdir(), "suica-review-"));
+    store.appendAgentReviewActivity(row.id, deps.now(), "Cloning the source branch");
     const headSha = await checkout(deps, detail, join(workDir, "repo"));
     const descriptionHash = descriptionSha(detail.description);
     if (store.hasAgentReviewAt(row.mrKey, headSha, descriptionHash))
@@ -545,7 +555,10 @@ export async function runAgentReview(baseDeps: ReviewDeps, row: AgentReviewRow):
       headSha,
       ...(rereview === undefined ? {} : { rereview }),
     });
-    const result = await runCli(deps, cliId, path, prompt, workDir);
+    store.appendAgentReviewActivity(row.id, deps.now(), `Starting ${CLI_NAMES[cliId] ?? cliId}`);
+    const result = await runCli(deps, cliId, path, prompt, workDir, (text) => {
+      store.appendAgentReviewActivity(row.id, deps.now(), text);
+    });
     if (result.tokens !== null) {
       store.recordTokenUsage({ at: deps.now(), purpose: "review", ...result.tokens });
     }

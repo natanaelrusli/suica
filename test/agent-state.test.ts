@@ -44,6 +44,7 @@ describe("buildAgentState", () => {
         cli: "claude",
         model: "opus",
         startedAt: 1792148400000,
+        latestActivity: "Reading src/a.ts",
       },
       queued: [{ id: 5, mrKey: "g/p!8", mrTitle: null }],
     };

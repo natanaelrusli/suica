@@ -183,7 +183,7 @@ describe("schema 10", () => {
     expect(store.getAgentReview(next)?.previousSha).toBe("aaa1111");
     store.close();
     const check = new DatabaseSync(path);
-    expect(check.prepare("PRAGMA user_version").get()?.["user_version"]).toBe(11);
+    expect(check.prepare("PRAGMA user_version").get()?.["user_version"]).toBe(12);
     check.close();
   });
 
@@ -211,7 +211,7 @@ describe("schema 10", () => {
     expect(store.getAgentReview(next)).toMatchObject({ descriptionSha: "d1", approved: true });
     store.close();
     const check = new DatabaseSync(path);
-    expect(check.prepare("PRAGMA user_version").get()?.["user_version"]).toBe(11);
+    expect(check.prepare("PRAGMA user_version").get()?.["user_version"]).toBe(12);
     check.close();
   });
 
@@ -278,6 +278,37 @@ describe("schema 10", () => {
     );
     store.saveReviewHeads(new Map([["g/p!2", { ...b, queuedHead: "" }]]));
     expect(store.loadReviewHeads()).toEqual(new Map([["g/p!2", { ...b, queuedHead: "" }]]));
+    store.close();
+  });
+});
+
+describe("agent review activity", () => {
+  const NOW = Date.UTC(2026, 9, 20, 6);
+
+  it("keeps the newest 50 lines of a running review, and nothing once it stopped running", () => {
+    const store = openStore(tempDb());
+    const id = store.queueAgentReview("g/p!1", "manual", NOW) ?? 0;
+    store.appendAgentReviewActivity(id, NOW, "too early");
+    expect(store.getAgentReview(id)?.activity).toEqual([]);
+    store.transitionAgentReview(id, ["queued"], "running", {}, NOW);
+    for (let i = 0; i < 55; i += 1) store.appendAgentReviewActivity(id, NOW + i, `line ${i}`);
+    const activity = store.getAgentReview(id)?.activity ?? [];
+    expect(activity).toHaveLength(50);
+    expect(activity[0]).toEqual({ at: NOW + 5, text: "line 5" });
+    expect(activity.at(-1)).toEqual({ at: NOW + 54, text: "line 54" });
+    store.transitionAgentReview(id, ["running"], "ready", { body: "b" }, NOW);
+    store.appendAgentReviewActivity(id, NOW + 60, "late");
+    expect(store.getAgentReview(id)?.activity.at(-1)?.text).toBe("line 54");
+    store.close();
+  });
+
+  it("starts over when a running review goes back to the queue", () => {
+    const store = openStore(tempDb());
+    const id = store.queueAgentReview("g/p!1", "manual", NOW) ?? 0;
+    store.transitionAgentReview(id, ["queued"], "running", {}, NOW);
+    store.appendAgentReviewActivity(id, NOW, "Reading a.ts");
+    store.requeueAgentReview(id, NOW);
+    expect(store.getAgentReview(id)?.activity).toEqual([]);
     store.close();
   });
 });

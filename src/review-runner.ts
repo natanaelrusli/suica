@@ -56,7 +56,8 @@ export function buildInvocation(
         "-p",
         prompt,
         "--output-format",
-        "json",
+        "stream-json",
+        "--verbose",
         ...(model === undefined ? [] : ["--model", model]),
         "--effort",
         REVIEW_EFFORT,
@@ -108,14 +109,27 @@ const claudeSchema = z.object({
   modelUsage: z.record(z.string(), claudeUsageSchema).optional(),
 });
 
-/** Reads `claude -p --output-format json`. */
-export function parseClaudeOutput(stdout: string): RunResult {
-  let raw: unknown;
-  try {
-    raw = JSON.parse(stdout);
-  } catch {
-    throw new RunFailure("claude output was not JSON");
+/** The last JSON line of claude's stream that is its result (one object without a type also is). */
+function claudeResult(stdout: string): unknown {
+  let result: unknown;
+  for (const line of stdout.split("\n")) {
+    if (!line.trim().startsWith("{")) continue;
+    try {
+      const event: unknown = JSON.parse(line);
+      const type =
+        typeof event === "object" && event !== null && "type" in event ? event.type : undefined;
+      if (type === "result" || type === undefined) result = event;
+    } catch {
+      // A partial or foreign line: the result event is a whole line of its own.
+    }
   }
+  return result;
+}
+
+/** Reads `claude -p --output-format stream-json --verbose`: the review is in its result event. */
+export function parseClaudeOutput(stdout: string): RunResult {
+  const raw = claudeResult(stdout);
+  if (raw === undefined) throw new RunFailure("claude output was not JSON");
   const parsed = claudeSchema.safeParse(raw);
   if (!parsed.success) throw new RunFailure("unexpected claude output shape");
   const { is_error: isError, result, subtype, modelUsage } = parsed.data;
@@ -186,4 +200,113 @@ export function parseCodexOutput(stdout: string, lastMessage: string): RunResult
     };
   }
   return { body: lastMessage.trim(), tokens, model: null };
+}
+
+// MARK: - Live activity
+
+const ACTIVITY_CHARS = 200;
+
+/** One line of at most `ACTIVITY_CHARS`, whitespace and line breaks collapsed. */
+function oneLine(text: string): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  return flat.length <= ACTIVITY_CHARS ? flat : `${flat.slice(0, ACTIVITY_CHARS - 1)}…`;
+}
+
+/** A path inside the checkout without the checkout's own folder. */
+function relative(path: string, workDir: string): string {
+  return path.startsWith(`${workDir}/`) ? path.slice(workDir.length + 1) : path;
+}
+
+const contentSchema = z.array(
+  z.object({
+    type: z.string(),
+    name: z.string().optional(),
+    input: z.record(z.string(), z.unknown()).optional(),
+    text: z.string().optional(),
+    thinking: z.string().optional(),
+  }),
+);
+const claudeEventSchema = z.object({
+  type: z.literal("assistant"),
+  message: z.object({ content: contentSchema }),
+});
+
+function field(input: Readonly<Record<string, unknown>> | undefined, key: string): string {
+  const value = input?.[key];
+  return typeof value === "string" ? value : "";
+}
+
+function describeTool(
+  name: string,
+  input: Readonly<Record<string, unknown>> | undefined,
+  workDir: string,
+): string {
+  const path = relative(field(input, "path") || field(input, "file_path"), workDir);
+  switch (name) {
+    case "Read":
+      return `Reading ${path}`;
+    case "Grep":
+      return `Searching "${field(input, "pattern")}"${path === "" ? "" : ` in ${path}`}`;
+    case "Glob":
+      return `Finding files ${field(input, "pattern")}`;
+    case "Skill":
+      return `Loading skill ${field(input, "skill")}`;
+    default:
+      return `Using ${name}`;
+  }
+}
+
+/**
+ * What one line of claude's stream shows the Owner: each tool step, thinking and the text the
+ * model writes. Anything else (system events, tool results, the result itself) shows nothing.
+ */
+export function describeClaudeEvent(line: string, workDir: string): string[] {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(line);
+  } catch {
+    return [];
+  }
+  const parsed = claudeEventSchema.safeParse(raw);
+  if (!parsed.success) return [];
+  return parsed.data.message.content.flatMap((block) => {
+    if (block.type === "tool_use" && block.name !== undefined) {
+      return [oneLine(describeTool(block.name, block.input, workDir))];
+    }
+    if (block.type === "thinking" && block.thinking?.trim()) {
+      return [oneLine(`Thinking: ${block.thinking}`)];
+    }
+    if (block.type === "text" && block.text?.trim()) return [oneLine(block.text)];
+    return [];
+  });
+}
+
+const codexEventSchema = z.object({
+  type: z.string(),
+  item: z.object({
+    type: z.string(),
+    text: z.string().optional(),
+    command: z.string().optional(),
+  }),
+});
+
+/** What one line of `codex exec --json` shows the Owner: reasoning, commands as they start, the answer. */
+export function describeCodexEvent(line: string): string[] {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(line);
+  } catch {
+    return [];
+  }
+  const parsed = codexEventSchema.safeParse(raw);
+  if (!parsed.success) return [];
+  const { type, item } = parsed.data;
+  if (type === "item.completed" && item.type === "reasoning" && item.text?.trim()) {
+    return [oneLine(`Thinking: ${item.text}`)];
+  }
+  if (type === "item.started" && item.type === "command_execution" && item.command) {
+    return [oneLine(`Running ${item.command}`)];
+  }
+  if (type === "item.completed" && item.type === "agent_message") return ["Writing the review"];
+  return [];
 }
