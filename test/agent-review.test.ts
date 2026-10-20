@@ -10,6 +10,7 @@ import {
   findSkillDir,
   postAgentReview,
   queueAutomaticReviews,
+  rereviewWaitingReasons,
   readSkillText,
   renderNote,
   renderThread,
@@ -273,8 +274,9 @@ describe("buildPrompt", () => {
 
 // MARK: - Running
 
+// Approval after a post is tested on its own, with APPROVING and NOT_APPROVING.
 const CONFIG = parseConfig(
-  "gitlab:\n  hostname: gitlab.example\nmodel:\n  cli: claude\nreview:\n  maxChangedLines: 100\n",
+  "gitlab:\n  hostname: gitlab.example\nmodel:\n  cli: claude\nreview:\n  maxChangedLines: 100\n  approve: false\n",
 );
 const CLAUDE: DetectedCli = { id: "claude", name: "Claude Code", path: "/bin/claude" };
 const CODEX: DetectedCli = { id: "codex", name: "Codex", path: "/bin/codex" };
@@ -1056,6 +1058,47 @@ describe("queueAutomaticReviews", () => {
     expect(queuedKeys(db)).toEqual(["g/p!1"]);
   });
 
+  it("explains from the saved tracking why a re-review waits, and nothing while review.auto is off", () => {
+    const db = store();
+    posted(db, "g/p!1", "sha-1-a");
+    posted(db, "g/p!2", "sha-2-a");
+    db.saveReviewHeads(
+      new Map([
+        ["g/p!1", { head: "sha-1-b", changedAt: NOW - 4 * MINUTE, queuedHead: "sha-1-a" }],
+        ["g/p!2", { head: "sha-2-b", changedAt: NOW - DAY, queuedHead: "sha-2-a" }],
+      ]),
+    );
+    const snap = snapshot({
+      reviewRequested: [
+        mr(1, { headSha: "sha-1-b", reviewers: [reviewer("me", "REVIEWED")] }),
+        mr(2, { headSha: "sha-2-b", reviewers: [reviewer("me", "APPROVED")] }),
+      ],
+    });
+    expect(rereviewWaitingReasons(db, auto, snap, NOW)).toEqual(
+      new Map([
+        ["g/p!1", { reason: "waiting", dueAt: NOW + 6 * MINUTE }],
+        ["g/p!2", { reason: "approved" }],
+      ]),
+    );
+    expect(rereviewWaitingReasons(db, off, snap, NOW)).toEqual(new Map());
+  });
+
+  it("blames the daily cap once automatic reviews reached review.maxPerDay", () => {
+    const db = store();
+    posted(db, "g/p!1", "sha-1-a");
+    db.queueAgentReview("g/p!8", "auto", NOW - MINUTE);
+    db.queueAgentReview("g/p!9", "auto", NOW - MINUTE);
+    db.saveReviewHeads(
+      new Map([["g/p!1", { head: "sha-1-b", changedAt: NOW - DAY, queuedHead: "sha-1-a" }]]),
+    );
+    const snap = snapshot({
+      reviewRequested: [mr(1, { headSha: "sha-1-b", reviewers: [reviewer("me", "REVIEWED")] })],
+    });
+    expect(rereviewWaitingReasons(db, auto, snap, NOW).get("g/p!1")).toEqual({
+      reason: "daily-cap",
+    });
+  });
+
   it("does not queue at once when GitLab asks again for an MR whose last review was posted", () => {
     const db = store();
     posted(db, "g/p!1", "sha-1-a");
@@ -1558,13 +1601,14 @@ describe("postAgentReview and discardAgentReview", () => {
       expect(off.h.db.getAgentReview(off.id)?.approved).toBe(false);
     });
 
-    it("is off by default, so approving stays one click in the app", async () => {
+    it("is on by default", async () => {
       const { h, id } = await readyWith(CLEAN_REREVIEW, true);
       const { deps, approvals } = approvingDeps(h, {
         config: parseConfig("gitlab:\n  hostname: gitlab.example\n"),
       });
       await postAgentReview(deps, id);
-      expect(approvals).toEqual([]);
+      expect(approvals).toHaveLength(1);
+      expect(h.db.getAgentReview(id)?.approved).toBe(true);
     });
 
     it("notes a refused approval on the posted review and does not retry", async () => {

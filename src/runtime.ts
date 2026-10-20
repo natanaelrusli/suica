@@ -9,6 +9,7 @@ import { createFailureTracker } from "./failures.ts";
 import { fetchSnapshot, glabPost, glabPostJson, glabRest, glabRunner } from "./gitlab.ts";
 import { createLogger } from "./log.ts";
 import type { Logger } from "./log.ts";
+import { loadAlerts } from "./alerts.ts";
 import { createNotifier } from "./notifier.ts";
 import { pollOnce } from "./poller.ts";
 import type { PollDeps, PollStatus } from "./poller.ts";
@@ -63,6 +64,8 @@ export function createRuntime(configPath: string, signal?: AbortSignal): Runtime
   // later seeds from the then-current state and never announces what happened in between.
   if (teams === undefined) store.resetTeamsBaseline();
 
+  // A bad notification template stops startup too, whether Teams is on or not.
+  const alerts = loadAlerts(config.teams.templatesPath ?? defaultTemplatesPath());
   const notifier = createNotifier();
   const reviews = createReviewWorker({
     store,
@@ -73,6 +76,7 @@ export function createRuntime(configPath: string, signal?: AbortSignal): Runtime
     post: glabPost(config.gitlab),
     postJson: glabPostJson(config.gitlab),
     notifier,
+    alerts,
     log,
     now: Date.now,
     ...(signal === undefined ? {} : { signal }),
@@ -82,6 +86,7 @@ export function createRuntime(configPath: string, signal?: AbortSignal): Runtime
     fetchSnapshot: () => fetchSnapshot(run),
     store,
     notifier,
+    alerts,
     queueReviews: (snapshot, newRequests) => {
       queueAutomaticReviews({ store, config, log, now: Date.now }, snapshot, newRequests);
     },

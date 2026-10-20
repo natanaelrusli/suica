@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { expandShortcodes } from "../emoji.ts";
 import type { FindingCount } from "../inline-review.ts";
 import { TEMPLATE_NAMES } from "./types.ts";
 import type { TemplateName } from "./types.ts";
@@ -12,11 +13,15 @@ export const PLACEHOLDERS = [
   "mr.iid",
   "mr.project",
   "person.name",
+  /** The first word of the recipient's name. */
+  "person.firstName",
   "owner.name",
   /** The name the agent introduces itself with (`teams.agentName`). */
   "agent.name",
   /** What an Agent Review found, such as "ada 8 findings (7 Minor, 1 Nit)"; empty elsewhere. */
   "review.findings",
+  /** "pagi", "siang", "sore" or "malam", by the local time the message is written. */
+  "time.greeting",
 ] as const;
 export type Placeholder = (typeof PLACEHOLDERS)[number];
 export type Templates = Readonly<Record<TemplateName, string>>;
@@ -73,33 +78,95 @@ export class TemplateError extends Error {
 }
 
 const PLACEHOLDER_PATTERN = /\{\{\s*([\w.]+)\s*\}\}/g;
+const IMAGE_PATTERN = /!\[[^\]\n]*\]\(([^)\s]*)/g;
+
+/** A line that is exactly this splits a template into variants; each message uses one. */
+export const VARIANT_SEPARATOR = "--- or ---";
+const VARIANT_LINE = /^[ \t]*--- or ---[ \t]*$/m;
 
 function isPlaceholder(name: string): name is Placeholder {
   return (PLACEHOLDERS as readonly string[]).includes(name);
 }
 
-/** Throws a `TemplateError` naming `label` when the text is empty or uses an unknown placeholder. */
-export function validateTemplate(label: string, text: string): void {
+export function splitVariants(text: string): string[] {
+  return text.split(new RegExp(VARIANT_LINE.source, "gm"));
+}
+
+/** FNV-1a: the same key always picks the same variant, so a retry writes the same text. */
+function fnv1a(key: string): number {
+  let hash = 0x811c9dc5;
+  for (const unit of new TextEncoder().encode(key)) {
+    hash ^= unit;
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash;
+}
+
+export function pickVariant(text: string, seed: string): string {
+  const variants = splitVariants(text);
+  return variants[fnv1a(seed) % variants.length] ?? text;
+}
+
+/**
+ * Throws a `TemplateError` naming `label` when the text is empty, uses a placeholder outside
+ * `allowed`, or shows an image from anything but an https URL.
+ */
+export function validateText(label: string, text: string, allowed: readonly string[]): void {
   if (text.trim().length === 0) throw new TemplateError(`template ${label} is empty`);
   for (const match of text.matchAll(PLACEHOLDER_PATTERN)) {
     const name = match[1] ?? "";
-    if (!isPlaceholder(name)) {
+    if (!allowed.includes(name)) {
       throw new TemplateError(`template ${label} uses an unknown placeholder: ${name}`);
+    }
+  }
+  for (const match of text.matchAll(IMAGE_PATTERN)) {
+    if (!/^https:\/\/[^/]/i.test(match[1] ?? "")) {
+      throw new TemplateError(`template ${label} shows an image that is not an https link`);
     }
   }
 }
 
-/** One pass over the template, so a value that looks like a placeholder is never expanded. */
+/** Every variant of a Teams template must be valid on its own. */
+export function validateTemplate(label: string, text: string): void {
+  for (const variant of splitVariants(text)) validateText(label, variant, PLACEHOLDERS);
+}
+
+/**
+ * Shortcodes first, then one pass over the placeholders, so a value that looks like a
+ * placeholder or a shortcode is never expanded.
+ */
+export function fillText(text: string, values: Readonly<Record<string, string>>): string {
+  return expandShortcodes(text)
+    .replace(PLACEHOLDER_PATTERN, (_whole, name: string) => {
+      const value = Object.hasOwn(values, name) ? values[name] : undefined;
+      if (value === undefined) throw new TemplateError(`unknown placeholder: ${name}`);
+      return value;
+    })
+    .trim();
+}
+
 export function renderTemplate(
   text: string,
   values: Readonly<Record<Placeholder, string>>,
 ): string {
-  return text
-    .replace(PLACEHOLDER_PATTERN, (_whole, name: string) => {
-      if (!isPlaceholder(name)) throw new TemplateError(`unknown placeholder: ${name}`);
-      return values[name];
-    })
-    .trim();
+  for (const match of text.matchAll(PLACEHOLDER_PATTERN)) {
+    if (!isPlaceholder(match[1] ?? "")) throw new TemplateError(`unknown placeholder: ${match[1]}`);
+  }
+  return fillText(text, values);
+}
+
+/** The `time.greeting` value at `date`, local time. */
+export function greetingAt(date: Date): string {
+  const hour = date.getHours();
+  if (hour >= 4 && hour < 11) return "pagi";
+  if (hour >= 11 && hour < 15) return "siang";
+  if (hour >= 15 && hour < 18) return "sore";
+  return "malam";
+}
+
+/** The `person.firstName` value: the first word of a cleaned name. */
+export function firstName(name: string): string {
+  return name.trim().split(/\s+/)[0] ?? "";
 }
 
 export function defaultTemplatesPath(): string {

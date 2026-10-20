@@ -81,6 +81,7 @@ struct SuicaApp: App {
     @State private var templates: TemplateEditorModel
     @State private var appearance = AppearanceSettings()
     @State private var navigator = Navigator()
+    @State private var celebrations = CelebrationCounter()
 
     init() {
         let agent: any AgentClient
@@ -114,9 +115,10 @@ struct SuicaApp: App {
     var body: some Scene {
         MenuBarExtra {
             MenuView(model: model, window: window, reviews: reviews, settings: appearance, navigator: navigator)
+                .modifier(Celebrations(model: model, reviews: reviews, settings: appearance, counter: celebrations))
                 .appearance(appearance)
         } label: {
-            Image(nsImage: PenguinGlyph.image)
+            MenuBarIconView(icon: appearance.menuBarIcon, emoji: appearance.menuBarEmoji)
                 .modifier(OpenWindowOnLink(window: window))
             if let badge = appearance.menuBarBadge.label(for: model.badgeCount) { Text(badge) }
         }
@@ -127,6 +129,7 @@ struct SuicaApp: App {
                 window: window, editor: editor, reviews: reviews, templates: templates, settings: appearance,
                 navigator: navigator
             )
+            .modifier(Celebrations(model: model, reviews: reviews, settings: appearance, counter: celebrations))
             .appearance(appearance)
         }
         .defaultSize(width: 1100, height: 720)
@@ -135,5 +138,21 @@ struct SuicaApp: App {
             SidebarCommands()
             NavigationCommands(navigator: navigator)
         }
+    }
+}
+
+/// Confetti and sound for a message sent, an MR approved and inbox zero, in the popover and the
+/// window alike; Appearance's Try it reaches the counter through the environment.
+private struct Celebrations: ViewModifier {
+    let model: MenuModel
+    let reviews: ReviewsModel
+    let settings: AppearanceSettings
+    let counter: CelebrationCounter
+
+    func body(content: Content) -> some View {
+        content
+            .celebrating(settings, trigger: model.sentCount + reviews.approvedCount + counter.value)
+            .onChange(of: model.badgeCount, initial: true) { _, count in counter.badgeChanged(to: count) }
+            .environment(counter)
     }
 }

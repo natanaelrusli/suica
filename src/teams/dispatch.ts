@@ -12,7 +12,14 @@ import type { TeamsGateway } from "./gateway.ts";
 import { isWithinWorkingHours } from "./hours.ts";
 import { resolveEmail } from "./identity.ts";
 import type { Resolution } from "./identity.ts";
-import { escapeMarkdown, markdownLink, renderTemplate } from "./templates.ts";
+import {
+  escapeMarkdown,
+  firstName,
+  greetingAt,
+  markdownLink,
+  pickVariant,
+  renderTemplate,
+} from "./templates.ts";
 import type { Placeholder, Templates } from "./templates.ts";
 import type { HeldMessage, OutboxRow } from "./types.ts";
 
@@ -128,18 +135,22 @@ function valuesFor(
   row: OutboxRow,
   ownerName: string,
   agentName: string,
+  nowMs: number,
 ): Record<Placeholder, string> {
+  const recipient = clean(row.recipientName, NAME_MAX);
   return {
     "mr.title": escapeMarkdown(clean(row.mrTitle, TITLE_MAX)),
     "mr.url": row.mrUrl,
     "mr.link": markdownLink(clean(row.mrTitle, TITLE_MAX), row.mrUrl),
     "mr.iid": String(row.mrIid),
     "mr.project": escapeMarkdown(row.mrProject),
-    "person.name": escapeMarkdown(clean(row.recipientName, NAME_MAX)),
+    "person.name": escapeMarkdown(recipient),
+    "person.firstName": escapeMarkdown(firstName(recipient)),
     "owner.name": escapeMarkdown(clean(ownerName, NAME_MAX)),
     "agent.name": escapeMarkdown(clean(agentName, NAME_MAX)),
     // Built by describeFindings, which already escapes what it took from the review.
     "review.findings": row.findings ?? "",
+    "time.greeting": greetingAt(new Date(nowMs)),
   };
 }
 
@@ -250,9 +261,10 @@ export async function dispatchQueued(
     if (row.status === "pending" || !inHours) continue;
     let text: string;
     try {
+      // The variant follows the row's dedupe key, so a retry writes the same text.
       text = renderTemplate(
-        deps.templates[row.variant],
-        valuesFor(row, snapshot.me.name, deps.config.agentName),
+        pickVariant(deps.templates[row.variant], row.dedupeKey),
+        valuesFor(row, snapshot.me.name, deps.config.agentName, nowMs),
       );
     } catch {
       deps.store.transitionOutbox(row.id, "queued", "failed", { detail: "template" }, nowMs);

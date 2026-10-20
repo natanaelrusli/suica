@@ -285,3 +285,15 @@ func makeState(attention: [OutboxItem] = [], paused: Bool = false) -> AgentState
     await model.refresh()
     #expect(model.confirmation?.id == 7)
 }
+
+@MainActor @Test func onlyADeliveredMessageCountsAsSentForTheCelebration() async {
+    let client = FakeClient(states: [.success(makeState())])
+    let model = MenuModel(client: client)
+    await model.send(item(1, "pending"))
+    #expect(model.sentCount == 1)
+    await client.setSend(.success(ActionResult(code: "retry-later")))
+    await model.send(item(2, "pending"))
+    await client.setSend(.failure(.timedOut))
+    await model.send(item(3, "pending"))
+    #expect(model.sentCount == 1)
+}

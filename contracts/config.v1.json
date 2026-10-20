@@ -277,7 +277,7 @@
       "label": "Approve automatically when ready",
       "help": "Approve the MR as you at the reviewed commit, and resolve your threads, once a posted Agent Review leaves only Minor or Nit findings. Off: approve with one click in the app",
       "value": null,
-      "effective": false
+      "effective": true
     },
     {
       "path": ["review", "skill"],

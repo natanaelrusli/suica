@@ -42,12 +42,9 @@ struct MenuView: View {
         }
         .padding(metrics.padding)
         .background(alignment: .top) {
-            // A wash of the accent colour behind the header, fading out before the content.
-            Rectangle()
-                .fill(.tint.opacity(0.16))
-                .mask(LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom))
+            // Appearance → Backdrop behind the header, fading out before the content.
+            BackdropView(backdrop: settings.backdrop, strength: settings.backdrop == .wash ? 0.16 : 0.3)
                 .frame(height: 96)
-                .allowsHitTesting(false)
         }
         // Fixed, so the lists have room even with one row in them.
         .frame(width: 460, height: 640, alignment: .top)

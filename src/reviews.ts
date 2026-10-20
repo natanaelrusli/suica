@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { RereviewWaitingJson } from "./agent-rereview.ts";
 import { UNREVIEWED } from "./domain.ts";
 import type { MergeRequest, Person, Reviewer, Snapshot } from "./domain.ts";
 import { FetchFailure } from "./gitlab.ts";
@@ -105,6 +106,13 @@ export interface ReviewSummaryJson {
    * changed since, no newer review is open, and neither the Owner nor the agent approved it yet.
    */
   readonly readyToApprove: boolean;
+  /**
+   * Why no automatic Agent Re-review ran yet although the head moved past the last posted Agent
+   * Review: `waiting` until `dueAt` (epoch milliseconds, `review.rereviewAfterMinutes` after the
+   * last push), `daily-cap` (`review.maxPerDay` reached), `approved` (never re-reviewed) or
+   * `draft`. Null otherwise, and when `review.auto` is off.
+   */
+  readonly rereviewWaiting: RereviewWaitingJson | null;
 }
 
 /** `suica reviews --json`. */
@@ -132,7 +140,12 @@ function toAgentReviewJson(row: AgentReviewRow): AgentReviewJson {
   };
 }
 
-const OPEN_STATUSES: readonly AgentReviewStatus[] = ["queued", "running", "ready", "posting"];
+export const OPEN_STATUSES: readonly AgentReviewStatus[] = [
+  "queued",
+  "running",
+  "ready",
+  "posting",
+];
 
 /** Pure: see `ReviewSummaryJson.changedSinceReview`. */
 export function changedSinceReview(
@@ -168,6 +181,7 @@ export function buildReviewList(
   snapshot: Snapshot,
   agentReviews: ReadonlyMap<string, AgentReviewRow> = new Map(),
   bases: ReadonlyMap<string, AgentReviewRow> = new Map(),
+  rereviewWaiting: ReadonlyMap<string, RereviewWaitingJson> = new Map(),
 ): ReviewListJson {
   return {
     version: 1,
@@ -189,6 +203,7 @@ export function buildReviewList(
         // Once you approved, a change is yours to look at; the list stops offering a re-review.
         changedSinceReview: approvedByMe ? null : changedSinceReview(mr, latest, bases.get(mr.key)),
         readyToApprove: readyToApprove(mr, snapshot.me, latest, bases.get(mr.key)),
+        rereviewWaiting: rereviewWaiting.get(mr.key) ?? null,
       };
     }),
   };

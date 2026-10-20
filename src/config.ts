@@ -89,7 +89,7 @@ export const configSchema = z
         postAs: z.enum(["comment", "inline"]).default("comment"),
         // Approve the MR as the Owner once a review that is ready to approve is posted. Off: the
         // Owner approves with one click in the app.
-        approve: z.boolean().default(false),
+        approve: z.boolean().default(true),
         // A skill name only, as typed after the slash: it ends up in a prompt and a file path.
         skill: z
           .string()

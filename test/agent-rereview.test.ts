@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { fetchSinceDiff, planRereviews } from "../src/agent-rereview.ts";
-import type { RereviewInput } from "../src/agent-rereview.ts";
+import { fetchSinceDiff, planRereviews, rereviewWaiting } from "../src/agent-rereview.ts";
+import type { RereviewInput, RereviewWaitingInput } from "../src/agent-rereview.ts";
 import type { AgentReviewRow, AgentReviewStatus, ReviewHead } from "../src/store.ts";
 import { mr } from "./builders.ts";
 
@@ -197,6 +197,59 @@ describe("planRereviews", () => {
     });
     expect([...result.heads.keys()].sort()).toEqual(["g/p!1", "g/p!2"]);
     expect(result.due.map((each) => each.key)).toEqual(["g/p!2", "g/p!1"]);
+  });
+});
+
+/** Why `g/p!1` waits, posted at `sha-1-a`, with the given tracking and defaults for everything else. */
+function why(overrides: Partial<RereviewWaitingInput>) {
+  return rereviewWaiting({
+    mrs: [mr(1, { headSha: "sha-1-b" })],
+    heads: settled,
+    bases: new Map([["g/p!1", base("posted", "sha-1-a")]]),
+    latest: new Map(),
+    now: NOW,
+    afterMs: AFTER,
+    approved: new Set(),
+    capReached: false,
+    ...overrides,
+  }).get("g/p!1");
+}
+
+describe("rereviewWaiting", () => {
+  it("says when the wait after the last push ends", () => {
+    const pushed = new Map<string, ReviewHead>([
+      ["g/p!1", { head: "sha-1-b", changedAt: NOW - 3 * MINUTE, queuedHead: "sha-1-a" }],
+    ]);
+    expect(why({ heads: pushed })).toEqual({ reason: "waiting", dueAt: NOW + 7 * MINUTE });
+  });
+
+  it("counts a head that moved since the last poll as pushed now", () => {
+    expect(why({ mrs: [mr(1, { headSha: "sha-1-c" })] })).toEqual({
+      reason: "waiting",
+      dueAt: NOW + AFTER,
+    });
+  });
+
+  it("blames the daily cap only for a re-review that is due", () => {
+    expect(why({ capReached: true })).toEqual({ reason: "daily-cap" });
+    expect(why({ capReached: false })).toBeUndefined();
+  });
+
+  it("names an approved MR before a draft, and both before the wait", () => {
+    const draft = mr(1, { headSha: "sha-1-b", draft: true });
+    expect(why({ mrs: [draft], approved: new Set(["g/p!1"]) })).toEqual({ reason: "approved" });
+    expect(why({ mrs: [draft] })).toEqual({ reason: "draft" });
+  });
+
+  it("says nothing when the head is the posted one, already queued, unknown or under an open review", () => {
+    expect(why({ mrs: [mr(1, { headSha: "sha-1-a" })] })).toBeUndefined();
+    const queued = new Map<string, ReviewHead>([
+      ["g/p!1", { head: "sha-1-b", changedAt: NOW - 20 * MINUTE, queuedHead: "sha-1-b" }],
+    ]);
+    expect(why({ heads: queued, capReached: true })).toBeUndefined();
+    expect(why({ heads: new Map() })).toBeUndefined();
+    expect(why({ latest: new Map([["g/p!1", base("running", "sha-1-a")]]) })).toBeUndefined();
+    expect(why({ bases: new Map([["g/p!1", base("discarded", "sha-1-a")]]) })).toBeUndefined();
   });
 });
 

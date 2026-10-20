@@ -18,6 +18,7 @@ import { expandHome, validateConfig } from "./config.ts";
 import type { ConfigIssue } from "./config.ts";
 import { CONFIG_FIELDS } from "./config-fields.ts";
 import type { ConfigField } from "./config-fields.ts";
+import { loadAlerts } from "./alerts.ts";
 import { TemplateError, defaultTemplatesPath, loadTemplates } from "./teams/templates.ts";
 import { errorMessage } from "./util.ts";
 
@@ -304,18 +305,17 @@ export function applyConfigEdits(path: string, request: SaveRequest): SaveResult
   }
   const validated = validateConfig(reparsed);
   if (!validated.ok) return fail("invalid", ...validated.issues);
-  if (validated.config.teams.enabled) {
-    try {
-      const templatesPath = validated.config.teams.templatesPath;
-      // The agent expands a leading ~ when it loads the config: check the folder it will read.
-      loadTemplates(
-        templatesPath === undefined ? defaultTemplatesPath() : expandHome(templatesPath),
-      );
-    } catch (error) {
-      const message =
-        error instanceof TemplateError ? error.message : "cannot read the templates folder";
-      return fail("invalid", { path: "teams.templatesPath", message });
-    }
+  try {
+    const templatesPath = validated.config.teams.templatesPath;
+    // The agent expands a leading ~ when it loads the config: check the folder it will read.
+    const folder = templatesPath === undefined ? defaultTemplatesPath() : expandHome(templatesPath);
+    // Notification templates load whether Teams is on or not; Teams templates only with Teams.
+    loadAlerts(folder);
+    if (validated.config.teams.enabled) loadTemplates(folder);
+  } catch (error) {
+    const message =
+      error instanceof TemplateError ? error.message : "cannot read the templates folder";
+    return fail("invalid", { path: "teams.templatesPath", message });
   }
 
   writeAtomically(path, text);

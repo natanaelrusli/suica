@@ -33,7 +33,52 @@ public enum Copy {
     public static let templateRevert = "Revert"
     public static let templateInsert = "Insert placeholder"
     public static let templateHint =
-        "Sent to Teams as Markdown: **bold**, [text](url) and line breaks work. Messages already waiting keep the text they were written with."
+        "Sent to Teams as Markdown: bold, italic, strikethrough, links, emoji and GIFs work. Messages already waiting keep the text they were written with."
+    public static let teamsMessagesSection = "Teams messages"
+    public static let alertsSection = "Your notifications"
+    public static let alertNeedsTitle = "Write a title on the first line."
+    public static let alertNeedsBody = "Write a body under the title."
+    public static let templateEmptyVariant = "A variant is empty: write it or remove it."
+    public static let alertTitleField = "Title"
+    public static let alertBodyField = "Body"
+    public static let alertHint =
+        "Shown by macOS as plain text: emoji and :shortcodes: work, Markdown does not. Long text is cut to one line."
+    public static let alertPreviewHeading = "As the notification will look"
+    public static let alertPreviewNote = "Preview with sample values."
+    public static let formatBold = "Bold"
+    public static let formatItalic = "Italic"
+    public static let formatStrikethrough = "Strikethrough"
+    public static let formatLink = "Link…"
+    public static let formatLinkPrompt = "Link address (https://…)"
+    public static let formatLinkAdd = "Add link"
+    public static let formatLinkRemove = "Remove link"
+    public static let formatEmoji = "Emoji"
+    public static let formatEmojiMore = "All emoji & symbols…"
+    public static let formatEmojiHint = "Typing a :shortcode: such as :tada: turns into the emoji."
+    public static let formatGIF = "GIF…"
+    public static let viewVisual = "Visual"
+    public static let viewMarkdown = "Markdown"
+    public static let visualUnavailable =
+        "This template uses Markdown the visual editor cannot show without changing it, so it opens as Markdown. Remove that syntax to edit it visually."
+    public static let variantsHeading = "Variants"
+    public static let variantsHelp =
+        "Each message uses one variant, picked per message, so repeated chats do not read the same."
+    public static func variantLabel(_ index: Int) -> String { "\(index + 1)" }
+    public static let variantAdd = "Add a variant"
+    public static let variantRemove = "Remove this variant"
+    public static let gifTitle = "Add a GIF"
+    public static let gifURL = "GIF link (https://…)"
+    public static let gifAlt = "Short description"
+    public static let gifAltPlaceholder = "celebrating penguin"
+    public static let gifInsert = "Add GIF"
+    public static let gifRecent = "Recently used"
+    public static let gifLoading = "Loading the GIF…"
+    public static let gifNotHTTPS = "Use an https link to the image itself, such as one ending in .gif."
+    public static let gifNotImage = "That link did not return an image."
+    public static let gifTooLarge = "That image is larger than 5 MB."
+    public static let gifHint =
+        "Copy a GIF's own link from GIPHY, Tenor or anywhere else (right-click the GIF → Copy Image Address). Teams shows it if it can load it."
+    public static let imageNotLoaded = "Image not loaded"
     public static func templatePreviewNote(_ recipient: String) -> String {
         "Preview with a sample MR and \(recipient) as the recipient."
     }
@@ -51,6 +96,17 @@ public enum Copy {
         case "notice.findings": "Review Notice: Agent Review findings"
         case "notice.refindings": "Review Notice: Agent Re-review findings"
         case "notice.reapproved": "Review Notice: Agent Re-review approved"
+        case "alert.review-requested": "Review requested"
+        case "alert.activity": "Activity on your MR"
+        case "alert.summary": "Several at once"
+        case "alert.baseline": "Agent started"
+        case "alert.rereview": "Re-review Nudge waiting"
+        case "alert.review-ready": "Agent Review ready"
+        case "alert.review-posted": "Agent Review posted"
+        case "alert.review-approved": "Agent Review posted and approved"
+        case "alert.review-post-failed": "Agent Review not posted"
+        case "alert.review-failed": "Agent Review failed"
+        case "alert.review-skipped": "Agent Review skipped"
         default: name
         }
     }
@@ -67,7 +123,36 @@ public enum Copy {
             "To the Author, after an Agent Re-review is posted on their MR, with its new findings per severity."
         case "notice.reapproved":
             "To the Author, after an Agent Re-review is posted and the agent approved their MR (review.approve)."
+        case "alert.review-requested": "To you, when someone adds you as a Reviewer."
+        case "alert.activity": "To you, when someone reviews or comments on your MR."
+        case "alert.summary":
+            "To you, instead of the others, when one poll has more than notifications.summaryThreshold of them."
+        case "alert.baseline": "To you, the first time the agent polls, with how many MRs wait for your review."
+        case "alert.rereview": "To you, when a Re-review Nudge waits for your approval after you pushed."
+        case "alert.review-ready": "To you, when an Agent Review is ready for you to check and post."
+        case "alert.review-posted": "To you, when an Agent Review was posted automatically (review.post: auto)."
+        case "alert.review-approved": "To you, when an Agent Review was posted automatically and the agent approved the MR."
+        case "alert.review-post-failed": "To you, when posting an Agent Review automatically failed."
+        case "alert.review-failed": "To you, when an Agent Review run failed."
+        case "alert.review-skipped": "To you, when an Agent Review run was skipped."
         default: ""
+        }
+    }
+    /// The short label a placeholder chip shows in the visual editor.
+    public static func placeholderChip(_ name: String) -> String {
+        switch name {
+        case "mr.link": "MR link"
+        case "mr.title": "MR title"
+        case "mr.url": "MR address"
+        case "mr.iid": "MR number"
+        case "mr.project": "Project"
+        case "person.name": "Recipient"
+        case "person.firstName": "First name"
+        case "owner.name": "You"
+        case "agent.name": "Agent"
+        case "review.findings": "Findings"
+        case "time.greeting": "Greeting"
+        default: name
         }
     }
     public static func placeholderHelp(_ name: String) -> String {
@@ -81,6 +166,14 @@ public enum Copy {
         case "owner.name": "Your name"
         case "agent.name": "The agent's name (teams.agentName)"
         case "review.findings": "What the Agent Review found, per severity (findings notices only)"
+        case "person.firstName": "The recipient's first name"
+        case "time.greeting": "pagi, siang, sore or malam, by the time the message is written"
+        case "author.name": "The MR's Author"
+        case "activity.summary": "Who approved, asked for changes or commented"
+        case "alert.count": "How many"
+        case "alert.titles": "The first three titles, then how many more"
+        case "reviewers.names": "The Reviewers waiting for a Re-review Nudge"
+        case "review.reason": "Why the run failed or was skipped"
         default: name
         }
     }
@@ -248,6 +341,16 @@ public enum Copy {
         case (true, true): "Code and description changed since review"
         case (true, false): "Code changed since review"
         default: "Description changed since review"
+        }
+    }
+    /// The row's line on why an automatic re-review has not run; nil for a reason this app does not know.
+    public static func rereviewWaiting(_ waiting: RereviewWaiting, dueTime: String?) -> String? {
+        switch waiting.reason {
+        case "waiting": dueTime.map { "Auto re-review due at \($0)" } ?? "Auto re-review waits after the last push"
+        case "daily-cap": "Auto re-review held: daily review cap reached"
+        case "approved": "No auto re-review: approved"
+        case "draft": "No auto re-review while it is a draft"
+        default: nil
         }
     }
     // Agent Review activity (Overview and menu bar)
@@ -558,7 +661,7 @@ public enum Copy {
     public static let systemReducesMotion =
         "Reduce motion is on in System Settings → Accessibility → Display, so the app only fades."
     public static let menuBarHeading = "Menu bar"
-    public static let menuBarBadgePicker = "Beside the penguin"
+    public static let menuBarBadgePicker = "Beside the icon"
     public static let menuBarBadgeHint = "Shown while messages need you."
     public static let popoverCounters = "Show quick actions in the popover"
     public static let startPagePicker = "Open the window on"
@@ -570,6 +673,58 @@ public enum Copy {
     public static let previewSample = "A sample tile in the chosen colour"
     public static func openSection(_ title: String) -> String { "Open \(title)" }
 
+    public static func title(_ value: MenuBarIcon) -> String {
+        switch value {
+        case .penguin: "Penguin"
+        case .watermelon: "Watermelon"
+        case .emoji: "Emoji"
+        }
+    }
+    public static func title(_ value: Backdrop) -> String {
+        switch value {
+        case .plain: "Plain"
+        case .wash: "Accent wash"
+        case .sunrise: "Sunrise"
+        case .lagoon: "Lagoon"
+        case .watermelon: "Watermelon"
+        case .aurora: "Aurora"
+        }
+    }
+    public static func title(_ value: SoundEffect) -> String {
+        switch value {
+        case .off: "Off"
+        case .pop: "Pop"
+        case .glass: "Glass"
+        case .purr: "Purr"
+        case .hero: "Hero"
+        case .tink: "Tink"
+        case .submarine: "Submarine"
+        }
+    }
+    public static func title(_ value: AppearancePreset) -> String {
+        switch value {
+        case .classic: "Classic"
+        case .watermelonParty: "Watermelon party"
+        case .midnight: "Midnight"
+        case .sunrise: "Sunrise"
+        case .zen: "Zen"
+        }
+    }
+    public static let presetsHeading = "Presets"
+    public static let presetsHint = "One click sets several choices below; change any of them afterwards."
+    public static let customColor = "Your colour"
+    public static let menuBarIconPicker = "Icon"
+    public static let menuBarEmojiField = "Emoji"
+    public static let menuBarEmojiHint = "Type or pick one emoji (⌃⌘Space opens the emoji picker)."
+    public static let backdropHeading = "Backdrop"
+    public static let backdropHint = "A soft wash behind the window's pages and the top of the popover. Aurora drifts slowly with full motion."
+    public static let funHeading = "Fun"
+    public static let celebrationsToggle = "Confetti when you send, approve or reach inbox zero"
+    public static let celebrationsNoMotion = "Confetti needs motion: it is off while Motion is Off or the system reduces motion."
+    public static let soundPicker = "Sound"
+    public static let soundHint = "Played for the same moments, at the system's alert volume."
+    public static let celebrateTry = "Try it"
+    public static let inboxZero = "Inbox zero! 🎉"
     public static func title(_ value: AccentTheme) -> String {
         switch value {
         case .glacier: "Glacier"
@@ -579,6 +734,7 @@ public enum Copy {
         case .watermelon: "Watermelon"
         case .grape: "Grape"
         case .graphite: "Graphite"
+        case .custom: "Custom"
         }
     }
 

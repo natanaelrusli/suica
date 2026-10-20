@@ -30,19 +30,28 @@ struct TeamsMessagePreview: View {
             Divider()
             VStack(alignment: .trailing, spacing: 3) {
                 Text(Copy.teamsNow).font(.caption2).foregroundStyle(.secondary)
-                MarkdownText.inline(DisplayText.cleanLines(text), projectURL: nil)
-                    .font(.system(size: 13))
-                    .foregroundStyle(TeamsColor.bubbleText)
-                    .tint(TeamsColor.link)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(TeamsColor.ownBubble, in: RoundedRectangle(cornerRadius: 6))
-                    // Links open only when they are http(s).
-                    .environment(\.openURL, OpenURLAction { url in
-                        DisplayText.safeURL(url.absoluteString) == nil ? .discarded : .systemAction
-                    })
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(Array(TemplatePreview.segments(text).enumerated()), id: \.offset) { _, segment in
+                        switch segment {
+                        case .text(let part):
+                            MarkdownText.inline(DisplayText.cleanLines(part), projectURL: nil)
+                                .font(.system(size: 13))
+                                .foregroundStyle(TeamsColor.bubbleText)
+                                .tint(TeamsColor.link)
+                                .textSelection(.enabled)
+                                .fixedSize(horizontal: false, vertical: true)
+                        case .image(let alt, let url):
+                            RemoteImage(url: url, alt: alt)
+                        }
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(TeamsColor.ownBubble, in: RoundedRectangle(cornerRadius: 6))
+                // Links open only when they are http(s).
+                .environment(\.openURL, OpenURLAction { url in
+                    DisplayText.safeURL(url.absoluteString) == nil ? .discarded : .systemAction
+                })
             }
             .padding(.leading, 36)
             .padding(10)

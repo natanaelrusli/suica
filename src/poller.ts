@@ -10,6 +10,7 @@ import {
   teamsFailureNotification,
 } from "./failures.ts";
 import type { FailureKind, FailureTracker, TeamsFailureReportKind } from "./failures.ts";
+import type { AlertTemplates } from "./alerts.ts";
 import type { Notification } from "./format.ts";
 import { baselineNotifications, buildNotifications, rereviewNotifications } from "./format.ts";
 import { FetchFailure } from "./gitlab.ts";
@@ -43,6 +44,8 @@ export interface PollDeps {
   readonly log: Logger;
   readonly config: Pick<Config, "gitlab" | "notifications">;
   readonly teams?: TeamsHooks;
+  /** The Owner's notification texts; the built-in ones when absent. */
+  readonly alerts?: AlertTemplates;
   /** Queues Agent Reviews after the commit; `newRequests` just asked for the Owner's review. May throw. */
   readonly queueReviews?: (snapshot: Snapshot, newRequests: readonly string[]) => void;
   /** Milliseconds since the epoch; the poll log stamps and times each poll with it. */
@@ -115,7 +118,7 @@ function queueReviews(deps: PollDeps, snapshot: Snapshot, events: readonly Activ
  * row moves to `pending` once, so a failed notification is never repeated and never touches the row.
  */
 async function notifyHeldRereviews(deps: PollDeps, held: readonly HeldMessage[]): Promise<void> {
-  for (const notification of rereviewNotifications(held)) {
+  for (const notification of rereviewNotifications(held, deps.alerts)) {
     try {
       await deps.notifier.notify(notification);
     } catch (error) {
@@ -192,8 +195,8 @@ async function runPoll(deps: PollDeps, start: number): Promise<PollOutcome> {
     ignoreAuthors: new Set(config.notifications.ignoreAuthors),
   });
   const notifications = previous.baselineDone
-    ? buildNotifications(events, config.notifications.summaryThreshold)
-    : baselineNotifications(countPendingReviews(snapshot));
+    ? buildNotifications(events, config.notifications.summaryThreshold, deps.alerts)
+    : baselineNotifications(countPendingReviews(snapshot), deps.alerts);
 
   let delivered = 0;
   try {

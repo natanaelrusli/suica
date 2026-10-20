@@ -177,6 +177,11 @@ struct MainWindow: View {
                     .transition(Motion.page(motion))
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(alignment: .top) {
+                BackdropView(backdrop: settings.backdrop, strength: settings.backdrop == .wash ? 0.1 : 0.2)
+                    .frame(height: 220)
+                    .ignoresSafeArea()
+            }
             .motion(Motion.page, value: current)
         }
         // The detail column follows the sidebar with the same curve, so pages resize smoothly

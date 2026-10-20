@@ -37,7 +37,8 @@
         "updatedAt": 1792152000000
       },
       "changedSinceReview": null,
-      "readyToApprove": false
+      "readyToApprove": false,
+      "rereviewWaiting": null
     },
     {
       "key": "g/p!9",
@@ -74,7 +75,11 @@
         "code": true,
         "description": false
       },
-      "readyToApprove": false
+      "readyToApprove": false,
+      "rereviewWaiting": {
+        "reason": "waiting",
+        "dueAt": 1792152800000
+      }
     }
   ]
 }

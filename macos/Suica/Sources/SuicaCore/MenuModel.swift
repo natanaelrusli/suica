@@ -6,6 +6,8 @@ public final class MenuModel {
     public private(set) var state: AgentState?
     public private(set) var errorText: String?
     public private(set) var banner: String?
+    /// Messages you sent from the app since it started; the views celebrate each one.
+    public private(set) var sentCount = 0
     public private(set) var busyIds: Set<Int> = []
     public private(set) var confirmation: OutboxItem?
 
@@ -70,9 +72,10 @@ public final class MenuModel {
     /// Takes the item itself: the confirmation dialog can clear `confirmation` while it closes.
     public func send(_ item: OutboxItem) async {
         guard item.actions.contains(.send) else { return }
-        await perform(id: item.id) { (client) async throws(AgentError) -> ActionResult in
+        let code = await perform(id: item.id) { (client) async throws(AgentError) -> ActionResult in
             try await client.send(id: item.id)
         }
+        if code == "sent" { sentCount += 1 }
     }
 
     public func skip(_ item: OutboxItem) async {
@@ -101,18 +104,23 @@ public final class MenuModel {
 
     /// One action per id at a time. The list is refreshed afterwards either way, because the row
     /// may already have been sent or skipped somewhere else.
+    /// The action's result code, or nil when it did not run or the agent could not be reached.
+    @discardableResult
     private func perform(
         id: Int, _ call: (any AgentClient) async throws(AgentError) -> ActionResult
-    ) async {
-        guard !busyIds.contains(id) else { return }
+    ) async -> String? {
+        guard !busyIds.contains(id) else { return nil }
         busyIds.insert(id)
+        var code: String?
         do {
-            banner = Copy.flash(for: try await call(client).code)
+            code = try await call(client).code
+            banner = Copy.flash(for: code ?? "")
         } catch {
             banner = Self.message(for: error)
         }
         busyIds.remove(id)
         await refresh()
+        return code
     }
 
     static func message(for error: AgentError) -> String {

@@ -1,18 +1,34 @@
+import AppKit
 import SuicaCore
 import SwiftUI
 
-extension AccentTheme {
-    /// The accent colour, or nil to keep the system's.
-    var color: Color? {
-        hex.map { hex in
-            Color(
-                .sRGB, red: Double((hex >> 16) & 0xFF) / 255, green: Double((hex >> 8) & 0xFF) / 255,
-                blue: Double(hex & 0xFF) / 255)
-        }
+extension Color {
+    /// An sRGB colour from 0xRRGGBB.
+    init(hex: Int) {
+        self.init(
+            .sRGB, red: Double((hex >> 16) & 0xFF) / 255, green: Double((hex >> 8) & 0xFF) / 255,
+            blue: Double(hex & 0xFF) / 255)
     }
+
+    /// 0xRRGGBB in sRGB, or nil when the colour cannot be read as sRGB.
+    var hex: Int? {
+        guard let rgb = NSColor(self).usingColorSpace(.sRGB) else { return nil }
+        let channel = { (value: CGFloat) in Int((min(max(value, 0), 1) * 255).rounded()) }
+        return channel(rgb.redComponent) << 16 | channel(rgb.greenComponent) << 8 | channel(rgb.blueComponent)
+    }
+}
+
+extension AccentTheme {
+    /// The accent colour, or nil to keep the system's (and for `custom`, see `AppearanceSettings.accent`).
+    var color: Color? { hex.map(Color.init(hex:)) }
 
     /// The swatch in Appearance: the system's accent for `system`.
     var swatch: Color { color ?? .accentColor }
+}
+
+extension AppearanceSettings {
+    /// The accent colour in use, or nil for the system's.
+    var accent: Color? { accentHex.map(Color.init(hex:)) }
 }
 
 extension AppearanceMode {
@@ -52,7 +68,7 @@ struct AppearanceRoot: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .tint(settings.theme.color)
+            .tint(settings.accent)
             .preferredColorScheme(settings.mode.colorScheme)
             .environment(\.metrics, Metrics.of(settings.density))
             .environment(\.motionLevel, settings.motion.effective(systemReduceMotion: systemReduceMotion))

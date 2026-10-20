@@ -11,7 +11,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { parseTemplateRequest, saveTemplate, showTemplates } from "../src/template-edit.ts";
-import { DEFAULT_TEMPLATES, loadTemplates } from "../src/teams/templates.ts";
+import { ALERT_NAMES, ALERT_PLACEHOLDERS, DEFAULT_ALERTS, loadAlerts } from "../src/alerts.ts";
+import { DEFAULT_TEMPLATES, PLACEHOLDERS, loadTemplates } from "../src/teams/templates.ts";
 
 const folders: string[] = [];
 afterEach(() => {
@@ -41,9 +42,12 @@ describe("showTemplates", () => {
       "notice.refindings",
       "notice.reapproved",
       "rereview",
+      ...ALERT_NAMES,
     ]);
     expect(doc.templates[0]).toEqual({
       name: "nudge",
+      group: "teams",
+      placeholders: PLACEHOLDERS,
       text: "Hi {{person.name}}\n{{mr.link}}",
       custom: true,
       defaultText: DEFAULT_TEMPLATES.nudge,
@@ -65,7 +69,7 @@ describe("saveTemplate", () => {
       status: "saved",
     });
     expect(readFileSync(join(dir, "rereview.txt"), "utf8")).toBe("Cek lagi {{person.name}}");
-    expect(showTemplates(dir).templates.at(-1)).toMatchObject({
+    expect(showTemplates(dir).templates.find((t) => t.name === "rereview")).toMatchObject({
       name: "rereview",
       text: "Cek lagi {{person.name}}",
       custom: true,
@@ -135,5 +139,53 @@ describe("parseTemplateRequest", () => {
     ]) {
       expect(parseTemplateRequest(bad)).toBeUndefined();
     }
+  });
+});
+
+/** The refusal's message, so a test can match it. */
+function refusal(result: ReturnType<typeof saveTemplate>): string {
+  return "message" in result ? `${result.status}: ${result.message}` : result.status;
+}
+
+describe("notification templates in the editor", () => {
+  it("lists each alert with its own placeholders, and the emoji table", () => {
+    const doc = showTemplates(tempDir());
+    expect(doc.templates.find((t) => t.name === "alert.review-failed")).toEqual({
+      name: "alert.review-failed",
+      group: "alert",
+      placeholders: ALERT_PLACEHOLDERS["alert.review-failed"],
+      text: DEFAULT_ALERTS["alert.review-failed"],
+      custom: false,
+      defaultText: DEFAULT_ALERTS["alert.review-failed"],
+    });
+    expect(doc.emoji["tada"]).toBe("🎉");
+  });
+
+  it("saves an alert the agent then loads", () => {
+    const dir = tempDir();
+    const text = ":tada: Review {{mr.title}}\nSiap dicek";
+    expect(saveTemplate(dir, { name: "alert.review-ready", text })).toEqual({ status: "saved" });
+    expect(loadAlerts(dir)["alert.review-ready"]).toBe(text);
+  });
+
+  it("refuses an alert without a body, or with another alert's placeholder", () => {
+    const dir = tempDir();
+    expect(refusal(saveTemplate(dir, { name: "alert.baseline", text: "Only a title" }))).toMatch(
+      /^invalid: .*no body/,
+    );
+    expect(
+      refusal(saveTemplate(dir, { name: "alert.baseline", text: "Hi\n{{mr.title}}" })),
+    ).toMatch(/^invalid: .*mr\.title/);
+    expect(existsSync(join(dir, "alert.baseline.txt"))).toBe(false);
+  });
+
+  it("refuses a Teams template with an http image or an empty variant", () => {
+    const dir = tempDir();
+    expect(
+      refusal(saveTemplate(dir, { name: "nudge", text: "Hi ![gif](http://x.example/a.gif)" })),
+    ).toMatch(/^invalid: .*https/);
+    expect(refusal(saveTemplate(dir, { name: "nudge", text: "Hi\n--- or ---\n" }))).toMatch(
+      /^invalid: .*empty/,
+    );
   });
 });

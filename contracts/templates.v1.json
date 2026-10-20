@@ -8,64 +8,332 @@
     "mr.iid",
     "mr.project",
     "person.name",
+    "person.firstName",
     "owner.name",
     "agent.name",
-    "review.findings"
+    "review.findings",
+    "time.greeting"
   ],
   "templates": [
     {
       "name": "nudge",
+      "group": "teams",
+      "placeholders": [
+        "mr.title",
+        "mr.url",
+        "mr.link",
+        "mr.iid",
+        "mr.project",
+        "person.name",
+        "person.firstName",
+        "owner.name",
+        "agent.name",
+        "review.findings",
+        "time.greeting"
+      ],
       "text": "Halo {{person.name}}, saya {{agent.name}}, agen review-nya {{owner.name}}. Boleh minta tolong review MR ini?\n{{mr.link}}\nTerima kasih!",
       "custom": false,
       "defaultText": "Halo {{person.name}}, saya {{agent.name}}, agen review-nya {{owner.name}}. Boleh minta tolong review MR ini?\n{{mr.link}}\nTerima kasih!"
     },
     {
       "name": "reminder",
+      "group": "teams",
+      "placeholders": [
+        "mr.title",
+        "mr.url",
+        "mr.link",
+        "mr.iid",
+        "mr.project",
+        "person.name",
+        "person.firstName",
+        "owner.name",
+        "agent.name",
+        "review.findings",
+        "time.greeting"
+      ],
       "text": "Halo {{person.name}}, saya {{agent.name}}, agen review-nya {{owner.name}}. Mengingatkan kembali soal review MR ini ya:\n{{mr.link}}\nTerima kasih!",
       "custom": false,
       "defaultText": "Halo {{person.name}}, saya {{agent.name}}, agen review-nya {{owner.name}}. Mengingatkan kembali soal review MR ini ya:\n{{mr.link}}\nTerima kasih!"
     },
     {
       "name": "notice.approved",
+      "group": "teams",
+      "placeholders": [
+        "mr.title",
+        "mr.url",
+        "mr.link",
+        "mr.iid",
+        "mr.project",
+        "person.name",
+        "person.firstName",
+        "owner.name",
+        "agent.name",
+        "review.findings",
+        "time.greeting"
+      ],
       "text": "Halo {{person.name}}, saya {{agent.name}}, agen review-nya {{owner.name}}. MR kamu sudah saya review dan saya approve:\n{{mr.link}}",
       "custom": false,
       "defaultText": "Halo {{person.name}}, saya {{agent.name}}, agen review-nya {{owner.name}}. MR kamu sudah saya review dan saya approve:\n{{mr.link}}"
     },
     {
       "name": "notice.changes",
+      "group": "teams",
+      "placeholders": [
+        "mr.title",
+        "mr.url",
+        "mr.link",
+        "mr.iid",
+        "mr.project",
+        "person.name",
+        "person.firstName",
+        "owner.name",
+        "agent.name",
+        "review.findings",
+        "time.greeting"
+      ],
       "text": "Halo {{person.name}}, saya {{agent.name}}, agen review-nya {{owner.name}}. Saya sudah review MR kamu dan ada perubahan yang perlu dilihat:\n{{mr.link}}",
       "custom": false,
       "defaultText": "Halo {{person.name}}, saya {{agent.name}}, agen review-nya {{owner.name}}. Saya sudah review MR kamu dan ada perubahan yang perlu dilihat:\n{{mr.link}}"
     },
     {
       "name": "notice.comments",
+      "group": "teams",
+      "placeholders": [
+        "mr.title",
+        "mr.url",
+        "mr.link",
+        "mr.iid",
+        "mr.project",
+        "person.name",
+        "person.firstName",
+        "owner.name",
+        "agent.name",
+        "review.findings",
+        "time.greeting"
+      ],
       "text": "Halo {{person.name}}, saya {{agent.name}}, agen review-nya {{owner.name}}. Saya sudah review MR kamu dan meninggalkan beberapa komentar:\n{{mr.link}}",
       "custom": false,
       "defaultText": "Halo {{person.name}}, saya {{agent.name}}, agen review-nya {{owner.name}}. Saya sudah review MR kamu dan meninggalkan beberapa komentar:\n{{mr.link}}"
     },
     {
       "name": "notice.findings",
+      "group": "teams",
+      "placeholders": [
+        "mr.title",
+        "mr.url",
+        "mr.link",
+        "mr.iid",
+        "mr.project",
+        "person.name",
+        "person.firstName",
+        "owner.name",
+        "agent.name",
+        "review.findings",
+        "time.greeting"
+      ],
       "text": "Halo {{person.name}}, saya {{agent.name}}, agen review-nya {{owner.name}}. Saya sudah review MR kamu: {{review.findings}}.\n{{mr.link}}\nDetailnya ada di komentar MR.",
       "custom": false,
       "defaultText": "Halo {{person.name}}, saya {{agent.name}}, agen review-nya {{owner.name}}. Saya sudah review MR kamu: {{review.findings}}.\n{{mr.link}}\nDetailnya ada di komentar MR."
     },
     {
       "name": "notice.refindings",
+      "group": "teams",
+      "placeholders": [
+        "mr.title",
+        "mr.url",
+        "mr.link",
+        "mr.iid",
+        "mr.project",
+        "person.name",
+        "person.firstName",
+        "owner.name",
+        "agent.name",
+        "review.findings",
+        "time.greeting"
+      ],
       "text": "Halo {{person.name}}, saya {{agent.name}}, agen review-nya {{owner.name}}. Saya sudah review ulang update MR kamu: {{review.findings}}.\n{{mr.link}}\nDetailnya ada di komentar MR.",
       "custom": false,
       "defaultText": "Halo {{person.name}}, saya {{agent.name}}, agen review-nya {{owner.name}}. Saya sudah review ulang update MR kamu: {{review.findings}}.\n{{mr.link}}\nDetailnya ada di komentar MR."
     },
     {
       "name": "notice.reapproved",
+      "group": "teams",
+      "placeholders": [
+        "mr.title",
+        "mr.url",
+        "mr.link",
+        "mr.iid",
+        "mr.project",
+        "person.name",
+        "person.firstName",
+        "owner.name",
+        "agent.name",
+        "review.findings",
+        "time.greeting"
+      ],
       "text": "Halo {{person.name}}, saya {{agent.name}}, agen review-nya {{owner.name}}. Saya sudah review ulang update MR kamu: {{review.findings}}, jadi MR-nya sudah saya approve.\n{{mr.link}}",
       "custom": false,
       "defaultText": "Halo {{person.name}}, saya {{agent.name}}, agen review-nya {{owner.name}}. Saya sudah review ulang update MR kamu: {{review.findings}}, jadi MR-nya sudah saya approve.\n{{mr.link}}"
     },
     {
       "name": "rereview",
+      "group": "teams",
+      "placeholders": [
+        "mr.title",
+        "mr.url",
+        "mr.link",
+        "mr.iid",
+        "mr.project",
+        "person.name",
+        "person.firstName",
+        "owner.name",
+        "agent.name",
+        "review.findings",
+        "time.greeting"
+      ],
       "text": "Halo {{person.name}}, saya {{agent.name}}, agen review-nya {{owner.name}}. MR ini sudah saya update sesuai review-mu. Boleh minta tolong dicek lagi?\n{{mr.link}}\nTerima kasih!",
       "custom": false,
       "defaultText": "Halo {{person.name}}, saya {{agent.name}}, agen review-nya {{owner.name}}. MR ini sudah saya update sesuai review-mu. Boleh minta tolong dicek lagi?\n{{mr.link}}\nTerima kasih!"
+    },
+    {
+      "name": "alert.review-requested",
+      "group": "alert",
+      "placeholders": ["mr.title", "mr.iid", "mr.project", "mr.url", "author.name"],
+      "text": "Diminta review: {{mr.title}}\n{{author.name}} · {{mr.project}}",
+      "custom": false,
+      "defaultText": "Diminta review: {{mr.title}}\n{{author.name}} · {{mr.project}}"
+    },
+    {
+      "name": "alert.activity",
+      "group": "alert",
+      "placeholders": ["mr.title", "mr.iid", "mr.project", "mr.url", "activity.summary"],
+      "text": "!{{mr.iid}}: {{mr.title}}\n{{activity.summary}}",
+      "custom": false,
+      "defaultText": "!{{mr.iid}}: {{mr.title}}\n{{activity.summary}}"
+    },
+    {
+      "name": "alert.summary",
+      "group": "alert",
+      "placeholders": ["alert.count", "alert.titles"],
+      "text": "{{alert.count}} aktivitas MR baru\n{{alert.titles}}",
+      "custom": false,
+      "defaultText": "{{alert.count}} aktivitas MR baru\n{{alert.titles}}"
+    },
+    {
+      "name": "alert.baseline",
+      "group": "alert",
+      "placeholders": ["alert.count"],
+      "text": "Suica aktif\n{{alert.count}} MR menunggu review-mu",
+      "custom": false,
+      "defaultText": "Suica aktif\n{{alert.count}} MR menunggu review-mu"
+    },
+    {
+      "name": "alert.rereview",
+      "group": "alert",
+      "placeholders": ["mr.title", "reviewers.names"],
+      "text": "Minta review ulang?\nKamu push ke {{mr.title}} setelah {{reviewers.names}} review. Kirim pesan Teams?",
+      "custom": false,
+      "defaultText": "Minta review ulang?\nKamu push ke {{mr.title}} setelah {{reviewers.names}} review. Kirim pesan Teams?"
+    },
+    {
+      "name": "alert.review-ready",
+      "group": "alert",
+      "placeholders": ["mr.title"],
+      "text": "Review agen siap\n{{mr.title}}: periksa di Suica, lalu posting ke GitLab.",
+      "custom": false,
+      "defaultText": "Review agen siap\n{{mr.title}}: periksa di Suica, lalu posting ke GitLab."
+    },
+    {
+      "name": "alert.review-posted",
+      "group": "alert",
+      "placeholders": ["mr.title"],
+      "text": "Review agen diposting\n{{mr.title}}: sudah diposting ke GitLab.",
+      "custom": false,
+      "defaultText": "Review agen diposting\n{{mr.title}}: sudah diposting ke GitLab."
+    },
+    {
+      "name": "alert.review-approved",
+      "group": "alert",
+      "placeholders": ["mr.title"],
+      "text": "Review agen diposting\n{{mr.title}}: sudah diposting ke GitLab dan MR di-approve.",
+      "custom": false,
+      "defaultText": "Review agen diposting\n{{mr.title}}: sudah diposting ke GitLab dan MR di-approve."
+    },
+    {
+      "name": "alert.review-post-failed",
+      "group": "alert",
+      "placeholders": ["mr.title"],
+      "text": "Review agen gagal diposting\n{{mr.title}}: periksa GitLab, lalu posting dari Suica.",
+      "custom": false,
+      "defaultText": "Review agen gagal diposting\n{{mr.title}}: periksa GitLab, lalu posting dari Suica."
+    },
+    {
+      "name": "alert.review-failed",
+      "group": "alert",
+      "placeholders": ["mr.title", "review.reason"],
+      "text": "Review agen gagal\n{{mr.title}}: {{review.reason}}",
+      "custom": false,
+      "defaultText": "Review agen gagal\n{{mr.title}}: {{review.reason}}"
+    },
+    {
+      "name": "alert.review-skipped",
+      "group": "alert",
+      "placeholders": ["mr.title", "review.reason"],
+      "text": "Review agen dilewati\n{{mr.title}}: {{review.reason}}",
+      "custom": false,
+      "defaultText": "Review agen dilewati\n{{mr.title}}: {{review.reason}}"
     }
-  ]
+  ],
+  "emoji": {
+    "wave": "👋",
+    "pray": "🙏",
+    "tada": "🎉",
+    "rocket": "🚀",
+    "fire": "🔥",
+    "eyes": "👀",
+    "smile": "😄",
+    "grin": "😁",
+    "joy": "😂",
+    "wink": "😉",
+    "blush": "😊",
+    "sweat_smile": "😅",
+    "thinking": "🤔",
+    "sunglasses": "😎",
+    "hugs": "🤗",
+    "heart": "❤️",
+    "sparkles": "✨",
+    "star": "⭐",
+    "+1": "👍",
+    "thumbsup": "👍",
+    "clap": "👏",
+    "raised_hands": "🙌",
+    "muscle": "💪",
+    "ok_hand": "👌",
+    "white_check_mark": "✅",
+    "heavy_check_mark": "✔️",
+    "x": "❌",
+    "warning": "⚠️",
+    "bug": "🐛",
+    "wrench": "🔧",
+    "hammer": "🔨",
+    "memo": "📝",
+    "mag": "🔍",
+    "bulb": "💡",
+    "zap": "⚡",
+    "hourglass": "⏳",
+    "alarm_clock": "⏰",
+    "coffee": "☕",
+    "watermelon": "🍉",
+    "penguin": "🐧",
+    "rotating_light": "🚨",
+    "construction": "🚧",
+    "package": "📦",
+    "bell": "🔔",
+    "speech_balloon": "💬",
+    "point_right": "👉",
+    "technologist": "🧑‍💻",
+    "partying_face": "🥳",
+    "star_struck": "🤩",
+    "slightly_smiling_face": "🙂"
+  }
 }
