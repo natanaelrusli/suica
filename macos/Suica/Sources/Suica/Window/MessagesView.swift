@@ -5,6 +5,7 @@ import SwiftUI
 /// MRs you reviewed for others.
 struct MessagesView: View {
     @Bindable var window: WindowModel
+    @State private var query = ""
     @Environment(\.motionLevel) private var motion
 
     private var model: MenuModel { window.menu }
@@ -15,9 +16,13 @@ struct MessagesView: View {
             list
                 // A `suica://message/<id>` link selects a row: bring it into view.
                 .onChange(of: window.selectedMessageId, initial: true) { _, id in
-                    if let id { withMotion(Motion.content, motion) { proxy.scrollTo(id, anchor: .center) } }
+                    guard let id else { return }
+                    // A search could hide the linked message.
+                    query = ""
+                    withMotion(Motion.content, motion) { proxy.scrollTo(id, anchor: .center) }
                 }
         }
+        .searchable(text: $query, placement: .toolbar, prompt: Copy.searchMessages)
         // Back to Your MRs, with nothing selected, the next time the page opens.
         .onDisappear {
             window.messageGroup = .yours
@@ -47,15 +52,21 @@ struct MessagesView: View {
                 NoticeBox(text: text, tint: .secondary).listRowSeparator(.hidden)
             }
             if let teams = model.state?.teams {
-                let attention = teams.attention.filter(group.contains)
-                let recent = teams.recent.filter(group.contains)
-                Section(Copy.attentionHeading) {
-                    if attention.isEmpty {
-                        Label(Copy.attentionEmpty, systemImage: "checkmark.circle").foregroundStyle(.secondary)
-                    }
-                    ForEach(attention) { row($0) }
-                    if teams.attentionHidden > 0 {
-                        Text(Copy.moreHidden(teams.attentionHidden)).font(.caption).foregroundStyle(.secondary)
+                let attention = shown(teams.attention, in: group)
+                let recent = shown(teams.recent, in: group)
+                if searching, attention.isEmpty, recent.isEmpty {
+                    noMatches(teams).listRowSeparator(.hidden)
+                }
+                // While searching, only sections with a match.
+                if !searching || !attention.isEmpty {
+                    Section(Copy.attentionHeading) {
+                        if attention.isEmpty {
+                            Label(Copy.attentionEmpty, systemImage: "checkmark.circle").foregroundStyle(.secondary)
+                        }
+                        ForEach(attention) { row($0) }
+                        if teams.attentionHidden > 0 {
+                            Text(Copy.moreHidden(teams.attentionHidden)).font(.caption).foregroundStyle(.secondary)
+                        }
                     }
                 }
                 if !recent.isEmpty {
@@ -81,6 +92,22 @@ struct MessagesView: View {
             .help("\(Copy.refresh) (⌘R)")
             .keyboardShortcut("r")
         }
+    }
+
+    private var searching: Bool { !query.trimmingCharacters(in: .whitespaces).isEmpty }
+
+    private func shown(_ items: [OutboxItem], in group: MessageGroup) -> [OutboxItem] {
+        items.filter { group.contains($0) && $0.matches(query) }
+    }
+
+    /// Says so when the other tab has matches, since the search looks in this tab only.
+    private func noMatches(_ teams: TeamsSection) -> some View {
+        let other: MessageGroup = group == .yours ? .others : .yours
+        let elsewhere = shown(teams.attention + teams.recent, in: other).count
+        let text = Copy.noMessagesMatch(query.trimmingCharacters(in: .whitespaces))
+        let tab = other == .yours ? Copy.yourMRs : Copy.othersMRs
+        return Text(elsewhere == 0 ? text : "\(text) \(Copy.matchesInOtherTab(elsewhere, tab))")
+            .foregroundStyle(.secondary)
     }
 
     private func row(_ item: OutboxItem) -> some View {

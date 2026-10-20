@@ -4,6 +4,7 @@ import SwiftUI
 /// Open MRs where you are a Reviewer: the list on the left, the selected MR on the right.
 struct ReviewsView: View {
     let model: ReviewsModel
+    @State private var query = ""
 
     var body: some View {
         HStack(spacing: 0) {
@@ -13,6 +14,7 @@ struct ReviewsView: View {
             detail
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .searchable(text: $query, placement: .toolbar, prompt: Copy.searchReviews)
         .task { await model.refresh() }
         // Reads the list and the selected MR again while the page is open, more often while a
         // review is queued, running or being posted (see `refreshSeconds`).
@@ -42,11 +44,18 @@ struct ReviewsView: View {
                 NoticeBox(text: text, tint: .red).listRowSeparator(.hidden)
             }
             if let list = model.list {
-                let sections = list.sections
+                let searching = !query.trimmingCharacters(in: .whitespaces).isEmpty
+                let sections = list.sections(matching: query)
                 if list.mergeRequests.isEmpty {
                     Label(Copy.noReviewRequests, systemImage: "checkmark.circle")
                         .foregroundStyle(.secondary)
                         .listRowSeparator(.hidden)
+                } else if searching {
+                    if sections.isEmpty {
+                        Text(Copy.noReviewsMatch(query.trimmingCharacters(in: .whitespaces)))
+                            .foregroundStyle(.secondary)
+                            .listRowSeparator(.hidden)
+                    }
                 } else if list.me != nil, sections.first?.group != .waiting {
                     Label(Copy.nothingWaiting, systemImage: "checkmark.circle")
                         .foregroundStyle(.secondary)
