@@ -31,9 +31,12 @@ actor FakeTemplatesClient: TemplatesClient {
                 version: 1, path: document.path, placeholders: document.placeholders,
                 templates: document.templates.map {
                     $0.name == name
-                        ? MessageTemplate(name: name, text: text ?? $0.defaultText, custom: text != nil, defaultText: $0.defaultText)
+                        ? MessageTemplate(
+                            name: name, text: text ?? $0.defaultText, custom: text != nil, defaultText: $0.defaultText,
+                            group: $0.group, placeholders: $0.placeholders)
                         : $0
-                })
+                },
+                emoji: document.emoji)
         }
         // Like the CLI: removing the file answers reset.
         return text == nil && result.status == "saved" ? TemplateSaveResult(status: "reset") : result
@@ -42,18 +45,29 @@ actor FakeTemplatesClient: TemplatesClient {
 
 @Test func theTemplatesContractDecodes() throws {
     let document = try decodeDocument(TemplatesDocument.self, from: contract("templates.v1.json"))
+    let teams = document.templates.filter { !$0.isAlert }
     #expect(
-        Set(document.templates.map(\.name))
+        Set(teams.map(\.name))
             == [
                 "nudge", "reminder", "rereview", "notice.approved", "notice.changes", "notice.comments",
                 "notice.findings", "notice.refindings", "notice.reapproved",
             ])
-    // Every template the agent lists has its own title and description in the window.
-    for name in document.templates.map(\.name) {
-        #expect(Copy.templateTitle(name) != name && !Copy.templateWhen(name).isEmpty, "\(name)")
+    #expect(document.templates.filter(\.isAlert).count == 11)
+    // Every template the agent lists has its own title and description in the window, and every
+    // placeholder its help.
+    for template in document.templates {
+        #expect(Copy.templateTitle(template.name) != template.name && !Copy.templateWhen(template.name).isEmpty, "\(template.name)")
+        for name in document.placeholders(for: template) {
+            #expect(Copy.placeholderHelp(name) != name, "\(name)")
+            if !template.isAlert { #expect(Copy.placeholderChip(name) != name, "\(name)") }
+        }
     }
-    #expect(document.placeholders.contains("mr.link"))
-    #expect(document.templates.allSatisfy { !$0.custom && $0.text == $0.defaultText && $0.text.contains("{{mr.link}}") })
+    #expect(document.placeholders.contains("mr.link") && document.emoji["tada"] == "🎉")
+    #expect(teams.allSatisfy { !$0.custom && $0.text == $0.defaultText && $0.text.contains("{{mr.link}}") })
+    // The visual editor opens every built-in Teams template without changing it.
+    #expect(teams.allSatisfy { TemplateMarkup.isFaithful($0.text) })
+    let failed = try #require(document.templates.first { $0.name == "alert.review-failed" })
+    #expect(document.placeholders(for: failed) == ["mr.title", "review.reason"])
 }
 
 @Test func thePreviewEscapesAndLinksAsTheAgentDoes() {
@@ -115,4 +129,42 @@ actor FakeTemplatesClient: TemplatesClient {
     let bodies = calls.map { String(decoding: $0.stdin ?? Data(), as: UTF8.self) }
     #expect(bodies[0].contains(#""name":"nudge""#) && bodies[0].contains(#""text":"Hi""#))
     #expect(bodies[1].contains(#""text":null"#))
+}
+
+@Test func anOlderAgentsDocumentStillDecodes() throws {
+    let json = #"{"version":1,"path":"/t","placeholders":["mr.url"],"templates":[{"name":"nudge","text":"x","custom":false,"defaultText":"x"}]}"#
+    let document = try decodeDocument(TemplatesDocument.self, from: Data(json.utf8))
+    let nudge = try #require(document.templates.first)
+    #expect(nudge.group == "teams" && document.placeholders(for: nudge) == ["mr.url"] && document.emoji.isEmpty)
+}
+
+@MainActor @Test func variantsAreEditedOneAtATime() async throws {
+    let document = try decodeDocument(TemplatesDocument.self, from: contract("templates.v1.json"))
+    let model = TemplateEditorModel(client: FakeTemplatesClient(document: document))
+    await model.load()
+    let nudge = try #require(model.selected)
+    model.addVariant(to: nudge)
+    #expect(model.variants(of: nudge).count == 2 && model.selectedVariant(of: nudge) == 1)
+    model.setVariantText("Hai {{person.firstName}} :wave:", for: nudge)
+    #expect(model.text(of: nudge) == nudge.text + "\n--- or ---\nHai {{person.firstName}} :wave:")
+    #expect(model.canSave(nudge))
+    model.setVariantText("  ", for: nudge)
+    #expect(model.missingPart(of: nudge) == Copy.templateEmptyVariant && !model.canSave(nudge))
+    model.removeVariant(from: nudge)
+    #expect(model.variants(of: nudge) == [nudge.text] && model.selectedVariant(of: nudge) == 0 && !model.isDirty(nudge))
+}
+
+@MainActor @Test func anAlertNeedsATitleAndABodyAndOnlyItsOwnPlaceholders() async throws {
+    let document = try decodeDocument(TemplatesDocument.self, from: contract("templates.v1.json"))
+    let model = TemplateEditorModel(client: FakeTemplatesClient(document: document))
+    await model.load()
+    model.selectedName = "alert.baseline"
+    let baseline = try #require(model.selected)
+    #expect(model.alertTemplates.contains(baseline) && !model.teamsTemplates.contains(baseline))
+    model.setText("Only a title", for: baseline)
+    #expect(model.missingPart(of: baseline) == Copy.alertNeedsBody)
+    model.setText(AlertPreview.join(title: "Suica bangun :sunglasses:", body: "{{mr.title}}"), for: baseline)
+    #expect(model.unknownPlaceholders(in: baseline) == ["mr.title"] && !model.canSave(baseline))
+    model.setText(AlertPreview.join(title: "Suica bangun", body: "{{alert.count}} MR menunggu"), for: baseline)
+    #expect(model.canSave(baseline))
 }

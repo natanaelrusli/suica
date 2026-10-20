@@ -36,6 +36,14 @@ _Avoid_: Review reply, feedback ping
 A notification to the Owner that someone else reviewed or replied on one of the Owner's own MRs.
 _Avoid_: Update, notification
 
+**Alert Template**:
+The editable title and body of one kind of macOS notification to the Owner (a Review Request, an Activity Alert, an Agent Review that is ready, posted or failed, …), with its own placeholders.
+_Avoid_: Notification template, alert text
+
+**Variant**:
+One of several versions of a Teams template; each message uses one, picked from its dedupe key.
+_Avoid_: Alternative, random template
+
 **Agent Review**:
 A review of an MR that the agent writes with a language model following a skill, in answer to a Review Request or when the Owner asks for one, and posts to GitLab as the Owner once the Owner approves it. The Owner can cancel it while it is queued or running.
 _Avoid_: Auto review, bot review
