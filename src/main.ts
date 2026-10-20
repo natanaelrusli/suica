@@ -17,7 +17,19 @@ async function main(): Promise<void> {
   });
 
   const runtime = createRuntime(defaultConfigPath(), controller.signal);
-  runtime.log.info("daemon started");
+  const { config } = runtime;
+  const startedAt = Date.now();
+  runtime.log.info("daemon started", {
+    pid: process.pid,
+    node: process.version,
+    poll_active_seconds: config.polling.activeSeconds,
+    poll_idle_seconds: config.polling.idleSeconds,
+    teams_enabled: config.teams.enabled,
+    model_cli: config.model.cli,
+    review_auto: config.review.auto,
+    review_post: config.review.post,
+    review_concurrency: config.review.concurrency,
+  });
   const interrupted = runtime.store.failInterruptedAgentReviews(Date.now());
   if (interrupted > 0) runtime.log.warn("agent reviews interrupted", { count: interrupted });
   const recovered = runtime.store.recoverStalePostings(Date.now());
@@ -41,7 +53,9 @@ async function main(): Promise<void> {
     await runtime.reviews.idle();
     runtime.store.close();
   }
-  runtime.log.info("daemon stopped");
+  runtime.log.info("daemon stopped", {
+    uptime_seconds: Math.round((Date.now() - startedAt) / 1000),
+  });
 }
 
 main().catch((error: unknown) => {

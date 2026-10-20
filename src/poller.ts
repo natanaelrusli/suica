@@ -89,6 +89,31 @@ async function reportFailure(
   }
 }
 
+/** Clears a failure streak; logs the recovery when the streak had been reported. */
+function recoverFailure(deps: PollDeps, kind: FailureKind): void {
+  const streak = deps.failures.recover(kind);
+  if (streak >= NOTIFY_AFTER[kind]) {
+    deps.log.info("poll failure recovered", { kind, failed_polls: streak });
+  }
+}
+
+/** One line per detected event, so the log shows what each alert was about. */
+function logEvents(log: Logger, events: readonly ActivityEvent[]): void {
+  for (const event of events) {
+    switch (event.kind) {
+      case "review-requested":
+        log.info("review requested", { mr_key: event.mr.key });
+        break;
+      case "reviewer-state":
+        log.info("reviewer state changed", { mr_key: event.mr.key, state: event.to });
+        break;
+      case "comment":
+        log.info("comment received", { mr_key: event.mr.key, note_id: event.noteId });
+        break;
+    }
+  }
+}
+
 async function reportFetchFailure(deps: PollDeps, error: unknown): Promise<GitlabFailureKind> {
   const kind: GitlabFailureKind = error instanceof FetchFailure ? error.kind : "gitlab-error";
   const reason = error instanceof FetchFailure ? error.message : "unexpected error";
@@ -152,7 +177,7 @@ async function runTeams(
   const { failure, held } = await teams.dispatch(snapshot);
   await notifyHeldRereviews(deps, held);
   if (failure === undefined) {
-    for (const kind of TEAMS_FAILURE_KINDS) deps.failures.recover(kind);
+    for (const kind of TEAMS_FAILURE_KINDS) recoverFailure(deps, kind);
     return;
   }
   const kind: TeamsFailureReportKind =
@@ -176,10 +201,7 @@ const PAUSED: PollOutcome = { status: "paused", failure: null };
  */
 async function runPoll(deps: PollDeps, start: number): Promise<PollOutcome> {
   const { store, notifier, failures, log, config } = deps;
-  if (store.isPaused()) {
-    log.debug("polling paused");
-    return PAUSED;
-  }
+  if (store.isPaused()) return PAUSED;
 
   let snapshot: Snapshot;
   try {
@@ -187,7 +209,7 @@ async function runPoll(deps: PollDeps, start: number): Promise<PollOutcome> {
   } catch (error) {
     return { status: "failed", failure: await reportFetchFailure(deps, error) };
   }
-  for (const kind of GITLAB_FAILURE_KINDS) failures.recover(kind);
+  for (const kind of GITLAB_FAILURE_KINDS) recoverFailure(deps, kind);
 
   let previous: PreviousState;
   try {
@@ -220,8 +242,11 @@ async function runPoll(deps: PollDeps, start: number): Promise<PollOutcome> {
     }
     if (delivered === 0) return { status: "failed", failure: "notifier" };
   }
+  if (delivered > 0) {
+    log.info("notifications delivered", { count: delivered, total: notifications.length });
+  }
   const complete = delivered === notifications.length;
-  if (complete) failures.recover("notifier");
+  if (complete) recoverFailure(deps, "notifier");
 
   try {
     store.commit(
@@ -233,13 +258,22 @@ async function runPoll(deps: PollDeps, start: number): Promise<PollOutcome> {
     await reportStateFailure(deps, error);
     return { status: "failed", failure: "state" };
   }
-  failures.recover("state");
+  recoverFailure(deps, "state");
+  if (previous.baselineDone) {
+    logEvents(log, events);
+  } else {
+    log.info("baseline recorded", {
+      pending_reviews: countPendingReviews(snapshot),
+      authored: snapshot.authored.length,
+    });
+  }
   queueReviews(deps, snapshot, previous.baselineDone ? events : []);
   await runTeams(deps, snapshot, previous);
   await lookUpNames(deps);
   log.debug("poll complete", {
     review_requested: snapshot.reviewRequested.length,
     authored: snapshot.authored.length,
+    events: events.length,
     notifications: notifications.length,
     baseline: !previous.baselineDone,
   });

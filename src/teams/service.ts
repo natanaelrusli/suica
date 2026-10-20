@@ -67,7 +67,6 @@ export function createTeamsService(deps: ServiceDeps): TeamsService {
     async dispatch(snapshot: Snapshot): Promise<DispatchOutcome> {
       try {
         const result = await dispatchQueued(dispatchDeps, snapshot);
-        if (result.sent > 0) deps.log.info("teams messages sent", { count: result.sent });
         return { failure: result.failure, held: result.held };
       } catch (error) {
         deps.log.error("teams dispatch crashed", {

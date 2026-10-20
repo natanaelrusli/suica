@@ -206,4 +206,84 @@ describe("pollOnce", () => {
     expect(await h.poll()).toBe("paused");
     expect(h.fetchCount()).toBe(0);
   });
+
+  describe("logs", () => {
+    type Line = { level: string; message: string; attributes?: Record<string, unknown> };
+    const lines = (logs: readonly string[], message: string): Line[] =>
+      logs.map((line) => JSON.parse(line) as Line).filter((line) => line.message === message);
+
+    it("logs the baseline, then each detected event and the delivered notifications", async () => {
+      const h = harness();
+      const own = (overrides: Partial<MergeRequest> = {}): MergeRequest =>
+        mr(5, { author: ME, reviewers: [reviewer("bob", "UNREVIEWED", "Bob")], ...overrides });
+      h.setSnapshot(snapshot({ reviewRequested: [waiting(1)], authored: [own()] }));
+      await h.poll();
+      expect(lines(h.logs, "baseline recorded")[0]?.attributes).toEqual({
+        pending_reviews: 1,
+        authored: 1,
+      });
+      h.setSnapshot(
+        snapshot({
+          reviewRequested: [waiting(1), waiting(3)],
+          authored: [
+            own({
+              reviewers: [reviewer("bob", "APPROVED", "Bob")],
+              notes: [note("n1", person("bob", "Bob"))],
+            }),
+          ],
+        }),
+      );
+      await h.poll();
+      expect(lines(h.logs, "review requested").map((line) => line.attributes)).toEqual([
+        { mr_key: "g/p!3" },
+      ]);
+      expect(lines(h.logs, "reviewer state changed")[0]?.attributes).toEqual({
+        mr_key: "g/p!5",
+        state: "APPROVED",
+      });
+      expect(lines(h.logs, "comment received")[0]?.attributes).toEqual({
+        mr_key: "g/p!5",
+        note_id: "n1",
+      });
+      // The baseline summary and the two alerts of the second poll.
+      expect(lines(h.logs, "notifications delivered").map((line) => line.attributes)).toEqual([
+        { count: 1, total: 1 },
+        { count: 2, total: 2 },
+      ]);
+      // Never a person's username or name.
+      expect(h.logs.join("\n")).not.toContain("bob");
+      expect(h.logs.join("\n")).not.toContain("Bob");
+    });
+
+    it("logs events only once the poll is committed", async () => {
+      const h = harness();
+      await h.poll();
+      h.setSnapshot(snapshot({ reviewRequested: [waiting(3)] }));
+      h.setNotifierFailing(true);
+      await h.poll();
+      expect(lines(h.logs, "review requested")).toHaveLength(0);
+      h.setNotifierFailing(false);
+      await h.poll();
+      expect(lines(h.logs, "review requested")).toHaveLength(1);
+    });
+
+    it("logs a recovery only after a reported failure streak", async () => {
+      const h = harness();
+      h.setFetchError(new FetchFailure("gitlab-unreachable", "glab failed with code 1"));
+      await h.poll();
+      h.setFetchError(undefined);
+      await h.poll();
+      // One unreachable poll is never reported, so its end is not news either.
+      expect(lines(h.logs, "poll failure recovered")).toHaveLength(0);
+      h.setFetchError(new FetchFailure("gitlab-unreachable", "glab failed with code 1"));
+      await h.poll();
+      await h.poll();
+      await h.poll();
+      h.setFetchError(undefined);
+      await h.poll();
+      expect(lines(h.logs, "poll failure recovered").map((line) => line.attributes)).toEqual([
+        { kind: "gitlab-unreachable", failed_polls: 3 },
+      ]);
+    });
+  });
 });

@@ -64,14 +64,22 @@ async function pollSafely(deps: DaemonDeps): Promise<PollStatus> {
  */
 export async function runDaemon(deps: DaemonDeps): Promise<void> {
   let failureStreak = 0;
+  let paused = false;
   while (!deps.signal.aborted) {
-    failureStreak = (await pollSafely(deps)) === "failed" ? failureStreak + 1 : 0;
-    const delaySeconds = nextDelaySeconds({
-      idleSeconds: await deps.readIdleSeconds(),
-      failureStreak,
-      polling: deps.polling,
+    const status = await pollSafely(deps);
+    // Pausing is the Owner's action in another process; the loop sees it on its next poll.
+    if ((status === "paused") !== paused) {
+      paused = status === "paused";
+      deps.log.info(paused ? "polling paused" : "polling resumed");
+    }
+    failureStreak = status === "failed" ? failureStreak + 1 : 0;
+    const idleSeconds = await deps.readIdleSeconds();
+    const delaySeconds = nextDelaySeconds({ idleSeconds, failureStreak, polling: deps.polling });
+    deps.log.debug("next poll scheduled", {
+      delay_seconds: delaySeconds,
+      idle_seconds: Math.round(idleSeconds),
+      failure_streak: failureStreak,
     });
-    deps.log.debug("next poll scheduled", { delay_seconds: delaySeconds });
     await deps.sleep(delaySeconds * 1000, deps.signal);
   }
 }

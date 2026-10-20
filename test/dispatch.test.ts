@@ -27,6 +27,7 @@ function setup(options: { mode?: SendMode; now?: number; api?: Partial<TeamsApi>
   const store = openStore(":memory:");
   const sent: { chatId: string; text: string }[] = [];
   const opened: string[] = [];
+  const logs: string[] = [];
   let sessions = 0;
   const api: TeamsApi = {
     searchUsers: () =>
@@ -62,7 +63,7 @@ function setup(options: { mode?: SendMode; now?: number; api?: Partial<TeamsApi>
       people: {},
       agentName: "Bahlil",
     },
-    log: createLogger({ write: () => undefined }),
+    log: createLogger({ write: (line) => logs.push(line) }),
     now: () => now,
   };
   return {
@@ -70,6 +71,7 @@ function setup(options: { mode?: SendMode; now?: number; api?: Partial<TeamsApi>
     store,
     sent,
     opened,
+    logs,
     sessions: () => sessions,
     setNow: (value: number) => {
       now = value;
@@ -746,5 +748,56 @@ describe("Re-review Nudge", () => {
     expect(await sendPending(reviewedAgain.deps, second)).toEqual({ status: "obsolete" });
     expect(reviewedAgain.store.getOutbox(second)).toMatchObject({ status: "skipped" });
     expect(reviewedAgain.sent).toEqual([]);
+  });
+});
+
+describe("logs", () => {
+  type Line = { level: string; message: string; attributes?: Record<string, unknown> };
+  const lines = (logs: readonly string[]): Line[] => logs.map((line) => JSON.parse(line) as Line);
+
+  it("logs each message's outcome with its id, kind, variant and MR, never the recipient", async () => {
+    const h = setup();
+    const [id] = enqueue(h.store, 1);
+    await dispatchQueued(h.deps, own());
+    expect(lines(h.logs)).toEqual([
+      expect.objectContaining({
+        level: "info",
+        message: "teams message sent",
+        attributes: { id, kind: "nudge", variant: "nudge", mr_key: "g/p!5" },
+      }),
+    ]);
+    expect(h.logs.join("\n")).not.toContain("bob");
+  });
+
+  it("logs held, obsolete, unresolved and failed messages", async () => {
+    const held = setup({ mode: "approval" });
+    enqueue(held.store, 1);
+    await dispatchQueued(held.deps, own());
+    await dispatchQueued(held.deps, own([reviewer("bob", "APPROVED", "Bob")]));
+    expect(lines(held.logs).map((line) => [line.message, line.attributes?.["reason"]])).toEqual([
+      ["teams message waiting for approval", undefined],
+      ["teams message skipped", "obsolete"],
+    ]);
+
+    const unknown = setup({ api: { searchUsers: () => Promise.resolve([]) } });
+    enqueue(unknown.store, 1);
+    await dispatchQueued(unknown.deps, own());
+    expect(lines(unknown.logs)[0]).toMatchObject({
+      level: "warn",
+      message: "teams recipient not found",
+      attributes: { reason: "no-match" },
+    });
+
+    const refused = setup({
+      api: { sendMessage: () => Promise.reject(new TeamsFailure("error", "403")) },
+    });
+    enqueue(refused.store, 1);
+    await dispatchQueued(refused.deps, own());
+    expect(lines(refused.logs)[0]).toMatchObject({
+      level: "warn",
+      message: "teams message failed",
+      attributes: { reason: "error" },
+    });
+    expect(refused.logs.join("\n")).not.toContain("403");
   });
 });

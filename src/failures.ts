@@ -7,8 +7,8 @@ export type FailureKind = GitlabFailureKind | "notifier" | "state" | TeamsFailur
 export interface FailureTracker {
   /** Records a failure and returns how many polls in a row have now failed with this kind. */
   fail(kind: FailureKind): number;
-  /** Clears a failure; true when it was failing. */
-  recover(kind: FailureKind): boolean;
+  /** Clears a failure; returns how many polls in a row had failed with this kind (0: none). */
+  recover(kind: FailureKind): number;
 }
 
 export function createFailureTracker(): FailureTracker {
@@ -19,7 +19,11 @@ export function createFailureTracker(): FailureTracker {
       streaks.set(kind, streak);
       return streak;
     },
-    recover: (kind) => streaks.delete(kind),
+    recover(kind) {
+      const streak = streaks.get(kind) ?? 0;
+      streaks.delete(kind);
+      return streak;
+    },
   };
 }
 

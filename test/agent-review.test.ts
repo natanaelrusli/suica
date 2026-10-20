@@ -1696,3 +1696,68 @@ describe("postAgentReview and discardAgentReview", () => {
     expect(h.db.queueAgentReview("g/p!7", "manual", NOW)).toBeDefined();
   });
 });
+
+describe("Agent Review logs", () => {
+  type Line = { level: string; message: string; attributes?: Record<string, unknown> };
+  const find = (logs: readonly string[], message: string): Line | undefined =>
+    logs.map((line) => JSON.parse(line) as Line).find((line) => line.message === message);
+
+  it("logs the start with what the run reviews, and the ready review with its model and tokens", async () => {
+    const h = harness();
+    const queued = h.queue();
+    await runAgentReview(h.deps, queued);
+    expect(find(h.logs, "agent review started")?.attributes).toEqual({
+      id: queued.id,
+      mr_key: queued.mrKey,
+      trigger: queued.trigger,
+      cli: "claude",
+      changed_lines: 4,
+      rereview: false,
+      incremental: false,
+    });
+    expect(find(h.logs, "agent review ready")?.attributes).toMatchObject({
+      id: queued.id,
+      model: "m",
+      rereview: false,
+      input_tokens: 100,
+      output_tokens: 20,
+    });
+  });
+
+  it("logs why a review was skipped or failed, with the agent's own reason only", async () => {
+    const big = harness({ raw: detailRaw({ additions: 500 }) });
+    await runAgentReview(big.deps, big.queue());
+    expect(find(big.logs, "agent review skipped")).toMatchObject({
+      level: "warn",
+      attributes: {
+        reason: "Skip",
+        detail: "the MR changes 501 lines, more than review.maxChangedLines (100)",
+      },
+    });
+
+    const broken = harness({ cliFails: true });
+    await runAgentReview(broken.deps, broken.queue());
+    expect(find(broken.logs, "agent review failed")?.attributes).toMatchObject({
+      reason: "RunFailure",
+      detail: "claude failed with code 1",
+    });
+  });
+
+  it("logs each automatic review it queues", () => {
+    const db = store();
+    const snap = snapshot({
+      reviewRequested: [mr(1, { createdAt: null, reviewers: [reviewer("me", "UNREVIEWED")] })],
+    });
+    const logs: string[] = [];
+    const log = createLogger({ write: (line) => logs.push(line) });
+    const config = parseConfig("gitlab:\n  hostname: h\n");
+    queueAutomaticReviews({ store: db, config, log, now: () => NOW }, snap, []);
+    queueAutomaticReviews({ store: db, config, log, now: () => NOW }, snap, []);
+    expect(logs.map((line) => JSON.parse(line) as Line)).toEqual([
+      expect.objectContaining({
+        message: "agent review queued",
+        attributes: { id: db.nextQueuedAgentReview()?.id, mr_key: "g/p!1", rereview: false },
+      }),
+    ]);
+  });
+});
