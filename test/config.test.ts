@@ -19,7 +19,7 @@ describe("parseConfig", () => {
         activeSeconds: 120,
         idleSeconds: 300,
         idleAfterSeconds: 300,
-        maxBackoffSeconds: 900,
+        maxBackoffSeconds: 300,
       },
       notifications: { summaryThreshold: 4, ignoreAuthors: [] },
       teams: {

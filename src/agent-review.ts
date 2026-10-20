@@ -729,6 +729,19 @@ export function createReviewWorker(deps: ReviewDeps): ReviewWorker {
   };
 }
 
+/**
+ * Ticks the worker every `everyMs` until `signal` aborts, so a review the Owner queues from the
+ * app starts within seconds instead of after the next poll.
+ */
+export function tickEvery(worker: ReviewWorker, everyMs: number, signal: AbortSignal): void {
+  if (signal.aborted) return;
+  const timer = setInterval(() => {
+    worker.tick();
+  }, everyMs);
+  timer.unref();
+  signal.addEventListener("abort", () => clearInterval(timer), { once: true });
+}
+
 export type PostOutcome = "posted" | "nothing" | "failed";
 export type PostMode = Config["review"]["postAs"];
 

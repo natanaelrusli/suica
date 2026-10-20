@@ -25,7 +25,7 @@ export const configSchema = z
         activeSeconds: positiveInt.default(120),
         idleSeconds: positiveInt.default(300),
         idleAfterSeconds: positiveInt.default(300),
-        maxBackoffSeconds: positiveInt.default(900),
+        maxBackoffSeconds: positiveInt.default(300),
       })
       .strict()
       .default({}),

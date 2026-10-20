@@ -1,8 +1,11 @@
 import { defaultConfigPath } from "./config.ts";
+import { tickEvery } from "./agent-review.ts";
 import { abortableSleep, runDaemon } from "./daemon.ts";
 import { readIdleSeconds } from "./idle.ts";
 import { createLogger } from "./log.ts";
 import { createRuntime } from "./runtime.ts";
+
+const REVIEW_TICK_MS = 2000;
 
 async function main(): Promise<void> {
   const controller = new AbortController();
@@ -19,9 +22,10 @@ async function main(): Promise<void> {
   if (interrupted > 0) runtime.log.warn("agent reviews interrupted", { count: interrupted });
   const recovered = runtime.store.recoverStalePostings(Date.now());
   if (recovered > 0) runtime.log.warn("agent review posts interrupted", { count: recovered });
+  tickEvery(runtime.reviews, REVIEW_TICK_MS, controller.signal);
   try {
     await runDaemon({
-      // A queued review starts after the poll and runs beside the loop.
+      // A queued review starts right after the poll too, and runs beside the loop.
       poll: async () => {
         const status = await runtime.poll();
         runtime.reviews.tick();

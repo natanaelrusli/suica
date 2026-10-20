@@ -35,6 +35,17 @@ describe("buildInvocation", () => {
   });
 });
 
+describe("the review effort", () => {
+  it("is medium for claude and codex", () => {
+    const claude = buildInvocation("claude", "p", "/w").args;
+    expect(claude.slice(claude.indexOf("--effort"), claude.indexOf("--effort") + 2)).toEqual([
+      "--effort",
+      "medium",
+    ]);
+    expect(buildInvocation("codex", "p", "/w").args).toContain('model_reasoning_effort="medium"');
+  });
+});
+
 describe("the review model", () => {
   it("is passed as --model to claude and -m to codex, and left out for the CLI's default", () => {
     const claude = buildInvocation("claude", "p", "/w", "opus").args;

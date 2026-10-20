@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buildPrompt,
   createReviewWorker,
@@ -15,6 +15,7 @@ import {
   renderThread,
   runAgentReview,
   sanitizeForGitLab,
+  tickEvery,
 } from "../src/agent-review.ts";
 import type { ReviewDeps } from "../src/agent-review.ts";
 import { parseConfig } from "../src/config.ts";
@@ -1156,6 +1157,23 @@ describe("createReviewWorker", () => {
     await worker.idle();
     expect(h.db.latestAgentReviews().get("g/p!7")?.status).toBe("ready");
     expect(h.calls.filter((call) => call.file === "/bin/claude")).toHaveLength(1);
+  });
+
+  it("starts a review queued between polls within one tick, and stops ticking when aborted", async () => {
+    const h = harness();
+    const worker = createReviewWorker(h.deps);
+    const controller = new AbortController();
+    tickEvery(worker, 5, controller.signal);
+    h.db.queueAgentReview("g/p!7", "manual", NOW);
+    await vi.waitFor(() => {
+      expect(h.db.latestAgentReviews().get("g/p!7")?.status).toBe("ready");
+    });
+    await worker.idle();
+    controller.abort();
+
+    h.db.queueAgentReview("g/p!8", "manual", NOW);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(h.db.nextQueuedAgentReview()?.mrKey).toBe("g/p!8");
   });
 });
 

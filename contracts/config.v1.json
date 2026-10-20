@@ -59,7 +59,7 @@
       "label": "Maximum backoff (seconds)",
       "help": "Cap for the exponential backoff after failed polls",
       "value": null,
-      "effective": 900
+      "effective": 300
     },
     {
       "path": ["notifications", "summaryThreshold"],

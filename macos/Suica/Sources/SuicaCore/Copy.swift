@@ -205,7 +205,7 @@ public enum Copy {
         "The agent has not reviewed this MR. It reviews with the skill set in review.skill, read-only, on a temporary checkout, and nothing is posted until you approve it."
     public static func agentReviewStatus(_ status: String) -> String {
         switch status {
-        case "queued": "Queued: starts after the agent's next poll"
+        case "queued": "Queued: starts in a few seconds"
         case "running": "Reviewing…"
         case "ready": "Ready: read it, then post or discard"
         case "posting": "Posting…"
@@ -290,7 +290,7 @@ public enum Copy {
     }
     public static func agentReviewOutcome(_ code: String) -> String {
         switch code {
-        case "queued": "Review queued. It starts after the agent's next poll."
+        case "queued": "Review queued. It starts in a few seconds."
         case "already-queued": "A review of this MR is already queued or running."
         case "posted": "Review posted to GitLab."
         case "discarded": "Review discarded."

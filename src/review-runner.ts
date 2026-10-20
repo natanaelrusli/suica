@@ -32,6 +32,9 @@ export class RunFailure extends Error {
   }
 }
 
+/** Enough for a review; higher levels cost much more time and tokens. */
+const REVIEW_EFFORT = "medium";
+
 /** Read-only tools only: the MR is untrusted, so no shell, no web, no edits. */
 const CLAUDE_TOOLS = ["Read", "Grep", "Glob", "Skill"] as const;
 
@@ -55,6 +58,8 @@ export function buildInvocation(
         "--output-format",
         "json",
         ...(model === undefined ? [] : ["--model", model]),
+        "--effort",
+        REVIEW_EFFORT,
         "--tools",
         ...CLAUDE_TOOLS,
         "--allowedTools",
@@ -76,6 +81,8 @@ export function buildInvocation(
       "--json",
       "-c",
       "mcp_servers={}",
+      "-c",
+      `model_reasoning_effort="${REVIEW_EFFORT}"`,
       "-C",
       workDir,
       "-o",
