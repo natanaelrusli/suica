@@ -125,6 +125,13 @@ export const CONFIG_FIELDS: readonly ConfigField[] = [
     options: SEND_MODES,
   },
   {
+    path: ["teams", "modes", "approved"],
+    type: "enum",
+    label: "Approval notice mode",
+    help: "How the Review Notice after you approve an MR sends: auto, approval or dry-run. It goes out at the first poll that sees the approval",
+    options: SEND_MODES,
+  },
+  {
     path: ["teams", "workingHours", "start"],
     type: "clock",
     label: "Working hours start",

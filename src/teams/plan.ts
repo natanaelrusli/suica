@@ -268,7 +268,11 @@ export function planTeams(input: PlanInput): TeamsPlan {
       };
     }
     const variant = noticeVariant(round);
-    if (live && variant !== undefined && now - round.changedAt >= config.noticeDebounceMs) {
+    // An approval is final, so it goes out at once; comments and requested changes wait until
+    // the Owner has stopped changing the review.
+    const settled =
+      variant === "notice.approved" || now - round.changedAt >= config.noticeDebounceMs;
+    if (live && variant !== undefined && settled) {
       intents.push({
         dedupeKey: `notice:${mr.key}:${myState}:${myNotes}`,
         kind: "notice",

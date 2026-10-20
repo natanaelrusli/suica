@@ -73,6 +73,7 @@ export function modeFor(
   ) {
     return config.modes.findings;
   }
+  if (row.variant === "notice.approved") return config.modes.approved;
   if (row.kind === "notice") return config.modes.notice;
   return row.kind === "rereview" ? config.modes.rereview : config.modes.nudge;
 }

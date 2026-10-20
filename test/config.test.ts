@@ -26,7 +26,13 @@ describe("parseConfig", () => {
         enabled: false,
         startTimeoutSeconds: 30,
         callTimeoutSeconds: 60,
-        modes: { nudge: "approval", notice: "approval", rereview: "approval", findings: "auto" },
+        modes: {
+          nudge: "approval",
+          notice: "approval",
+          rereview: "approval",
+          findings: "auto",
+          approved: "auto",
+        },
         workingHours: { start: "09:00", end: "17:00", days: [1, 2, 3, 4, 5] },
         reminderAfterHours: 24,
         noticeDebounceMinutes: 10,
@@ -54,6 +60,13 @@ describe("parseConfig", () => {
     expect(parseConfig(MINIMAL).teams.agentName).toBe("Suica");
     expect(parseConfig(`${MINIMAL}teams:\n  agentName: Bahlil\n`).teams.agentName).toBe("Bahlil");
     expect(() => parseConfig(`${MINIMAL}teams:\n  agentName: "  "\n`)).toThrow();
+  });
+
+  it("teams.modes.approved is auto by default", () => {
+    expect(parseConfig(MINIMAL).teams.modes.approved).toBe("auto");
+    expect(
+      parseConfig(`${MINIMAL}teams:\n  modes:\n    approved: approval\n`).teams.modes.approved,
+    ).toBe("approval");
   });
 
   it("review.approve is on by default", () => {
@@ -104,6 +117,7 @@ describe("teams section", () => {
       notice: "auto",
       rereview: "auto",
       findings: "auto",
+      approved: "auto",
     });
     expect(
       parseConfig(`${MINIMAL}teams:\n  modes:\n    findings: approval\n`).teams.modes.findings,
@@ -121,6 +135,7 @@ describe("teams section", () => {
       notice: "approval",
       rereview: "auto",
       findings: "auto",
+      approved: "auto",
     });
   });
 

@@ -57,7 +57,7 @@ function setup(options: { mode?: SendMode; now?: number; api?: Partial<TeamsApi>
     gateway,
     templates: DEFAULT_TEMPLATES,
     config: {
-      modes: { nudge: mode, notice: mode, rereview: mode, findings: mode },
+      modes: { nudge: mode, notice: mode, rereview: mode, findings: mode, approved: mode },
       workingHours: hours,
       people: {},
       agentName: "Bahlil",
@@ -148,7 +148,13 @@ describe("dispatchQueued", () => {
       ...h.deps,
       config: {
         ...h.deps.config,
-        modes: { nudge: "approval", notice: "dry-run", rereview: "approval", findings: "approval" },
+        modes: {
+          nudge: "approval",
+          notice: "dry-run",
+          rereview: "approval",
+          findings: "approval",
+          approved: "dry-run",
+        },
       },
     };
     h.store.applyTeamsPlan(
@@ -186,7 +192,13 @@ describe("dispatchQueued", () => {
       ...h.deps,
       config: {
         ...h.deps.config,
-        modes: { nudge: "approval", notice: "dry-run", rereview: "approval", findings: "auto" },
+        modes: {
+          nudge: "approval",
+          notice: "dry-run",
+          rereview: "approval",
+          findings: "auto",
+          approved: "dry-run",
+        },
       },
     };
     const theirs = {
@@ -397,7 +409,13 @@ describe("at most once", () => {
       ...h.deps,
       config: {
         ...h.deps.config,
-        modes: { nudge: "auto", notice: "auto", rereview: "auto", findings: "auto" },
+        modes: {
+          nudge: "auto",
+          notice: "auto",
+          rereview: "auto",
+          findings: "auto",
+          approved: "auto",
+        },
       },
     };
     await dispatchQueued(h.deps, own());
@@ -571,7 +589,13 @@ describe("Re-review Nudge", () => {
   }
 
   it("uses its own send mode", () => {
-    const modes = { nudge: "auto", notice: "auto", rereview: "dry-run", findings: "auto" } as const;
+    const modes = {
+      nudge: "auto",
+      notice: "auto",
+      rereview: "dry-run",
+      findings: "auto",
+      approved: "auto",
+    } as const;
     expect(modeFor({ kind: "rereview", variant: "rereview" }, { modes })).toBe("dry-run");
     expect(modeFor({ kind: "nudge", variant: "nudge" }, { modes })).toBe("auto");
     expect(modeFor({ kind: "reminder", variant: "reminder" }, { modes })).toBe("auto");
@@ -584,10 +608,24 @@ describe("Re-review Nudge", () => {
       notice: "dry-run",
       rereview: "auto",
       findings: "approval",
+      approved: "auto",
     } as const;
     expect(modeFor({ kind: "notice", variant: "notice.findings" }, { modes })).toBe("approval");
     expect(modeFor({ kind: "notice", variant: "notice.refindings" }, { modes })).toBe("approval");
     expect(modeFor({ kind: "notice", variant: "notice.reapproved" }, { modes })).toBe("approval");
+  });
+
+  it("sends the approval notice in its own mode, and the other notices in the notice mode", () => {
+    const modes = {
+      nudge: "approval",
+      notice: "dry-run",
+      rereview: "approval",
+      findings: "approval",
+      approved: "auto",
+    } as const;
+    expect(modeFor({ kind: "notice", variant: "notice.approved" }, { modes })).toBe("auto");
+    expect(modeFor({ kind: "notice", variant: "notice.comments" }, { modes })).toBe("dry-run");
+    expect(modeFor({ kind: "notice", variant: "notice.changes" }, { modes })).toBe("dry-run");
     expect(modeFor({ kind: "notice", variant: "notice.comments" }, { modes })).toBe("dry-run");
   });
 

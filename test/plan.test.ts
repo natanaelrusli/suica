@@ -202,18 +202,23 @@ describe("review notices (flow C)", () => {
     expect(result.keepRounds).toEqual([KEY]);
   });
 
-  it("restarts the debounce when the Owner's review changes, and notices only after it", () => {
-    const current = snapshot({ reviewRequested: [theirs("APPROVED")] });
+  it("restarts the debounce when the Owner's review changes, and notices comments only after it", () => {
+    const current = snapshot({ reviewRequested: [theirs("UNREVIEWED", [note("a", ME)])] });
     const changed = plan({ snapshot: current, state: withRound(round()) });
     expect(changed.intents).toEqual([]);
     expect(changed.roundUpdates).toEqual([
-      { mrKey: KEY, round: round({ myState: "APPROVED", changedAt: NOW }) },
+      { mrKey: KEY, round: round({ myNotes: 1, changedAt: NOW }) },
     ]);
-
     const settled = plan({
       snapshot: current,
-      state: withRound(round({ myState: "APPROVED", changedAt: NOW - 11 * MINUTE })),
+      state: withRound(round({ myNotes: 1, changedAt: NOW - 11 * MINUTE })),
     });
+    expect(settled.intents.map((i) => i.variant)).toEqual(["notice.comments"]);
+  });
+
+  it("notices an approval at the first poll that sees it, without the debounce, once", () => {
+    const current = snapshot({ reviewRequested: [theirs("APPROVED")] });
+    const settled = plan({ snapshot: current, state: withRound(round()) });
     expect(settled.intents).toEqual([
       {
         dedupeKey: "notice:g/p!7:APPROVED:0",
@@ -234,7 +239,7 @@ describe("review notices (flow C)", () => {
         mrKey: KEY,
         round: round({
           myState: "APPROVED",
-          changedAt: NOW - 11 * MINUTE,
+          changedAt: NOW,
           noticedState: "APPROVED",
         }),
       },

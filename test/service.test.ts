@@ -13,7 +13,13 @@ const teamsConfig: ServiceDeps["config"] = {
   enabled: true,
   startTimeoutSeconds: 30,
   callTimeoutSeconds: 60,
-  modes: { nudge: "approval", notice: "approval", rereview: "approval", findings: "approval" },
+  modes: {
+    nudge: "approval",
+    notice: "approval",
+    rereview: "approval",
+    findings: "approval",
+    approved: "approval",
+  },
   workingHours: { start: "09:00", end: "17:00", days: [1, 2, 3, 4, 5] },
   reminderAfterHours: 24,
   noticeDebounceMinutes: 10,
@@ -122,7 +128,13 @@ describe("createTeamsService", () => {
     const { service } = setup({
       config: {
         ...teamsConfig,
-        modes: { nudge: "auto", notice: "auto", rereview: "auto", findings: "auto" },
+        modes: {
+          nudge: "auto",
+          notice: "auto",
+          rereview: "auto",
+          findings: "auto",
+          approved: "auto",
+        },
       },
       gateway: { session: () => Promise.reject(new TeamsFailure("unavailable", "down")) },
     });
@@ -163,7 +175,13 @@ describe("Re-review Nudge through the service", () => {
       now: () => clock,
       config: {
         ...teamsConfig,
-        modes: { nudge: "approval", notice: "approval", rereview: mode, findings: "approval" },
+        modes: {
+          nudge: "approval",
+          notice: "approval",
+          rereview: mode,
+          findings: "approval",
+          approved: "approval",
+        },
         people: { bob: "bob@x.id" },
       },
       gateway: {

@@ -49,6 +49,8 @@ export const configSchema = z
             rereview: sendModeSchema.default("approval"),
             // The Owner asked for an Agent Review's findings to reach the Author without a stop.
             findings: sendModeSchema.default("auto"),
+            // The Owner asked for the Author to hear about an approval without a stop as well.
+            approved: sendModeSchema.default("auto"),
           })
           .strict()
           .default({}),
