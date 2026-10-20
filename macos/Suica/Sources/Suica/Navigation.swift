@@ -3,7 +3,7 @@ import SuicaCore
 import SwiftUI
 
 enum WindowSection: String, CaseIterable, Identifiable {
-    case overview, reviews, messages, statistics, usage, configuration, appearance
+    case overview, reviews, messages, statistics, usage, logs, configuration, appearance
 
     var id: String { rawValue }
 
@@ -14,6 +14,7 @@ enum WindowSection: String, CaseIterable, Identifiable {
         case .messages: Copy.messages
         case .statistics: Copy.statistics
         case .usage: Copy.tokenUsage
+        case .logs: Copy.logs
         case .configuration: Copy.configuration
         case .appearance: Copy.appearance
         }
@@ -26,6 +27,7 @@ enum WindowSection: String, CaseIterable, Identifiable {
         case .messages: "tray.full"
         case .statistics: "chart.bar"
         case .usage: "gauge.with.dots.needle.33percent"
+        case .logs: "doc.text.magnifyingglass"
         case .configuration: "gearshape"
         case .appearance: "paintpalette"
         }
@@ -39,6 +41,7 @@ enum WindowSection: String, CaseIterable, Identifiable {
         case .messages: .orange
         case .statistics: .green
         case .usage: .pink
+        case .logs: .brown
         case .configuration: .gray
         case .appearance: .indigo
         }
@@ -126,7 +129,7 @@ struct SidebarNode: Identifiable {
     /// are set up. Configuration's categories and the templates are nested under it.
     static let groups: [(title: String, nodes: [SidebarNode])] = [
         (Copy.workGroup, [SidebarNode(.overview), SidebarNode(.reviews), SidebarNode(.messages)]),
-        (Copy.insightsGroup, [SidebarNode(.statistics), SidebarNode(.usage)]),
+        (Copy.insightsGroup, [SidebarNode(.statistics), SidebarNode(.usage), SidebarNode(.logs)]),
         (
             Copy.settingsGroup,
             [
@@ -162,7 +165,7 @@ struct OpenPageAction {
     }
 }
 
-/// The Go menu (⌘1 to ⌘7, one per section) and Settings… (⌘,), which opens Appearance.
+/// The Go menu (⌘1 to ⌘8, one per section) and Settings… (⌘,), which opens Appearance.
 struct NavigationCommands: Commands {
     let navigator: Navigator
 
