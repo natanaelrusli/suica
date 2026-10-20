@@ -4,8 +4,13 @@ import SwiftUI
 
 struct MenuView: View {
     let model: MenuModel
+    let window: WindowModel
+    let reviews: ReviewsModel
     let settings: AppearanceSettings
     let navigator: Navigator
+    @State private var tab: PanelTab = .recent
+    /// The outcome of a Cancel pressed here; the Reviews page's own banner is not repeated.
+    @State private var cancelNotice: String?
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismiss) private var dismiss
     @Environment(\.motionLevel) private var motion
@@ -15,22 +20,18 @@ struct MenuView: View {
         VStack(alignment: .leading, spacing: metrics.gap * 0.75) {
             header
             if settings.showsPopoverCounters, let state = model.state {
-                counters(state).transition(Motion.reveal(motion))
+                quickActions(state).transition(Motion.reveal(motion))
             }
             if let running = model.state?.agentReview?.running {
-                ReviewingNow(running: running, queued: model.state?.agentReview?.queued.count ?? 0)
-                    .padding(10)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 8))
-                    .transition(Motion.reveal(motion))
+                runningReview(running).transition(Motion.reveal(motion))
             }
             if let text = model.errorText {
                 NoticeBox(text: text, tint: .red)
             }
-            if let text = model.banner {
+            if let text = model.banner ?? cancelNotice {
                 NoticeBox(text: text, tint: .secondary)
             }
-            content
+            lists
             Divider()
             footer
         }
@@ -43,15 +44,26 @@ struct MenuView: View {
                 .frame(height: 96)
                 .allowsHitTesting(false)
         }
-        .frame(width: 400)
+        // Fixed, so the lists have room even with one row in them.
+        .frame(width: 460, height: 640, alignment: .top)
         .motion(value: settings.showsPopoverCounters)
         .motion(value: model.errorText)
         .motion(value: model.banner)
+        .motion(value: cancelNotice)
         .motion(value: model.state?.teams)
         .motion(value: model.confirmation?.id)
         .motion(value: model.isPaused)
         .motion(value: model.state?.agentReview?.running?.id)
-        .task { await model.refresh() }
+        .motion(value: tab)
+        // Runs each time the panel opens.
+        .task {
+            cancelNotice = nil
+            let known = model.state != nil
+            tab = PanelTab.opening(badgeCount: model.badgeCount)
+            await model.refresh()
+            if !known { tab = PanelTab.opening(badgeCount: model.badgeCount) }
+            await window.refreshStatus()
+        }
     }
 
     private var header: some View {
@@ -63,85 +75,115 @@ struct MenuView: View {
                     StatusDot(
                         color: model.state == nil ? Color.gray : (model.isPaused ? Color.orange : Color.green),
                         active: model.state != nil && !model.isPaused)
-                    Text(model.isPaused ? Copy.paused : Copy.running)
+                    Text(statusLine)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .contentTransition(.opacity)
                 }
             }
             Spacer()
-            RefreshButton { Task { await model.refresh() } }
-                .buttonStyle(.borderless)
-        }
-    }
-
-    /// Each figure opens the window on the page that lists what it counts.
-    private func counters(_ state: AgentState) -> some View {
-        HStack(spacing: 8) {
-            counter(Copy.trackedShort, state.trackedAuthored, tint: .blue, page: .overview)
-            counter(Copy.toReviewShort, state.reviewRequested, tint: .teal, page: .reviews)
-            counter(
-                Copy.needsYouShort, model.badgeCount, tint: model.badgeCount > 0 ? .orange : .secondary,
-                page: .messages)
-        }
-    }
-
-    private func counter(_ title: String, _ value: Int, tint: Color, page: WindowSection) -> some View {
-        Button {
-            open(.section(page))
-        } label: {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("\(value)")
-                    .font(.title3.weight(.semibold).monospacedDigit())
-                    .foregroundStyle(tint)
-                    .contentTransition(.numericText(value: Double(value)))
-                    .pulse(on: value)
-                Text(title).font(.caption).foregroundStyle(.secondary)
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, metrics.rowSpacing + 1)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 8))
-            .contentShape(RoundedRectangle(cornerRadius: 8))
-        }
-        .buttonStyle(.plain)
-        .hoverLift(cornerRadius: 8)
-        .help(Copy.openSection(page.title))
-        .accessibilityElement(children: .combine)
-        .accessibilityHint(Copy.openSection(page.title))
-    }
-
-    @ViewBuilder private var content: some View {
-        if let teams = model.state?.teams {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(Copy.attentionHeading).font(.subheadline.weight(.semibold))
-                    if teams.attention.isEmpty {
-                        Label(Copy.attentionEmpty, systemImage: "checkmark.circle")
-                            .foregroundStyle(.secondary)
-                            .padding(.vertical, 4)
-                    }
-                    ForEach(teams.attention) { row($0).transition(Motion.reveal(motion)) }
-                    if teams.attentionHidden > 0 {
-                        Text(Copy.moreHidden(teams.attentionHidden)).font(.caption).foregroundStyle(.secondary)
-                    }
-                    if !teams.recent.isEmpty {
-                        DisclosureGroup {
-                            VStack(alignment: .leading, spacing: 8) {
-                                ForEach(teams.recent) { row($0).transition(Motion.reveal(motion)) }
-                            }
-                            .padding(.top, 4)
-                        } label: {
-                            Text(Copy.recentHeading(teams.recent.count)).font(.subheadline.weight(.semibold))
-                        }
-                    }
+            RefreshButton {
+                Task {
+                    await model.refresh()
+                    await window.refreshStatus()
                 }
             }
-            .frame(maxHeight: 440)
+            .buttonStyle(.borderless)
+        }
+    }
+
+    private var statusLine: String {
+        let state = model.isPaused ? Copy.paused : Copy.running
+        guard let poll = window.status?.lastPoll else { return state }
+        let date = Date(timeIntervalSince1970: TimeInterval(poll.at) / 1000)
+        return "\(state) · \(Copy.polled(date.formatted(.relative(presentation: .named))))"
+    }
+
+    private func quickActions(_ state: AgentState) -> some View {
+        HStack(spacing: 8) {
+            QuickAction(
+                title: model.isPaused ? Copy.resumeShort : Copy.pauseShort,
+                symbol: model.isPaused ? "play.fill" : "pause.fill", tint: model.isPaused ? .green : .orange,
+                help: model.isPaused ? Copy.resume : Copy.pause
+            ) {
+                Task { await model.togglePause() }
+            }
+            QuickAction(
+                title: Copy.reviewsShort, symbol: "checklist", tint: .purple, count: state.reviewRequested,
+                help: Copy.openSection(WindowSection.reviews.title)
+            ) {
+                open(.section(.reviews))
+            }
+            QuickAction(
+                title: Copy.statistics, symbol: "chart.bar", tint: .green,
+                help: Copy.openSection(WindowSection.statistics.title)
+            ) {
+                open(.section(.statistics))
+            }
+            QuickAction(title: Copy.openShort, symbol: "macwindow", tint: .blue, help: Copy.openWindow) {
+                open(nil)
+            }
+        }
+    }
+
+    private func runningReview(_ running: RunningReview) -> some View {
+        HStack(alignment: .top) {
+            ReviewingNow(running: running, queued: model.state?.agentReview?.queued.count ?? 0)
+            Spacer(minLength: 8)
+            Button(Copy.cancelReview) {
+                Task {
+                    await reviews.cancelAgentReview(id: running.id, key: running.mrKey)
+                    cancelNotice = reviews.agentBanner
+                    await model.refresh()
+                }
+            }
+            .controlSize(.small)
+            .disabled(reviews.agentBusyKeys.contains(running.mrKey))
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    @ViewBuilder private var lists: some View {
+        if let teams = model.state?.teams {
+            Picker(Copy.panelLists, selection: $tab) {
+                Text(Copy.needsYouTab(teams.attention.count + teams.attentionHidden)).tag(PanelTab.needsYou)
+                Text(Copy.recentTab(teams.recent.count)).tag(PanelTab.recent)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 8) {
+                    switch tab {
+                    case .needsYou:
+                        if teams.attention.isEmpty { empty(Copy.attentionEmpty) }
+                        ForEach(teams.attention) { row($0).transition(Motion.reveal(motion)) }
+                        if teams.attentionHidden > 0 {
+                            Text(Copy.moreHidden(teams.attentionHidden)).font(.caption).foregroundStyle(.secondary)
+                        }
+                    case .recent:
+                        if teams.recent.isEmpty { empty(Copy.recentEmpty) }
+                        ForEach(teams.recent) { row($0).transition(Motion.reveal(motion)) }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxHeight: .infinity)
         } else if model.state != nil {
             Label(Copy.teamsDisabled, systemImage: "bubble.left.and.exclamationmark.bubble.right")
                 .foregroundStyle(.secondary)
+            Spacer(minLength: 0)
+        } else {
+            Spacer(minLength: 0)
         }
+    }
+
+    private func empty(_ text: String) -> some View {
+        Label(text, systemImage: "checkmark.circle")
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 24)
     }
 
     private func row(_ item: OutboxItem) -> some View {
@@ -150,12 +192,15 @@ struct MenuView: View {
 
     private var footer: some View {
         HStack {
-            Button {
-                Task { await model.togglePause() }
-            } label: {
-                Label(
-                    model.isPaused ? Copy.resume : Copy.pause,
-                    systemImage: model.isPaused ? "play.fill" : "pause.fill")
+            // With the quick actions hidden, Pause stays reachable here.
+            if !settings.showsPopoverCounters {
+                Button {
+                    Task { await model.togglePause() }
+                } label: {
+                    Label(
+                        model.isPaused ? Copy.resume : Copy.pause,
+                        systemImage: model.isPaused ? "play.fill" : "pause.fill")
+                }
             }
             Spacer()
             Button {
@@ -192,5 +237,43 @@ struct MenuView: View {
             openWindow(id: "main")
             NSApp.activate()
         }
+    }
+}
+
+/// One of the panel's quick-action tiles: a coloured symbol over a short label, with a count.
+private struct QuickAction: View {
+    let title: String
+    let symbol: String
+    let tint: Color
+    var count: Int?
+    let help: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 5) {
+                SidebarIcon(symbol: symbol, tint: tint, size: 24)
+                HStack(spacing: 4) {
+                    Text(title).lineLimit(1)
+                    if let count {
+                        Text("\(count)")
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                            .contentTransition(.numericText(value: Double(count)))
+                            .pulse(on: count)
+                    }
+                }
+                .font(.caption.weight(.medium))
+            }
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity)
+            .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 8))
+            .contentShape(RoundedRectangle(cornerRadius: 8))
+        }
+        .buttonStyle(.plain)
+        .hoverLift(cornerRadius: 8)
+        .help(help)
+        .accessibilityElement(children: .combine)
+        .accessibilityHint(help)
     }
 }

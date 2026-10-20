@@ -113,7 +113,7 @@ struct SuicaApp: App {
 
     var body: some Scene {
         MenuBarExtra {
-            MenuView(model: model, settings: appearance, navigator: navigator)
+            MenuView(model: model, window: window, reviews: reviews, settings: appearance, navigator: navigator)
                 .appearance(appearance)
         } label: {
             Image(nsImage: PenguinGlyph.image)

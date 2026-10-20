@@ -437,6 +437,18 @@ public enum Copy {
     public static let needsYouShort = "Needs you"
     public static func recentHeading(_ count: Int) -> String { "Recent (\(count))" }
 
+    // MARK: Menu bar panel
+
+    public static func polled(_ relative: String) -> String { "polled \(relative)" }
+    public static let panelLists = "List"
+    public static func needsYouTab(_ count: Int) -> String { "Needs you · \(count)" }
+    public static func recentTab(_ count: Int) -> String { "Recent · \(count)" }
+    public static let recentEmpty = "Nothing was sent or skipped lately."
+    public static let pauseShort = "Pause"
+    public static let resumeShort = "Resume"
+    public static let reviewsShort = "Reviews"
+    public static let openShort = "Open"
+
     public static func outcomeLabel(_ outcome: ItemOutcome) -> String {
         switch outcome {
         case .approvedByYou: "Sent with your approval"
@@ -514,7 +526,7 @@ public enum Copy {
     public static let menuBarHeading = "Menu bar"
     public static let menuBarBadgePicker = "Beside the penguin"
     public static let menuBarBadgeHint = "Shown while messages need you."
-    public static let popoverCounters = "Show Tracked, To review and Needs you in the popover"
+    public static let popoverCounters = "Show quick actions in the popover"
     public static let startPagePicker = "Open the window on"
     public static let windowHeading = "Window"
     public static let resetAppearance = "Restore defaults"
