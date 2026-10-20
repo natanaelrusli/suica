@@ -263,6 +263,14 @@
       "effective": "comment"
     },
     {
+      "path": ["review", "approve"],
+      "type": "bool",
+      "label": "Approve after a clean re-review",
+      "help": "Approve the MR as you at the reviewed commit once an Agent Re-review with no new findings and every previous finding fixed is posted; off by default",
+      "value": null,
+      "effective": false
+    },
+    {
       "path": ["review", "skill"],
       "type": "string",
       "label": "Review skill",

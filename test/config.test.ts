@@ -40,6 +40,7 @@ describe("parseConfig", () => {
         auto: true,
         post: "approval",
         postAs: "comment",
+        approve: false,
         skill: "madhani:madhani-code-review",
         maxChangedLines: 800,
         maxPerDay: 10,
@@ -53,6 +54,11 @@ describe("parseConfig", () => {
     expect(parseConfig(MINIMAL).teams.agentName).toBe("Suica");
     expect(parseConfig(`${MINIMAL}teams:\n  agentName: Bahlil\n`).teams.agentName).toBe("Bahlil");
     expect(() => parseConfig(`${MINIMAL}teams:\n  agentName: "  "\n`)).toThrow();
+  });
+
+  it("review.approve is off by default", () => {
+    expect(parseConfig(MINIMAL).review.approve).toBe(false);
+    expect(parseConfig(`${MINIMAL}review:\n  approve: true\n`).review.approve).toBe(true);
   });
 
   it("review.rereviewAfterMinutes defaults to 10", () => {

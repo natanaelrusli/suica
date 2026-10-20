@@ -18,7 +18,7 @@ import {
 import type { ReviewDeps } from "../src/agent-review.ts";
 import { parseConfig } from "../src/config.ts";
 import type { Exec, ExecOptions } from "../src/exec.ts";
-import { descriptionSha } from "../src/gitlab.ts";
+import { FetchFailure, descriptionSha } from "../src/gitlab.ts";
 import type { Notification } from "../src/format.ts";
 import { createLogger } from "../src/log.ts";
 import type { DetectedCli } from "../src/model-cli.ts";
@@ -326,6 +326,10 @@ const SINCE_DIFFS = [
   },
 ];
 const PREVIOUS_REVIEW = "# Code review\n## Findings\n1. Major `a.ts:1` — old problem.\n";
+const CLEAN_REREVIEW =
+  "# Re-review\n## Previous review\n- Major `a.ts:1` old problem — fixed, the guard is there.\n## Findings\nNone.\n";
+const OPEN_REREVIEW =
+  "# Re-review\n## Previous review\n- Major `a.ts:1` old problem — not fixed.\n## Findings\nNone.\n";
 
 interface Call {
   readonly file: string;
@@ -342,6 +346,7 @@ function harness(
     model?: "claude" | "codex" | "auto" | "gemini";
     autoPost?: boolean;
     postFails?: boolean;
+    approve?: boolean;
     home?: string;
     sshUrl?: string;
     /** The merge base GitLab names for a re-review; PREV (an ancestor) by default. */
@@ -416,6 +421,7 @@ function harness(
     review: {
       ...CONFIG.review,
       post: options.autoPost === true ? ("auto" as const) : ("approval" as const),
+      approve: options.approve === true,
     },
   };
   const deps: ReviewDeps = {
@@ -682,6 +688,25 @@ describe("runAgentReview", () => {
     expect(approval.db.getAgentReview(b.id)?.status).toBe("ready");
     expect(approval.posts).toEqual([]);
     expect(approval.notifications.map((n) => n.title)).toEqual(["Review agen siap"]);
+  });
+
+  it("approves after an automatic post of a clean re-review with review.approve, and says so", async () => {
+    const h = harness({
+      autoPost: true,
+      approve: true,
+      cliStdout: JSON.stringify({ is_error: false, result: CLEAN_REREVIEW, modelUsage: {} }),
+    });
+    h.previous();
+    const queued = h.queue();
+    await runAgentReview(h.deps, queued);
+    expect(h.posts).toEqual([
+      "projects/g%2Fp/merge_requests/7/notes",
+      "projects/g%2Fp/merge_requests/7/approve",
+    ]);
+    expect(h.db.getAgentReview(queued.id)).toMatchObject({ status: "posted", approved: true });
+    expect(h.notifications.map((n) => n.body)).toEqual([
+      "Add thing: sudah diposting ke GitLab dan MR di-approve.",
+    ]);
   });
 
   it("leaves a review whose automatic post failed waiting, with a note to check GitLab", async () => {
@@ -1236,6 +1261,79 @@ describe("postAgentReview and discardAgentReview", () => {
     expect(h.db.getAgentReview(id)?.detail).toMatch(
       /^2 inline comments were posted, but the summary comment was not\..*posting again repeats them/,
     );
+  });
+
+  describe("approval after the post", () => {
+    const APPROVING = parseConfig(
+      "gitlab:\n  hostname: gitlab.example\nreview:\n  approve: true\n",
+    );
+    /** Post deps where the approve call is recorded apart from the note, and can be refused. */
+    function approvingDeps(
+      h: ReturnType<typeof harness>,
+      options: { conflict?: boolean; config?: typeof APPROVING } = {},
+    ) {
+      const base = postDeps(h);
+      const approvals: unknown[] = [];
+      const post = (path: string, fields: Readonly<Record<string, string>>) => {
+        if (!path.endsWith("/approve")) return base.deps.post(path, fields);
+        if (options.conflict === true) {
+          return Promise.reject(new FetchFailure("gitlab-error", "conflict", 409));
+        }
+        approvals.push({ path, fields });
+        return Promise.resolve();
+      };
+      return {
+        deps: { ...base.deps, post, config: options.config ?? APPROVING },
+        approvals,
+        notes: base.notes,
+      };
+    }
+
+    it("approves at the reviewed commit once a clean re-review is posted, and records it", async () => {
+      const { h, id } = await readyWith(CLEAN_REREVIEW, true);
+      const { deps, approvals, notes } = approvingDeps(h);
+      expect(await postAgentReview(deps, id)).toBe("posted");
+      expect(notes).toHaveLength(1);
+      expect(approvals).toEqual([
+        { path: "projects/g%2Fp/merge_requests/7/approve", fields: { sha: SHA } },
+      ]);
+      expect(h.db.getAgentReview(id)).toMatchObject({
+        status: "posted",
+        approved: true,
+        detail: `Approved as you at commit ${SHA.slice(0, 8)}.`,
+      });
+    });
+
+    it("does not approve a re-review with an open previous item, a first review, or with review.approve off", async () => {
+      const open = await readyWith(OPEN_REREVIEW, true);
+      const a = approvingDeps(open.h);
+      expect(await postAgentReview(a.deps, open.id)).toBe("posted");
+      expect(a.approvals).toEqual([]);
+      expect(open.h.db.getAgentReview(open.id)).toMatchObject({ approved: false, detail: "" });
+
+      const first = await readyWith(CLEAN_REREVIEW, false);
+      const b = approvingDeps(first.h);
+      await postAgentReview(b.deps, first.id);
+      expect(b.approvals).toEqual([]);
+
+      const off = await readyWith(CLEAN_REREVIEW, true);
+      const c = approvingDeps(off.h, { config: CONFIG });
+      await postAgentReview(c.deps, off.id);
+      expect(c.approvals).toEqual([]);
+      expect(off.h.db.getAgentReview(off.id)?.approved).toBe(false);
+    });
+
+    it("notes a refused approval on the posted review and does not retry", async () => {
+      const { h, id } = await readyWith(CLEAN_REREVIEW, true);
+      const { deps } = approvingDeps(h, { conflict: true });
+      expect(await postAgentReview(deps, id)).toBe("posted");
+      expect(h.db.getAgentReview(id)).toMatchObject({
+        status: "posted",
+        approved: false,
+        detail: "Not approved: the source branch moved since the review.",
+      });
+      expect(await postAgentReview(deps, id)).toBe("nothing");
+    });
   });
 
   it("discards a ready review so the MR can be queued again", async () => {

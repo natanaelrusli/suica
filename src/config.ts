@@ -85,6 +85,8 @@ export const configSchema = z
         post: z.enum(["approval", "auto"]).default("approval"),
         // comment: one MR note; inline: findings on a line of the diff become threads there.
         postAs: z.enum(["comment", "inline"]).default("comment"),
+        // Approve the MR as the Owner once a clean Agent Re-review is posted: opt-in, it writes to GitLab.
+        approve: z.boolean().default(false),
         // A skill name only, as typed after the slash: it ends up in a prompt and a file path.
         skill: z
           .string()

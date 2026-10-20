@@ -12,7 +12,7 @@ import { execFailure } from "./exec.ts";
 import type { Notification } from "./format.ts";
 import { descriptionSha } from "./gitlab.ts";
 import type { GraphqlRunner, PostJsonRunner, PostRunner, RestRunner } from "./gitlab.ts";
-import { extractFindings, placeFinding, summaryWithout } from "./inline-review.ts";
+import { extractFindings, isCleanReview, placeFinding, summaryWithout } from "./inline-review.ts";
 import type { Finding, ThreadPosition } from "./inline-review.ts";
 import type { Logger } from "./log.ts";
 import { detectModelClis, resolveModelCli } from "./model-cli.ts";
@@ -25,8 +25,8 @@ import {
   RunFailure,
 } from "./review-runner.ts";
 import type { RunResult } from "./review-runner.ts";
-import { fetchMrDetail, parseMrKey } from "./reviews.ts";
-import type { DiffFileJson, MrDetailJson } from "./reviews.ts";
+import { approveMergeRequest, fetchMrDetail, parseMrKey } from "./reviews.ts";
+import type { ApproveOutcome, DiffFileJson, MrDetailJson } from "./reviews.ts";
 import type { AgentReviewRow, Store } from "./store.ts";
 
 /** Agent Review: an MR reviewed by a coding agent CLI with a skill, posted only after approval. */
@@ -543,12 +543,13 @@ export async function runAgentReview(deps: ReviewDeps, row: AgentReviewRow): Pro
         row.id,
       );
       log.info("agent review posted automatically", { id: row.id, mr_key: row.mrKey, outcome });
+      const approved = store.getAgentReview(row.id)?.approved === true;
       await notifyQuietly(
         deps,
         outcome === "posted"
           ? {
               title: "Review agen diposting",
-              body: `${mrTitle.slice(0, 80)}: sudah diposting ke GitLab.`,
+              body: `${mrTitle.slice(0, 80)}: sudah diposting ke GitLab${approved ? " dan MR di-approve" : ""}.`,
             }
           : {
               title: "Review agen gagal diposting",
@@ -799,7 +800,51 @@ export async function postAgentReview(
   }
   const detail = mode === "inline" ? inlineDetail(posted.length, plan.findings.length) : "";
   store.transitionAgentReview(id, ["posting"], "posted", { detail }, deps.now());
+  await approveAfterPost(deps, row, detail);
   return "posted";
+}
+
+const APPROVAL_DETAIL: Record<Exclude<ApproveOutcome, "approved">, string> = {
+  "head-changed": "Not approved: the source branch moved since the review.",
+  failed: "Not approved: GitLab refused the approval.",
+  "bad-request": "Not approved: the reviewed commit is unknown.",
+};
+
+/**
+ * With `review.approve`, approves the MR as the Owner at the reviewed commit once a clean Agent
+ * Re-review (no finding, every previous item fixed) is posted. A first review never approves,
+ * and a refused approval is noted on the row, never retried.
+ */
+async function approveAfterPost(
+  deps: Pick<ReviewDeps, "store" | "now" | "log"> & {
+    readonly config: Pick<Config, "review">;
+    readonly post: PostRunner;
+  },
+  row: AgentReviewRow,
+  detail: string,
+): Promise<void> {
+  if (
+    !deps.config.review.approve ||
+    row.previousSha === null ||
+    row.headSha === null ||
+    row.body === null ||
+    !isCleanReview(row.body)
+  ) {
+    return;
+  }
+  const outcome = await approveMergeRequest(deps, row.mrKey, row.headSha);
+  deps.log.info("agent review approval", { id: row.id, mr_key: row.mrKey, outcome });
+  const note =
+    outcome === "approved"
+      ? `Approved as you at commit ${row.headSha.slice(0, 8)}.`
+      : APPROVAL_DETAIL[outcome];
+  deps.store.transitionAgentReview(
+    row.id,
+    ["posted"],
+    "posted",
+    { approved: outcome === "approved", detail: [detail, note].filter(Boolean).join(" ") },
+    deps.now(),
+  );
 }
 
 function errorName(error: unknown): string {

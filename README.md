@@ -60,6 +60,7 @@ Config file: `~/.config/suica/config.yaml` (override the path with `SUICA_CONFIG
 | `review.auto`                      | `true`                           | Review every MR waiting for you that the agent has not reviewed yet, oldest first, and again after a new Review Request (see Agent Review below) |
 | `review.post`                      | `approval`                       | `approval`: a ready review waits until you post it; `auto`: it is posted to GitLab as you as soon as it is ready |
 | `review.postAs`                    | `comment`                        | `comment`: the review is one MR comment; `inline`: findings on a line of the reviewed diff become threads there and the rest is one comment. Used by `review.post: auto` and `suica review post`; the app asks each time |
+| `review.approve`                   | `false`                          | Approve the MR as you at the reviewed commit once a clean Agent Re-review (no new findings, every previous finding fixed) is posted |
 | `review.skill`                     | `madhani:madhani-code-review`    | Claude Code skill the review follows, as typed after the slash   |
 | `review.model`                     | CLI default                      | Model the review runs with: `sonnet`, `opus`, `haiku` or a full model name for Claude Code (`--model`), a model name for Codex (`-m`) |
 | `review.maxChangedLines`           | `800`                            | Larger MRs are skipped                                           |
