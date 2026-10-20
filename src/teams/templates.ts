@@ -13,28 +13,24 @@ export const PLACEHOLDERS = [
   "mr.project",
   "person.name",
   "owner.name",
+  /** The name the agent introduces itself with (`teams.agentName`). */
+  "agent.name",
   /** What an Agent Review found, such as "ada 8 findings (7 Minor, 1 Nit)"; empty elsewhere. */
   "review.findings",
 ] as const;
 export type Placeholder = (typeof PLACEHOLDERS)[number];
 export type Templates = Readonly<Record<TemplateName, string>>;
 
+export const INTRO = "Halo {{person.name}}, saya {{agent.name}}, agen review-nya {{owner.name}}.";
 export const DEFAULT_TEMPLATES: Templates = {
-  nudge: "Halo {{person.name}}, boleh minta tolong review MR ini?\n{{mr.link}}\nTerima kasih!",
-  reminder:
-    "Halo {{person.name}}, mengingatkan kembali soal review MR ini ya:\n{{mr.link}}\nTerima kasih!",
-  "notice.approved":
-    "Halo {{person.name}}, MR kamu sudah saya review dan saya approve:\n{{mr.link}}",
-  "notice.changes":
-    "Halo {{person.name}}, saya sudah review MR kamu dan ada perubahan yang perlu dilihat:\n{{mr.link}}",
-  "notice.comments":
-    "Halo {{person.name}}, saya sudah review MR kamu dan meninggalkan beberapa komentar:\n{{mr.link}}",
-  "notice.findings":
-    "Halo {{person.name}}, saya sudah review MR kamu: {{review.findings}}.\n{{mr.link}}\nDetailnya ada di komentar MR.",
-  "notice.refindings":
-    "Halo {{person.name}}, saya sudah review ulang update MR kamu: {{review.findings}}.\n{{mr.link}}\nDetailnya ada di komentar MR.",
-  rereview:
-    "Halo {{person.name}}, MR ini sudah saya update sesuai review-mu. Boleh minta tolong dicek lagi?\n{{mr.link}}\nTerima kasih!",
+  nudge: `${INTRO} Boleh minta tolong review MR ini?\n{{mr.link}}\nTerima kasih!`,
+  reminder: `${INTRO} Mengingatkan kembali soal review MR ini ya:\n{{mr.link}}\nTerima kasih!`,
+  "notice.approved": `${INTRO} MR kamu sudah saya review dan saya approve:\n{{mr.link}}`,
+  "notice.changes": `${INTRO} Saya sudah review MR kamu dan ada perubahan yang perlu dilihat:\n{{mr.link}}`,
+  "notice.comments": `${INTRO} Saya sudah review MR kamu dan meninggalkan beberapa komentar:\n{{mr.link}}`,
+  "notice.findings": `${INTRO} Saya sudah review MR kamu: {{review.findings}}.\n{{mr.link}}\nDetailnya ada di komentar MR.`,
+  "notice.refindings": `${INTRO} Saya sudah review ulang update MR kamu: {{review.findings}}.\n{{mr.link}}\nDetailnya ada di komentar MR.`,
+  rereview: `${INTRO} MR ini sudah saya update sesuai review-mu. Boleh minta tolong dicek lagi?\n{{mr.link}}\nTerima kasih!`,
 };
 
 /**

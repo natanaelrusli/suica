@@ -180,6 +180,12 @@ export const CONFIG_FIELDS: readonly ConfigField[] = [
     help: "GitLab username to email, for people Teams cannot find by name",
   },
   {
+    path: ["teams", "agentName"],
+    type: "string",
+    label: "Agent name",
+    help: "The name the agent introduces itself with in Teams messages ({{agent.name}})",
+  },
+  {
     path: ["model", "cli"],
     type: "enum",
     label: "Model CLI",

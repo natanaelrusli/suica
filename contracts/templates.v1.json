@@ -9,56 +9,57 @@
     "mr.project",
     "person.name",
     "owner.name",
+    "agent.name",
     "review.findings"
   ],
   "templates": [
     {
       "name": "nudge",
-      "text": "Halo {{person.name}}, boleh minta tolong review MR ini?\n{{mr.link}}\nTerima kasih!",
+      "text": "Halo {{person.name}}, saya {{agent.name}}, agen review-nya {{owner.name}}. Boleh minta tolong review MR ini?\n{{mr.link}}\nTerima kasih!",
       "custom": false,
-      "defaultText": "Halo {{person.name}}, boleh minta tolong review MR ini?\n{{mr.link}}\nTerima kasih!"
+      "defaultText": "Halo {{person.name}}, saya {{agent.name}}, agen review-nya {{owner.name}}. Boleh minta tolong review MR ini?\n{{mr.link}}\nTerima kasih!"
     },
     {
       "name": "reminder",
-      "text": "Halo {{person.name}}, mengingatkan kembali soal review MR ini ya:\n{{mr.link}}\nTerima kasih!",
+      "text": "Halo {{person.name}}, saya {{agent.name}}, agen review-nya {{owner.name}}. Mengingatkan kembali soal review MR ini ya:\n{{mr.link}}\nTerima kasih!",
       "custom": false,
-      "defaultText": "Halo {{person.name}}, mengingatkan kembali soal review MR ini ya:\n{{mr.link}}\nTerima kasih!"
+      "defaultText": "Halo {{person.name}}, saya {{agent.name}}, agen review-nya {{owner.name}}. Mengingatkan kembali soal review MR ini ya:\n{{mr.link}}\nTerima kasih!"
     },
     {
       "name": "notice.approved",
-      "text": "Halo {{person.name}}, MR kamu sudah saya review dan saya approve:\n{{mr.link}}",
+      "text": "Halo {{person.name}}, saya {{agent.name}}, agen review-nya {{owner.name}}. MR kamu sudah saya review dan saya approve:\n{{mr.link}}",
       "custom": false,
-      "defaultText": "Halo {{person.name}}, MR kamu sudah saya review dan saya approve:\n{{mr.link}}"
+      "defaultText": "Halo {{person.name}}, saya {{agent.name}}, agen review-nya {{owner.name}}. MR kamu sudah saya review dan saya approve:\n{{mr.link}}"
     },
     {
       "name": "notice.changes",
-      "text": "Halo {{person.name}}, saya sudah review MR kamu dan ada perubahan yang perlu dilihat:\n{{mr.link}}",
+      "text": "Halo {{person.name}}, saya {{agent.name}}, agen review-nya {{owner.name}}. Saya sudah review MR kamu dan ada perubahan yang perlu dilihat:\n{{mr.link}}",
       "custom": false,
-      "defaultText": "Halo {{person.name}}, saya sudah review MR kamu dan ada perubahan yang perlu dilihat:\n{{mr.link}}"
+      "defaultText": "Halo {{person.name}}, saya {{agent.name}}, agen review-nya {{owner.name}}. Saya sudah review MR kamu dan ada perubahan yang perlu dilihat:\n{{mr.link}}"
     },
     {
       "name": "notice.comments",
-      "text": "Halo {{person.name}}, saya sudah review MR kamu dan meninggalkan beberapa komentar:\n{{mr.link}}",
+      "text": "Halo {{person.name}}, saya {{agent.name}}, agen review-nya {{owner.name}}. Saya sudah review MR kamu dan meninggalkan beberapa komentar:\n{{mr.link}}",
       "custom": false,
-      "defaultText": "Halo {{person.name}}, saya sudah review MR kamu dan meninggalkan beberapa komentar:\n{{mr.link}}"
+      "defaultText": "Halo {{person.name}}, saya {{agent.name}}, agen review-nya {{owner.name}}. Saya sudah review MR kamu dan meninggalkan beberapa komentar:\n{{mr.link}}"
     },
     {
       "name": "notice.findings",
-      "text": "Halo {{person.name}}, saya sudah review MR kamu: {{review.findings}}.\n{{mr.link}}\nDetailnya ada di komentar MR.",
+      "text": "Halo {{person.name}}, saya {{agent.name}}, agen review-nya {{owner.name}}. Saya sudah review MR kamu: {{review.findings}}.\n{{mr.link}}\nDetailnya ada di komentar MR.",
       "custom": false,
-      "defaultText": "Halo {{person.name}}, saya sudah review MR kamu: {{review.findings}}.\n{{mr.link}}\nDetailnya ada di komentar MR."
+      "defaultText": "Halo {{person.name}}, saya {{agent.name}}, agen review-nya {{owner.name}}. Saya sudah review MR kamu: {{review.findings}}.\n{{mr.link}}\nDetailnya ada di komentar MR."
     },
     {
       "name": "notice.refindings",
-      "text": "Halo {{person.name}}, saya sudah review ulang update MR kamu: {{review.findings}}.\n{{mr.link}}\nDetailnya ada di komentar MR.",
+      "text": "Halo {{person.name}}, saya {{agent.name}}, agen review-nya {{owner.name}}. Saya sudah review ulang update MR kamu: {{review.findings}}.\n{{mr.link}}\nDetailnya ada di komentar MR.",
       "custom": false,
-      "defaultText": "Halo {{person.name}}, saya sudah review ulang update MR kamu: {{review.findings}}.\n{{mr.link}}\nDetailnya ada di komentar MR."
+      "defaultText": "Halo {{person.name}}, saya {{agent.name}}, agen review-nya {{owner.name}}. Saya sudah review ulang update MR kamu: {{review.findings}}.\n{{mr.link}}\nDetailnya ada di komentar MR."
     },
     {
       "name": "rereview",
-      "text": "Halo {{person.name}}, MR ini sudah saya update sesuai review-mu. Boleh minta tolong dicek lagi?\n{{mr.link}}\nTerima kasih!",
+      "text": "Halo {{person.name}}, saya {{agent.name}}, agen review-nya {{owner.name}}. MR ini sudah saya update sesuai review-mu. Boleh minta tolong dicek lagi?\n{{mr.link}}\nTerima kasih!",
       "custom": false,
-      "defaultText": "Halo {{person.name}}, MR ini sudah saya update sesuai review-mu. Boleh minta tolong dicek lagi?\n{{mr.link}}\nTerima kasih!"
+      "defaultText": "Halo {{person.name}}, saya {{agent.name}}, agen review-nya {{owner.name}}. MR ini sudah saya update sesuai review-mu. Boleh minta tolong dicek lagi?\n{{mr.link}}\nTerima kasih!"
     }
   ]
 }

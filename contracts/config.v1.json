@@ -220,6 +220,14 @@
       "effective": {}
     },
     {
+      "path": ["teams", "agentName"],
+      "type": "string",
+      "label": "Agent name",
+      "help": "The name the agent introduces itself with in Teams messages ({{agent.name}})",
+      "value": null,
+      "effective": "Suica"
+    },
+    {
       "path": ["model", "cli"],
       "type": "enum",
       "label": "Model CLI",

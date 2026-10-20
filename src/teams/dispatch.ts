@@ -33,7 +33,7 @@ export interface DispatchDeps {
   readonly store: TeamsStore;
   readonly gateway: TeamsGateway;
   readonly templates: Templates;
-  readonly config: Pick<Config["teams"], "modes" | "workingHours" | "people">;
+  readonly config: Pick<Config["teams"], "modes" | "workingHours" | "people" | "agentName">;
   readonly log: Logger;
   readonly now: () => number;
 }
@@ -119,7 +119,11 @@ function stillNeededInState(store: TeamsStore, row: OutboxRow, state: PreviousSt
   return state.trackedAuthored.has(row.mrKey) && state.reviewerStates.get(key) === UNREVIEWED;
 }
 
-function valuesFor(row: OutboxRow, ownerName: string): Record<Placeholder, string> {
+function valuesFor(
+  row: OutboxRow,
+  ownerName: string,
+  agentName: string,
+): Record<Placeholder, string> {
   return {
     "mr.title": escapeMarkdown(clean(row.mrTitle, TITLE_MAX)),
     "mr.url": row.mrUrl,
@@ -128,6 +132,7 @@ function valuesFor(row: OutboxRow, ownerName: string): Record<Placeholder, strin
     "mr.project": escapeMarkdown(row.mrProject),
     "person.name": escapeMarkdown(clean(row.recipientName, NAME_MAX)),
     "owner.name": escapeMarkdown(clean(ownerName, NAME_MAX)),
+    "agent.name": escapeMarkdown(clean(agentName, NAME_MAX)),
     // Built by describeFindings, which already escapes what it took from the review.
     "review.findings": row.findings ?? "",
   };
@@ -240,7 +245,7 @@ export async function dispatchQueued(
     if (row.status === "pending" || !inHours) continue;
     let text: string;
     try {
-      text = renderTemplate(deps.templates[row.variant], valuesFor(row, snapshot.me.name));
+      text = renderTemplate(deps.templates[row.variant], valuesFor(row, snapshot.me.name, deps.config.agentName));
     } catch {
       deps.store.transitionOutbox(row.id, "queued", "failed", { detail: "template" }, nowMs);
       continue;

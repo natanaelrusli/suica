@@ -33,6 +33,7 @@ describe("parseConfig", () => {
         rereviewAfterMinutes: 10,
         maxMessagesPerReviewer: 2,
         people: {},
+        agentName: "Suica",
       },
       model: { cli: "auto" },
       review: {
@@ -46,6 +47,12 @@ describe("parseConfig", () => {
         timeoutMinutes: 20,
       },
     });
+  });
+
+  it("teams.agentName defaults to Suica and must not be blank", () => {
+    expect(parseConfig(MINIMAL).teams.agentName).toBe("Suica");
+    expect(parseConfig(`${MINIMAL}teams:\n  agentName: Bahlil\n`).teams.agentName).toBe("Bahlil");
+    expect(() => parseConfig(`${MINIMAL}teams:\n  agentName: "  "\n`)).toThrow();
   });
 
   it("review.rereviewAfterMinutes defaults to 10", () => {

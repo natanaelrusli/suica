@@ -67,6 +67,8 @@ export const configSchema = z
         maxMessagesPerReviewer: positiveInt.default(2),
         templatesPath: z.string().min(1).optional(),
         people: z.record(z.string(), z.string().email()).default({}),
+        // The name the agent introduces itself with in Teams ({{agent.name}}).
+        agentName: z.string().trim().min(1).default("Suica"),
       })
       .strict()
       .default({}),

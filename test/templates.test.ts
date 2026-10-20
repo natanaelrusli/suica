@@ -32,6 +32,7 @@ const values = {
   "mr.project": "g/p",
   "person.name": "Alice",
   "owner.name": "Nata",
+  "agent.name": "Bahlil",
   "review.findings": "",
 };
 
@@ -145,14 +146,14 @@ describe("describeFindings for an Agent Re-review", () => {
 describe("the built-in re-review findings notice", () => {
   it("tells the Author what the Agent Re-review found and where to read it", () => {
     expect(DEFAULT_TEMPLATES["notice.refindings"]).toBe(
-      "Halo {{person.name}}, saya sudah review ulang update MR kamu: {{review.findings}}.\n{{mr.link}}\nDetailnya ada di komentar MR.",
+      "Halo {{person.name}}, saya {{agent.name}}, agen review-nya {{owner.name}}. Saya sudah review ulang update MR kamu: {{review.findings}}.\n{{mr.link}}\nDetailnya ada di komentar MR.",
     );
     const text = renderTemplate(DEFAULT_TEMPLATES["notice.refindings"], {
       ...values,
       "review.findings": "ada 2 findings baru (1 Major, 1 Minor)",
     });
     expect(text).toBe(
-      "Halo Alice, saya sudah review ulang update MR kamu: ada 2 findings baru (1 Major, 1 Minor).\n[Add thing](https://gitlab.example/g/p/-/merge_requests/7)\nDetailnya ada di komentar MR.",
+      "Halo Alice, saya Bahlil, agen review-nya Nata. Saya sudah review ulang update MR kamu: ada 2 findings baru (1 Major, 1 Minor).\n[Add thing](https://gitlab.example/g/p/-/merge_requests/7)\nDetailnya ada di komentar MR.",
     );
   });
 });
@@ -164,7 +165,7 @@ describe("the built-in findings notice", () => {
       "review.findings": "ada 8 findings (7 Minor, 1 Nit)",
     });
     expect(text).toBe(
-      "Halo Alice, saya sudah review MR kamu: ada 8 findings (7 Minor, 1 Nit).\n[Add thing](https://gitlab.example/g/p/-/merge_requests/7)\nDetailnya ada di komentar MR.",
+      "Halo Alice, saya Bahlil, agen review-nya Nata. Saya sudah review MR kamu: ada 8 findings (7 Minor, 1 Nit).\n[Add thing](https://gitlab.example/g/p/-/merge_requests/7)\nDetailnya ada di komentar MR.",
     );
   });
 });
@@ -172,16 +173,17 @@ describe("the built-in findings notice", () => {
 describe("loadTemplates", () => {
   it("uses the built-in Indonesian defaults when the folder does not exist", () => {
     expect(loadTemplates(join(tempDir(), "missing"))).toEqual(DEFAULT_TEMPLATES);
-    expect(DEFAULT_TEMPLATES.nudge).toContain("boleh minta tolong review");
+    expect(DEFAULT_TEMPLATES.nudge).toContain("Boleh minta tolong review");
+    for (const name of TEMPLATE_NAMES) expect(DEFAULT_TEMPLATES[name]).toContain("saya {{agent.name}}");
   });
 
   it("has a built-in Indonesian re-review template that asks for another look", () => {
     expect(TEMPLATE_NAMES).toContain("rereview");
     expect(DEFAULT_TEMPLATES.rereview).toBe(
-      "Halo {{person.name}}, MR ini sudah saya update sesuai review-mu. Boleh minta tolong dicek lagi?\n{{mr.link}}\nTerima kasih!",
+      "Halo {{person.name}}, saya {{agent.name}}, agen review-nya {{owner.name}}. MR ini sudah saya update sesuai review-mu. Boleh minta tolong dicek lagi?\n{{mr.link}}\nTerima kasih!",
     );
     expect(renderTemplate(DEFAULT_TEMPLATES.rereview, { ...values, "person.name": "Bob" })).toBe(
-      "Halo Bob, MR ini sudah saya update sesuai review-mu. Boleh minta tolong dicek lagi?\n[Add thing](https://gitlab.example/g/p/-/merge_requests/7)\nTerima kasih!",
+      "Halo Bob, saya Bahlil, agen review-nya Nata. MR ini sudah saya update sesuai review-mu. Boleh minta tolong dicek lagi?\n[Add thing](https://gitlab.example/g/p/-/merge_requests/7)\nTerima kasih!",
     );
   });
 

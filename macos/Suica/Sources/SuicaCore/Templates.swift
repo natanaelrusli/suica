@@ -74,6 +74,7 @@ public enum TemplatePreview {
             "mr.project": escapeMarkdown("group/project"),
             "person.name": escapeMarkdown(recipient),
             "owner.name": escapeMarkdown(owner),
+            "agent.name": escapeMarkdown("Suica"),
             "review.findings": "ada 3 findings (1 Major, 2 Minor)",
         ]
         return text.replacing(/\{\{\s*([\w.]+)\s*\}\}/) { match in

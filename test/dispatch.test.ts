@@ -60,6 +60,7 @@ function setup(options: { mode?: SendMode; now?: number; api?: Partial<TeamsApi>
       modes: { nudge: mode, notice: mode, rereview: mode, findings: mode },
       workingHours: hours,
       people: {},
+      agentName: "Bahlil",
     },
     log: createLogger({ write: () => undefined }),
     now: () => now,
@@ -98,7 +99,7 @@ describe("dispatchQueued", () => {
     expect(h.sent).toEqual([
       {
         chatId: "chat-bob@x.id",
-        text: "Halo Bob, boleh minta tolong review MR ini?\n[Add thing](https://gitlab.example/g/p/-/merge_requests/5)\nTerima kasih!",
+        text: "Halo Bob, saya Bahlil, agen review-nya Nata. Boleh minta tolong review MR ini?\n[Add thing](https://gitlab.example/g/p/-/merge_requests/5)\nTerima kasih!",
       },
     ]);
     expect(h.store.getOutbox(id ?? 0)).toMatchObject({ status: "sent", approved: false });
@@ -223,7 +224,7 @@ describe("dispatchQueued", () => {
     expect(h.sent).toEqual([
       {
         chatId: "chat-bob@x.id",
-        text: "Halo Bob, saya sudah review MR kamu: ada 3 findings (2 Minor, 1 Nit).\n[Fix it](https://gitlab.example/g/p/-/merge_requests/7)\nDetailnya ada di komentar MR.",
+        text: "Halo Bob, saya Bahlil, agen review-nya Nata. Saya sudah review MR kamu: ada 3 findings (2 Minor, 1 Nit).\n[Fix it](https://gitlab.example/g/p/-/merge_requests/7)\nDetailnya ada di komentar MR.",
       },
     ]);
     expect(h.store.listOutbox(["dry-run"]).map((row) => row.variant)).toEqual(["notice.approved"]);
@@ -596,7 +597,7 @@ describe("Re-review Nudge", () => {
     expect(h.sessions()).toBe(0);
     expect(h.store.getOutbox(id)).toMatchObject({ status: "pending" });
     expect(h.store.getOutbox(id)?.text).toBe(
-      "Halo Bob, MR ini sudah saya update sesuai review-mu. Boleh minta tolong dicek lagi?\n[Add thing](https://gitlab.example/g/p/-/merge_requests/5)\nTerima kasih!",
+      "Halo Bob, saya Bahlil, agen review-nya Nata. MR ini sudah saya update sesuai review-mu. Boleh minta tolong dicek lagi?\n[Add thing](https://gitlab.example/g/p/-/merge_requests/5)\nTerima kasih!",
     );
     expect(result.held).toEqual([
       expect.objectContaining({ id, kind: "rereview", mrKey: "g/p!5", recipientName: "Bob" }),
