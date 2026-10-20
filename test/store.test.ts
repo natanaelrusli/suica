@@ -183,7 +183,7 @@ describe("schema 10", () => {
     expect(store.getAgentReview(next)?.previousSha).toBe("aaa1111");
     store.close();
     const check = new DatabaseSync(path);
-    expect(check.prepare("PRAGMA user_version").get()?.["user_version"]).toBe(12);
+    expect(check.prepare("PRAGMA user_version").get()?.["user_version"]).toBe(13);
     check.close();
   });
 
@@ -211,7 +211,7 @@ describe("schema 10", () => {
     expect(store.getAgentReview(next)).toMatchObject({ descriptionSha: "d1", approved: true });
     store.close();
     const check = new DatabaseSync(path);
-    expect(check.prepare("PRAGMA user_version").get()?.["user_version"]).toBe(12);
+    expect(check.prepare("PRAGMA user_version").get()?.["user_version"]).toBe(13);
     check.close();
   });
 

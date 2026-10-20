@@ -25,5 +25,18 @@
     }
   ],
   "ownerAfterRequest": { "count": 1, "medianMinutes": 90, "p90Minutes": 90 },
-  "reviewerAfterNudge": { "count": 1, "medianMinutes": 120, "p90Minutes": 120 }
+  "reviewerAfterNudge": { "count": 1, "medianMinutes": 120, "p90Minutes": 120 },
+  "peopleIReview": [{ "username": "alice", "name": "Alice", "mergeRequests": 1 }],
+  "peopleWhoReviewMe": [{ "username": "bob", "name": "Bob", "mergeRequests": 1 }],
+  "slowestApprovals": [
+    {
+      "mrKey": "g/p!2",
+      "title": "Add thing",
+      "url": "https://gitlab.example/g/p/-/merge_requests/2",
+      "openedAt": 1792058400000,
+      "approvedAt": 1792150800000,
+      "minutes": 1540,
+      "approver": { "username": "bob", "name": "Bob" }
+    }
+  ]
 }

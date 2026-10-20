@@ -2,7 +2,7 @@ import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
-import type { Snapshot } from "./domain.ts";
+import type { Person, Snapshot } from "./domain.ts";
 import { myReviewState, reviewerKey } from "./events.ts";
 import type { PreviousState } from "./events.ts";
 import { isOutboxKind, isOutboxStatus, isTemplateName } from "./teams/types.ts";
@@ -23,9 +23,24 @@ export type HistoryKind = "review-requested" | "owner-reviewed" | "reviewer-revi
 export interface HistoryEvent {
   readonly kind: HistoryKind;
   readonly mrKey: string;
-  /** Empty unless `kind` is "reviewer-reviewed". */
+  /**
+   * The Reviewer for "reviewer-reviewed", the MR's author for "owner-reviewed", else empty.
+   * "owner-reviewed" rows from before schema 13 are empty too.
+   */
   readonly username: string;
   readonly at: number;
+}
+
+/** The first time a Reviewer approved one of the Owner's MRs, as a poll saw it. */
+export interface FirstApproval {
+  readonly mrKey: string;
+  readonly title: string;
+  readonly url: string;
+  /** When the MR was opened, per GitLab. */
+  readonly openedAt: number;
+  /** The poll that first saw an approval, so up to one poll interval late. */
+  readonly approvedAt: number;
+  readonly approver: Person;
 }
 
 export interface PollLogEntry {
@@ -152,11 +167,19 @@ export interface Store {
    * Replaces the stored state with `snapshot` in one transaction and marks the baseline as done.
    * The `history` rows are inserted in the same transaction.
    */
-  commit(snapshot: Snapshot, history?: readonly HistoryEvent[]): void;
-  /** Inserts the poll, then forgets poll-log and history rows older than 90 days before it. */
+  commit(
+    snapshot: Snapshot,
+    history?: readonly HistoryEvent[],
+    approvals?: readonly FirstApproval[],
+  ): void;
+  /** Inserts the poll, then forgets poll-log, history and approval rows older than 90 days before it. */
   recordPoll(entry: PollLogEntry): void;
   /** The poll log and the history events at or after `since`, oldest first. */
   loadHistory(since: number): HistoryRows;
+  /** The first approvals seen at or after `since`, oldest first. */
+  loadApprovals(since: number): FirstApproval[];
+  /** Username to display name, for everyone seen on an open MR, as last seen. */
+  loadNames(): Map<string, string>;
   /** The latest poll (the last recorded of a tie), undefined when the log is empty. */
   lastPoll(): PollLogEntry | undefined;
   /** Also drops rows older than the retention. */
@@ -235,7 +258,19 @@ export interface Store {
   close(): void;
 }
 
-const SCHEMA_VERSION = 12;
+const SCHEMA_VERSION = 13;
+/**
+ * When each of the Owner's MRs was first approved, and the display names of the people on open
+ * MRs, so the history's usernames can be shown by name.
+ */
+const SCHEMA_V13 = `
+CREATE TABLE IF NOT EXISTS first_approval (
+  mr_key TEXT PRIMARY KEY, title TEXT NOT NULL, url TEXT NOT NULL, opened_at INTEGER NOT NULL,
+  approved_at INTEGER NOT NULL, approver TEXT NOT NULL, approver_name TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS first_approval_at ON first_approval (approved_at);
+CREATE TABLE IF NOT EXISTS person_name (username TEXT PRIMARY KEY, name TEXT NOT NULL);
+`;
 /** What a running review is doing, as a JSON array of `ActivityLine`. */
 const SCHEMA_V12 = "ALTER TABLE agent_review ADD COLUMN activity TEXT NOT NULL DEFAULT '[]'";
 const ACTIVITY_LINES = 50;
@@ -438,6 +473,17 @@ function toHistoryEvent(row: Row): HistoryEvent {
   };
 }
 
+function toFirstApproval(row: Row): FirstApproval {
+  return {
+    mrKey: text(row, "mr_key"),
+    title: text(row, "title"),
+    url: text(row, "url"),
+    openedAt: integer(row, "opened_at"),
+    approvedAt: integer(row, "approved_at"),
+    approver: { username: text(row, "approver"), name: text(row, "approver_name") },
+  };
+}
+
 function toPollLogEntry(row: Row): PollLogEntry {
   const status = text(row, "status");
   if (status !== "ok" && status !== "failed") throw new Error("poll log row has an unknown status");
@@ -555,6 +601,7 @@ function initSchema(db: DatabaseSync): void {
     }
   }
   if (version < 12 && !hasColumn(db, "agent_review", "activity")) db.exec(SCHEMA_V12);
+  if (version < 13) db.exec(SCHEMA_V13);
   if (version !== SCHEMA_VERSION) db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 }
 
@@ -619,7 +666,7 @@ export function openStore(path: string): Store {
       };
     },
 
-    commit(snapshot, history = []) {
+    commit(snapshot, history = [], approvals = []) {
       const insertTracked = db.prepare(
         "INSERT OR REPLACE INTO tracked_authored (mr_key) VALUES (?)",
       );
@@ -633,8 +680,22 @@ export function openStore(path: string): Store {
       const insertEvent = db.prepare(
         "INSERT INTO history_event (kind, mr_key, username, at) VALUES (?, ?, ?, ?)",
       );
+      // Only the first approval counts: a later one, or one after an unapproval, is ignored.
+      const insertApproval = db.prepare(
+        `INSERT OR IGNORE INTO first_approval
+           (mr_key, title, url, opened_at, approved_at, approver, approver_name)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      );
+      // Kept across polls, so a name stays known after the MR closes; the table holds one row per colleague.
+      const insertName = db.prepare(
+        "INSERT OR REPLACE INTO person_name (username, name) VALUES (?, ?)",
+      );
       db.exec("BEGIN IMMEDIATE");
       try {
+        for (const mr of [...snapshot.reviewRequested, ...snapshot.authored]) {
+          for (const person of [mr.author, ...mr.reviewers])
+            insertName.run(person.username, person.name);
+        }
         db.exec(
           "DELETE FROM tracked_authored; DELETE FROM my_review_state; DELETE FROM reviewer_state; DELETE FROM seen_note;",
         );
@@ -649,7 +710,20 @@ export function openStore(path: string): Store {
           }
           for (const note of mr.notes) insertNote.run(note.id);
         }
-        for (const item of history) insertEvent.run(item.kind, item.mrKey, item.username, item.at);
+        for (const item of history) {
+          insertEvent.run(item.kind, item.mrKey, item.username, item.at);
+        }
+        for (const item of approvals) {
+          insertApproval.run(
+            item.mrKey,
+            item.title,
+            item.url,
+            item.openedAt,
+            item.approvedAt,
+            item.approver.username,
+            item.approver.name,
+          );
+        }
         setMeta(META_BASELINE, "1");
         db.exec("COMMIT");
       } catch (error) {
@@ -669,6 +743,7 @@ export function openStore(path: string): Store {
         ).run(entry.at, entry.status, entry.failure, entry.durationMs);
         db.prepare("DELETE FROM poll_log WHERE at < ?").run(cutoff);
         db.prepare("DELETE FROM history_event WHERE at < ?").run(cutoff);
+        db.prepare("DELETE FROM first_approval WHERE approved_at < ?").run(cutoff);
         db.exec("COMMIT");
       } catch (error) {
         db.exec("ROLLBACK");
@@ -688,6 +763,22 @@ export function openStore(path: string): Store {
           .all(since)
           .map(toHistoryEvent),
       };
+    },
+
+    loadNames() {
+      return new Map(
+        db
+          .prepare("SELECT username, name FROM person_name")
+          .all()
+          .map((row) => [text(row, "username"), text(row, "name")] as const),
+      );
+    },
+
+    loadApprovals(since) {
+      return db
+        .prepare("SELECT * FROM first_approval WHERE approved_at >= ? ORDER BY approved_at, rowid")
+        .all(since)
+        .map(toFirstApproval);
     },
 
     lastPoll() {

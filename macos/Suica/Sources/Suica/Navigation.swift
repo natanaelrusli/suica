@@ -56,9 +56,39 @@ enum WindowSection: String, CaseIterable, Identifiable {
     }
 }
 
-/// A row of the sidebar: a section, or one category of Configuration under it.
+/// The pages under Statistics: who you review, who reviews you, and your slowest approvals.
+enum StatisticsPage: CaseIterable, Hashable {
+    case peopleIReview, peopleWhoReviewMe, slowestApprovals
+
+    var title: String {
+        switch self {
+        case .peopleIReview: Copy.peopleIReview
+        case .peopleWhoReviewMe: Copy.peopleWhoReviewMe
+        case .slowestApprovals: Copy.slowestApprovals
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .peopleIReview: "person.crop.circle.badge.checkmark"
+        case .peopleWhoReviewMe: "person.2"
+        case .slowestApprovals: "hourglass"
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .peopleIReview: .teal
+        case .peopleWhoReviewMe: .mint
+        case .slowestApprovals: .orange
+        }
+    }
+}
+
+/// A row of the sidebar: a section, or one page nested under Statistics or Configuration.
 enum SidebarItem: Hashable {
     case section(WindowSection)
+    case statistics(StatisticsPage)
     case settings(ConfigCategory)
     /// The Teams message templates, the last row under Configuration.
     case templates
@@ -66,12 +96,27 @@ enum SidebarItem: Hashable {
     var section: WindowSection {
         switch self {
         case .section(let section): section
+        case .statistics: .statistics
         case .settings, .templates: .configuration
         }
     }
 
     var category: ConfigCategory? {
         if case .settings(let category) = self { category } else { nil }
+    }
+
+    var statisticsPage: StatisticsPage? {
+        if case .statistics(let page) = self { page } else { nil }
+    }
+
+    /// The nested page's name, shown after the section's in the window title.
+    var subtitle: String? {
+        switch self {
+        case .section: nil
+        case .statistics(let page): page.title
+        case .settings(let category): category.title
+        case .templates: Copy.messageTemplates
+        }
     }
 }
 
@@ -126,10 +171,21 @@ struct SidebarNode: Identifiable {
     }
 
     /// The sidebar's three groups: what needs you, what happened, and how the agent and the app
-    /// are set up. Configuration's categories and the templates are nested under it.
+    /// are set up. Statistics' pages are nested under it, as are Configuration's categories and
+    /// the templates.
     static let groups: [(title: String, nodes: [SidebarNode])] = [
         (Copy.workGroup, [SidebarNode(.overview), SidebarNode(.reviews), SidebarNode(.messages)]),
-        (Copy.insightsGroup, [SidebarNode(.statistics), SidebarNode(.usage), SidebarNode(.logs)]),
+        (
+            Copy.insightsGroup,
+            [
+                SidebarNode(
+                    .statistics,
+                    children: StatisticsPage.allCases.map {
+                        SidebarNode(item: .statistics($0), title: $0.title, symbol: $0.symbol, tint: $0.tint)
+                    }),
+                SidebarNode(.usage), SidebarNode(.logs),
+            ]
+        ),
         (
             Copy.settingsGroup,
             [

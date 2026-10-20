@@ -485,6 +485,25 @@ public enum Copy {
     public static let ownerTurnaround = "Your time to review"
     public static let reviewerTurnaround = "Reviewers' time after a nudge"
     public static let noData = "Not enough data yet"
+    public static let peopleIReview = "People you review"
+    public static let peopleWhoReviewMe = "Your reviewers"
+    public static let slowestApprovals = "Slowest approvals"
+    public static let last90Days = "Last 90 days"
+    public static let peopleIReviewHint =
+        "The authors of the MRs you reviewed, by how many of their MRs you reviewed. Counted from this version of Suica on."
+    public static let peopleWhoReviewMeHint = "The people who reviewed your MRs, by how many of your MRs they reviewed."
+    public static let slowestApprovalsHint =
+        "Your MRs by the time from opening to the first approval, as the agent saw it. Counted from this version of Suica on."
+    public static func mergeRequestCount(_ n: Int) -> String { n == 1 ? "1 MR" : "\(n) MRs" }
+    public static func approvedBy(_ name: String) -> String { "First approved by \(name)" }
+    public static func openedOn(_ date: String) -> String { "opened \(date)" }
+    /// A wait: minutes up to a day, then days and hours.
+    public static func duration(_ m: Int) -> String {
+        guard m >= 24 * 60 else { return minutes(m) }
+        let days = m / (24 * 60)
+        let hours = m % (24 * 60) / 60
+        return hours == 0 ? "\(days) d" : "\(days) d \(hours) h"
+    }
     public static func minutes(_ m: Int) -> String {
         m < 60 ? "\(m) min" : m % 60 == 0 ? "\(m / 60) h" : "\(m / 60) h \(m % 60) min"
     }

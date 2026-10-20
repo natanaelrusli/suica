@@ -15,7 +15,7 @@ import type { Notification } from "./format.ts";
 import { baselineNotifications, buildNotifications, rereviewNotifications } from "./format.ts";
 import { FetchFailure } from "./gitlab.ts";
 import type { GitlabFailureKind } from "./gitlab.ts";
-import { historyEvents } from "./history.ts";
+import { firstApprovals, historyEvents } from "./history.ts";
 import type { Logger } from "./log.ts";
 import type { Notifier } from "./notifier.ts";
 import type { Store } from "./store.ts";
@@ -219,7 +219,11 @@ async function runPoll(deps: PollDeps, start: number): Promise<PollOutcome> {
   if (complete) failures.recover("notifier");
 
   try {
-    store.commit(snapshot, historyEvents(snapshot, previous, events, start));
+    store.commit(
+      snapshot,
+      historyEvents(snapshot, previous, events, start),
+      firstApprovals(events, start),
+    );
   } catch (error) {
     await reportStateFailure(deps, error);
     return { status: "failed", failure: "state" };

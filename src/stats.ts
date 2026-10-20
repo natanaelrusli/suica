@@ -1,4 +1,11 @@
-import type { HistoryEvent, HistoryRows, PollLogEntry } from "./store.ts";
+import type { Person } from "./domain.ts";
+import type {
+  FirstApproval,
+  HistoryEvent,
+  HistoryKind,
+  HistoryRows,
+  PollLogEntry,
+} from "./store.ts";
 import type { OutboxRow } from "./teams/types.ts";
 
 /** The document `suica stats` prints. The app window decodes it; see contracts/stats.v1.json. */
@@ -25,6 +32,26 @@ export interface PollCountsJson {
   readonly failed: number;
 }
 
+export interface PersonCountJson {
+  readonly username: string;
+  /** The display name last seen on an open MR, else the username. */
+  readonly name: string;
+  /** Distinct MRs. */
+  readonly mergeRequests: number;
+}
+
+export interface SlowApprovalJson {
+  readonly mrKey: string;
+  readonly title: string;
+  readonly url: string;
+  /** Epoch milliseconds. */
+  readonly openedAt: number;
+  /** Epoch milliseconds: the poll that first saw an approval. */
+  readonly approvedAt: number;
+  readonly minutes: number;
+  readonly approver: Person;
+}
+
 export interface StatsJson {
   readonly version: 1;
   /** Epoch milliseconds. */
@@ -41,10 +68,19 @@ export interface StatsJson {
   readonly days: readonly DayJson[];
   readonly ownerAfterRequest: TurnaroundJson;
   readonly reviewerAfterNudge: TurnaroundJson;
+  /** Authors of the MRs you reviewed in the last 90 days, most MRs first, at most 10. */
+  readonly peopleIReview: readonly PersonCountJson[];
+  /** Reviewers of your MRs in the last 90 days, most MRs first, at most 10. */
+  readonly peopleWhoReviewMe: readonly PersonCountJson[];
+  /** Your MRs first approved in the last 90 days, longest from opening first, at most 10. */
+  readonly slowestApprovals: readonly SlowApprovalJson[];
 }
 
 export interface StatsInput {
   readonly history: HistoryRows;
+  readonly approvals: readonly FirstApproval[];
+  /** Username to display name; a username without one is shown as itself. */
+  readonly names: ReadonlyMap<string, string>;
   readonly outbox: readonly OutboxRow[];
   readonly now: number;
   readonly days: number;
@@ -54,6 +90,8 @@ export interface StatsInput {
 const MINUTE = 60_000;
 const DAY = 24 * 60 * MINUTE;
 const TURNAROUND_WINDOW = 30 * DAY;
+export const RANKING_WINDOW = 90 * DAY;
+const RANKING_SIZE = 10;
 
 type MutableDay = { -readonly [K in keyof DayJson]: DayJson[K] };
 
@@ -96,6 +134,49 @@ function turnarounds(
     if (end !== undefined && end.at >= now - TURNAROUND_WINDOW) durations.push(end.at - start.at);
   }
   return durations;
+}
+
+/** People by the distinct MRs of `kind` rows naming them since `since`; rows without a username are left out. */
+function ranking(
+  events: readonly HistoryEvent[],
+  kind: HistoryKind,
+  since: number,
+  names: ReadonlyMap<string, string>,
+): PersonCountJson[] {
+  const mrs = new Map<string, Set<string>>();
+  for (const event of events) {
+    if (event.kind !== kind || event.username === "" || event.at < since) continue;
+    mrs.set(event.username, (mrs.get(event.username) ?? new Set()).add(event.mrKey));
+  }
+  return [...mrs]
+    .map(([username, keys]) => ({
+      username,
+      name: names.get(username) ?? username,
+      mergeRequests: keys.size,
+    }))
+    .sort((a, b) => b.mergeRequests - a.mergeRequests || a.name.localeCompare(b.name))
+    .slice(0, RANKING_SIZE);
+}
+
+function slowestApprovals(
+  approvals: readonly FirstApproval[],
+  since: number,
+  now: number,
+): SlowApprovalJson[] {
+  return approvals
+    .filter((row) => row.approvedAt >= since && row.approvedAt <= now)
+    .map((row) => ({ row, waited: Math.max(0, row.approvedAt - row.openedAt) }))
+    .sort((a, b) => b.waited - a.waited || a.row.approvedAt - b.row.approvedAt)
+    .slice(0, RANKING_SIZE)
+    .map(({ row, waited }) => ({
+      mrKey: row.mrKey,
+      title: row.title,
+      url: row.url,
+      openedAt: row.openedAt,
+      approvedAt: row.approvedAt,
+      minutes: Math.round(waited / MINUTE),
+      approver: row.approver,
+    }));
 }
 
 export function buildStats(input: StatsInput): StatsJson {
@@ -166,5 +247,8 @@ export function buildStats(input: StatsInput): StatsJson {
         now,
       ),
     ),
+    peopleIReview: ranking(events, "owner-reviewed", now - RANKING_WINDOW, input.names),
+    peopleWhoReviewMe: ranking(events, "reviewer-reviewed", now - RANKING_WINDOW, input.names),
+    slowestApprovals: slowestApprovals(input.approvals, now - RANKING_WINDOW, now),
   };
 }

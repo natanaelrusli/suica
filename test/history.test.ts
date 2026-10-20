@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ActivityEvent } from "../src/events.ts";
 import { reviewerKey } from "../src/events.ts";
-import { historyEvents } from "../src/history.ts";
+import { firstApprovals, historyEvents } from "../src/history.ts";
 import { mr, note, person, previous, reviewer, snapshot } from "./builders.ts";
 
 const AT = 5000;
@@ -71,7 +71,7 @@ describe("historyEvents", () => {
     const reviewed = mr(1, { reviewers: [reviewer("me", "APPROVED")] });
     const known = previous({ myReviewStates: new Map([[reviewed.key, "UNREVIEWED"]]) });
     expect(historyEvents(snapshot({ reviewRequested: [reviewed] }), known, [], AT)).toEqual([
-      { kind: "owner-reviewed", mrKey: "g/p!1", username: "", at: AT },
+      { kind: "owner-reviewed", mrKey: "g/p!1", username: "author", at: AT },
     ]);
   });
 
@@ -90,5 +90,38 @@ describe("historyEvents", () => {
   it("ignores comments that are not events", () => {
     const mine = mr(2, { notes: [note("n1", bob)] });
     expect(historyEvents(snapshot({ authored: [mine] }), previous(), [], AT)).toEqual([]);
+  });
+});
+
+describe("firstApprovals", () => {
+  const opened = "2026-10-16T08:00:00.000Z";
+
+  it("records an approval of an Owner's MR with when it was opened", () => {
+    const mine = mr(2, { createdAt: opened, reviewers: [reviewer("bob", "APPROVED")] });
+    const events: ActivityEvent[] = [
+      { kind: "reviewer-state", mr: mine, reviewer: bob, to: "APPROVED" },
+      { kind: "comment", mr: mine, noteId: "n1", author: bob },
+    ];
+    expect(firstApprovals(events, AT)).toEqual([
+      {
+        mrKey: "g/p!2",
+        title: mine.title,
+        url: mine.url,
+        openedAt: Date.parse(opened),
+        approvedAt: AT,
+        approver: bob,
+      },
+    ]);
+  });
+
+  it("ignores other review states and an MR without a usable opening time", () => {
+    const unknown = mr(3, { reviewers: [reviewer("bob", "APPROVED")] });
+    const mine = mr(2, { createdAt: opened, reviewers: [reviewer("bob", "UNAPPROVED")] });
+    const events: ActivityEvent[] = [
+      { kind: "reviewer-state", mr: unknown, reviewer: bob, to: "APPROVED" },
+      { kind: "reviewer-state", mr: mine, reviewer: bob, to: "UNAPPROVED" },
+      { kind: "reviewer-state", mr: mr(4, { createdAt: "soon" }), reviewer: bob, to: "APPROVED" },
+    ];
+    expect(firstApprovals(events, AT)).toEqual([]);
   });
 });

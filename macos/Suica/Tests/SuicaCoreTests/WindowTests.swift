@@ -288,6 +288,12 @@ func makeBrokenConfigStatus() -> StatusDocument {
     #expect(await agent.sendCalls == [7])
 }
 
+@Test func durationFormatting() {
+    #expect(Copy.duration(90) == "1 h 30 min")
+    #expect(Copy.duration(24 * 60) == "1 d")
+    #expect(Copy.duration(3 * 24 * 60 + 5 * 60 + 59) == "3 d 5 h")
+}
+
 @Test func minutesFormatting() {
     #expect(Copy.minutes(45) == "45 min")
     #expect(Copy.minutes(0) == "0 min")

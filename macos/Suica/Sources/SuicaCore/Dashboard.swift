@@ -158,6 +158,25 @@ public struct DayStats: Codable, Equatable, Sendable {
     public let failed: Int
 }
 
+/// Someone in a ranking, by the distinct MRs counted for them.
+public struct PersonCount: Codable, Equatable, Sendable {
+    public let username: String
+    public let name: String
+    public let mergeRequests: Int
+}
+
+/// One of your MRs and how long it waited for its first approval.
+public struct SlowApproval: Codable, Equatable, Sendable {
+    public let mrKey: String
+    public let title: String
+    public let url: String
+    /// Epoch milliseconds.
+    public let openedAt: Int
+    public let approvedAt: Int
+    public let minutes: Int
+    public let approver: Person
+}
+
 /// `suica stats`.
 public struct StatsDocument: Codable, Equatable, Sendable {
     public let version: Int
@@ -169,6 +188,10 @@ public struct StatsDocument: Codable, Equatable, Sendable {
     public let days: [DayStats]
     public let ownerAfterRequest: Turnaround
     public let reviewerAfterNudge: Turnaround
+    /// The last 90 days, at most 10 each. Nil from an older agent.
+    public var peopleIReview: [PersonCount]? = nil
+    public var peopleWhoReviewMe: [PersonCount]? = nil
+    public var slowestApprovals: [SlowApproval]? = nil
 }
 
 // MARK: - Token usage
