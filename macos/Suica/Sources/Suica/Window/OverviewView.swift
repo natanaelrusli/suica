@@ -314,11 +314,13 @@ struct OverviewView: View {
         Card(title: Copy.agentReviewHeading, symbol: "checkmark.bubble") {
             VStack(alignment: .leading, spacing: 8) {
                 if let text = reviewNotice { NoticeBox(text: text, tint: .secondary) }
-                if let running = review.running {
-                    HStack(alignment: .top) {
-                        ReviewingNow(running: running, queued: 0)
-                        Spacer(minLength: 8)
-                        cancelButton(id: running.id, key: running.mrKey)
+                if !review.allRunning.isEmpty {
+                    ForEach(review.allRunning, id: \.id) { running in
+                        HStack(alignment: .top) {
+                            ReviewingNow(running: running, queued: 0)
+                            Spacer(minLength: 8)
+                            cancelButton(id: running.id, key: running.mrKey)
+                        }
                     }
                 } else {
                     Label(Copy.notReviewing, systemImage: "moon.zzz").foregroundStyle(.secondary)

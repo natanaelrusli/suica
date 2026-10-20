@@ -387,7 +387,7 @@ function harness(
       const path = join(execOptions.cwd ?? "", name);
       if (existsSync(path)) seenFiles.set(name, readFileSync(path, "utf8"));
     }
-    seenRunning = db.agentReviewActivity().running;
+    seenRunning = db.agentReviewActivity().running[0];
     if (options.cliFails === true) throw Object.assign(new Error("x"), { code: 1 });
     if (file === "/bin/codex") {
       writeFileSync(args[args.indexOf("-o") + 1] ?? "", "# Codex review");
@@ -540,7 +540,7 @@ describe("runAgentReview", () => {
       cli: "claude",
       startedAt: NOW,
     });
-    expect(h.db.agentReviewActivity().running).toBeUndefined();
+    expect(h.db.agentReviewActivity().running).toEqual([]);
     const stored = h.db.getAgentReview(queued.id);
     expect(stored?.model).toBe("m");
     expect(stored).toMatchObject({
@@ -1248,6 +1248,42 @@ describe("createReviewWorker", () => {
     await worker.idle();
     expect(h.db.latestAgentReviews().get("g/p!7")?.status).toBe("ready");
     expect(h.calls.filter((call) => call.file === "/bin/claude")).toHaveLength(1);
+  });
+
+  it("runs up to review.concurrency reviews at once, and starts the next as one ends", async () => {
+    const h = harness();
+    let inFlight = 0;
+    let peak = 0;
+    const release: (() => void)[] = [];
+    const exec: Exec = async (file, args, options) => {
+      if (file !== "/bin/claude") return h.deps.exec(file, args, options);
+      inFlight += 1;
+      peak = Math.max(peak, inFlight);
+      await new Promise<void>((resolve) => release.push(resolve));
+      inFlight -= 1;
+      return h.deps.exec(file, args, options);
+    };
+    for (const key of ["g/p!7", "g/p!8", "g/p!9"]) h.db.queueAgentReview(key, "manual", NOW);
+    const config = { ...h.deps.config, review: { ...h.deps.config.review, concurrency: 2 } };
+    const worker = createReviewWorker({ ...h.deps, exec, config });
+    worker.tick();
+    worker.tick();
+    await vi.waitFor(() => {
+      expect(release).toHaveLength(2);
+    });
+    expect(h.db.agentReviewActivity().running.map((row) => row.mrKey)).toEqual(["g/p!7", "g/p!8"]);
+    expect(h.db.nextQueuedAgentReview()?.mrKey).toBe("g/p!9");
+
+    release.shift()?.();
+    await vi.waitFor(() => {
+      expect(release).toHaveLength(2);
+    });
+    for (const each of release.splice(0)) each();
+    await worker.idle();
+    expect(peak).toBe(2);
+    expect(
+      ["g/p!7", "g/p!8", "g/p!9"].map((key) => h.db.latestAgentReviews().get(key)?.status),
+    ).toEqual(["ready", "ready", "ready"]);
   });
 
   it("starts a review queued between polls within one tick, and stops ticking when aborted", async () => {

@@ -163,13 +163,20 @@ public struct QueuedReview: Codable, Equatable, Sendable {
 
 /// What the agent is reviewing now and what waits, in run order.
 public struct ReviewActivity: Codable, Equatable, Sendable {
+    /// The oldest running review.
     public let running: RunningReview?
+    /// Every running review, oldest first; nil from an agent older than `review.concurrency`.
+    public let runningReviews: [RunningReview]?
     public let queued: [QueuedReview]
 
-    public init(running: RunningReview?, queued: [QueuedReview]) {
+    public init(running: RunningReview?, runningReviews: [RunningReview]? = nil, queued: [QueuedReview]) {
         self.running = running
+        self.runningReviews = runningReviews
         self.queued = queued
     }
+
+    /// Every running review, also from an older agent that names only one.
+    public var allRunning: [RunningReview] { runningReviews ?? running.map { [$0] } ?? [] }
 }
 
 public struct AgentState: Codable, Equatable, Sendable {

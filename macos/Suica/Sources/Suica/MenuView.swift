@@ -24,8 +24,9 @@ struct MenuView: View {
             if settings.showsPopoverCounters, let state = model.state {
                 quickActions(state).transition(Motion.reveal(motion))
             }
-            if let running = model.state?.agentReview?.running {
-                runningReview(running).transition(Motion.reveal(motion))
+            ForEach(runningReviews, id: \.id) { running in
+                runningReview(running, last: running.id == runningReviews.last?.id)
+                    .transition(Motion.reveal(motion))
             }
             if let text = model.errorText {
                 NoticeBox(text: text, tint: .red)
@@ -55,7 +56,7 @@ struct MenuView: View {
         .motion(value: model.state?.teams)
         .motion(value: model.confirmation?.id)
         .motion(value: model.isPaused)
-        .motion(value: model.state?.agentReview?.running?.id)
+        .motion(value: runningReviews.map(\.id))
         .motion(value: tab)
         // Runs each time the panel opens.
         .task {
@@ -129,9 +130,12 @@ struct MenuView: View {
         }
     }
 
-    private func runningReview(_ running: RunningReview) -> some View {
+    private var runningReviews: [RunningReview] { model.state?.agentReview?.allRunning ?? [] }
+
+    /// The queue count goes under the last running review only.
+    private func runningReview(_ running: RunningReview, last: Bool) -> some View {
         HStack(alignment: .top) {
-            ReviewingNow(running: running, queued: model.state?.agentReview?.queued.count ?? 0)
+            ReviewingNow(running: running, queued: last ? model.state?.agentReview?.queued.count ?? 0 : 0)
             Spacer(minLength: 8)
             Button(Copy.cancelReview) {
                 Task {

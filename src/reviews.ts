@@ -31,21 +31,27 @@ export interface AgentReviewJson {
   readonly updatedAt: number;
 }
 
+/** One running review in `ReviewActivityJson`. */
+export interface RunningReviewJson {
+  readonly id: number;
+  readonly mrKey: string;
+  /** Null until the run has read the MR. */
+  readonly mrTitle: string | null;
+  readonly cli: string | null;
+  /** `review.model` until the CLI reports the model it used; null for the CLI's default. */
+  readonly model: string | null;
+  /** Epoch milliseconds. */
+  readonly startedAt: number | null;
+  /** The run's newest step; null before its first. */
+  readonly latestActivity: string | null;
+}
+
 /** What the agent is reviewing now and what waits; in `suica status --json` and `suica state`. */
 export interface ReviewActivityJson {
-  readonly running: {
-    readonly id: number;
-    readonly mrKey: string;
-    /** Null until the run has read the MR. */
-    readonly mrTitle: string | null;
-    readonly cli: string | null;
-    /** `review.model` until the CLI reports the model it used; null for the CLI's default. */
-    readonly model: string | null;
-    /** Epoch milliseconds. */
-    readonly startedAt: number | null;
-    /** The run's newest step; null before its first. */
-    readonly latestActivity: string | null;
-  } | null;
+  /** The oldest running review, for readers from before `review.concurrency`. */
+  readonly running: RunningReviewJson | null;
+  /** Every running review, oldest first. */
+  readonly runningReviews: readonly RunningReviewJson[];
   /** In the order they run. */
   readonly queued: readonly {
     readonly id: number;
@@ -55,23 +61,21 @@ export interface ReviewActivityJson {
 }
 
 export function buildReviewActivity(
-  activity: { running: AgentReviewRow | undefined; queued: readonly AgentReviewRow[] },
+  activity: { running: readonly AgentReviewRow[]; queued: readonly AgentReviewRow[] },
   configuredModel: string | undefined,
 ): ReviewActivityJson {
-  const { running } = activity;
+  const running = activity.running.map((row): RunningReviewJson => ({
+    id: row.id,
+    mrKey: row.mrKey,
+    mrTitle: row.mrTitle,
+    cli: row.cli,
+    model: row.model ?? configuredModel ?? null,
+    startedAt: row.startedAt,
+    latestActivity: row.activity.at(-1)?.text ?? null,
+  }));
   return {
-    running:
-      running === undefined
-        ? null
-        : {
-            id: running.id,
-            mrKey: running.mrKey,
-            mrTitle: running.mrTitle,
-            cli: running.cli,
-            model: running.model ?? configuredModel ?? null,
-            startedAt: running.startedAt,
-            latestActivity: running.activity.at(-1)?.text ?? null,
-          },
+    running: running[0] ?? null,
+    runningReviews: running,
     queued: activity.queued.map((row) => ({ id: row.id, mrKey: row.mrKey, mrTitle: row.mrTitle })),
   };
 }

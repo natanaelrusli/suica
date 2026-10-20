@@ -119,7 +119,7 @@ describe("schema 7", () => {
     });
     const id = store.queueAgentReview("g/p!2", "auto", NOW, "Add thing") ?? 0;
     store.transitionAgentReview(id, ["queued"], "running", { startedAt: NOW, model: "opus" }, NOW);
-    expect(store.agentReviewActivity().running).toMatchObject({
+    expect(store.agentReviewActivity().running[0]).toMatchObject({
       mrTitle: "Add thing",
       model: "opus",
       startedAt: NOW,

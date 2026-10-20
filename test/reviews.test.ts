@@ -512,12 +512,24 @@ describe("buildReviewActivity", () => {
         { at: 2, text: "Reading src/a.ts" },
       ],
     };
-    expect(buildReviewActivity({ running, queued: [] }, undefined).running?.latestActivity).toBe(
-      "Reading src/a.ts",
-    );
     expect(
-      buildReviewActivity({ running: { ...running, activity: [] }, queued: [] }, undefined).running
-        ?.latestActivity,
+      buildReviewActivity({ running: [running], queued: [] }, undefined).running?.latestActivity,
+    ).toBe("Reading src/a.ts");
+    expect(
+      buildReviewActivity({ running: [{ ...running, activity: [] }], queued: [] }, undefined)
+        .running?.latestActivity,
     ).toBeNull();
+  });
+
+  it("lists every running review oldest first, and keeps the oldest as running", () => {
+    const first: AgentReviewRow = { ...POSTED_NINE, id: 3, status: "running", activity: [] };
+    const second: AgentReviewRow = { ...first, id: 4, mrKey: "g/p!10" };
+    const activity = buildReviewActivity({ running: [first, second], queued: [] }, undefined);
+    expect(activity.running?.id).toBe(3);
+    expect(activity.runningReviews.map((each) => each.id)).toEqual([3, 4]);
+    expect(buildReviewActivity({ running: [], queued: [] }, undefined)).toMatchObject({
+      running: null,
+      runningReviews: [],
+    });
   });
 });
