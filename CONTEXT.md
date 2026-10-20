@@ -29,7 +29,7 @@ A Teams chat from the Owner to a Reviewer of the Owner's own MR who had already 
 _Avoid_: Re-request, follow-up
 
 **Review Notice**:
-A Teams chat from the Owner to the Author of someone else's MR, sent after the Owner has reviewed it. After an Agent Review is posted, it says how many findings the review has per severity; after an Agent Re-review is posted, it says how many new findings it has.
+A Teams chat from the Owner to the Author of someone else's MR, sent after the Owner has reviewed it. After an Agent Review is posted, it says how many findings the review has per severity; after an Agent Re-review is posted, it says how many new findings it has. After an Agent Re-review the agent approved, it says the MR is approved. Every Teams chat opens with the agent introducing itself by its name (`teams.agentName`).
 _Avoid_: Review reply, feedback ping
 
 **Activity Alert**:
@@ -41,7 +41,7 @@ A review of an MR that the agent writes with a language model following a skill,
 _Avoid_: Auto review, bot review
 
 **Agent Re-review**:
-An Agent Review of an MR whose previous Agent Review was posted, written after the Author pushed new commits. It reviews the changes since the commit the previous review covered and says, for each finding of the previous review, whether it was fixed.
+An Agent Review of an MR whose previous Agent Review was posted, written after the Author pushed new commits (or, when the Owner asks for one, changed the description). It reviews the changes since the commit the previous review covered and says, for each finding of the previous review, whether it was fixed.
 _Avoid_: incremental review, follow-up review
 
 **Pending Message**:
