@@ -702,6 +702,15 @@ public enum Copy {
     public static let logNoMatches = "No entries match the search."
     public static func logMissing(_ file: String) -> String { "\(file) does not exist yet." }
     public static func logTruncated(_ entries: Int) -> String { "Showing the latest \(entries) entries at most." }
+
+    public static let searchMessages = "Search messages"
+    public static let searchReviews = "Search review requests"
+    public static func noMessagesMatch(_ query: String) -> String { "No messages match “\(query)”." }
+    /// After `noMessagesMatch`, when the other tab has some.
+    public static func matchesInOtherTab(_ count: Int, _ tab: String) -> String {
+        "\(count) \(count == 1 ? "match" : "matches") in \(tab)."
+    }
+    public static func noReviewsMatch(_ query: String) -> String { "No review requests match “\(query)”." }
     public static func logReadFailed(_ reason: String) -> String { "Could not read the log: \(reason)" }
     public static let logFolderUnknown = "The logs folder is not known until the agent's status loads."
     public static let editConfig = "Edit config"

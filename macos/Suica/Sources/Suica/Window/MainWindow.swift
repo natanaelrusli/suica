@@ -163,14 +163,24 @@ extension View {
     }
 }
 
+/// The first width is taken as it is: animated, it played the switch from one column to two each
+/// time the page opened, on top of the page's own entrance.
 private struct TracksWidth: ViewModifier {
     let threshold: CGFloat
     @Binding var isWide: Bool
+    @State private var measured = false
     @Environment(\.motionLevel) private var motion
 
     func body(content: Content) -> some View {
         content.onGeometryChange(for: Bool.self) { $0.size.width > threshold } action: { wide in
-            withMotion(Motion.layout, motion) { isWide = wide }
+            if measured {
+                withMotion(Motion.layout, motion) { isWide = wide }
+            } else {
+                var instant = Transaction()
+                instant.disablesAnimations = true
+                withTransaction(instant) { isWide = wide }
+                measured = true
+            }
         }
     }
 }
