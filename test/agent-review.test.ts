@@ -891,6 +891,21 @@ describe("runAgentReview", () => {
     expect(h.notifications).toEqual([]);
   });
 
+  it("queues a review again when the agent shuts down during the run, without notifying", async () => {
+    const h = harness();
+    const queued = h.queue();
+    const shutdown = new AbortController();
+    const exec: Exec = (file, args, options) => {
+      if (file !== "/bin/claude") return h.deps.exec(file, args, options);
+      shutdown.abort();
+      return Promise.reject(Object.assign(new Error("aborted"), { code: "ABORT_ERR" }));
+    };
+    await runAgentReview({ ...h.deps, exec, signal: shutdown.signal }, queued);
+    expect(h.db.getAgentReview(queued.id)).toMatchObject({ status: "queued", startedAt: null });
+    expect(h.db.nextQueuedAgentReview()?.id).toBe(queued.id);
+    expect(h.notifications).toEqual([]);
+  });
+
   it("does nothing for a row that is no longer queued", async () => {
     const h = harness();
     const queued = h.queue();

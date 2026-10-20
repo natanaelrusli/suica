@@ -91,7 +91,8 @@ export interface ReviewSummaryJson {
   /**
    * Set when the newest posted-or-discarded Agent Review was posted, the MR's head or description
    * differs from what it read, and no review is open (queued, running, ready or posting). A base
-   * without a description hash (reviewed before the hash was kept) compares the head only.
+   * without a description hash (reviewed before the hash was kept) compares the head only. Null
+   * once you approved the MR.
    */
   readonly changedSinceReview: ChangedSinceReviewJson | null;
   /**
@@ -167,6 +168,9 @@ export function buildReviewList(
     me: snapshot.me,
     mergeRequests: snapshot.reviewRequested.map((mr) => {
       const latest = agentReviews.get(mr.key);
+      const approvedByMe = mr.reviewers.some(
+        (each) => each.username === snapshot.me.username && each.state === "APPROVED",
+      );
       return {
         key: mr.key,
         title: mr.title,
@@ -176,7 +180,8 @@ export function buildReviewList(
         author: mr.author,
         reviewers: mr.reviewers,
         agentReview: latest === undefined ? null : toAgentReviewJson(latest),
-        changedSinceReview: changedSinceReview(mr, latest, bases.get(mr.key)),
+        // Once you approved, a change is yours to look at; the list stops offering a re-review.
+        changedSinceReview: approvedByMe ? null : changedSinceReview(mr, latest, bases.get(mr.key)),
         readyToApprove: readyToApprove(mr, snapshot.me, latest, bases.get(mr.key)),
       };
     }),

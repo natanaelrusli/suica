@@ -133,7 +133,7 @@ private struct ReviewRow: View {
     let onRereview: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: 4) {
             Text(DisplayText.clean(mr.title, max: 160))
                 .fontWeight(group == .waiting ? .semibold : .medium)
                 .lineLimit(2)
@@ -141,21 +141,23 @@ private struct ReviewRow: View {
                 // Inside the Drafts group the heading already says it.
                 if mr.draft && group != .drafts { Badge(text: Copy.draft, tint: .gray) }
                 Text(DisplayText.clean(mr.author.name, max: 60)).lineLimit(1)
-                Text("·").foregroundStyle(.tertiary)
-                // The key gives way first: the author and the project's own name stay readable.
-                Text(DisplayText.shortKey(mr.key)).lineLimit(1).truncationMode(.head).layoutPriority(-1)
             }
             .font(.caption)
             .foregroundStyle(.secondary)
-            // On its own line, so a long name or key never cuts it off.
-            if let opened = mr.createdDate {
-                Text(Copy.opened(opened.formatted(.relative(presentation: .named))))
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
-                    .help(opened.formatted(date: .abbreviated, time: .shortened))
+            HStack(spacing: 4) {
+                // The key gives way first: when it was opened always stays readable.
+                Text(DisplayText.shortKey(mr.key)).lineLimit(1).truncationMode(.head).layoutPriority(-1)
+                if let opened = mr.createdDate {
+                    Text("·")
+                    Text(Copy.opened(opened.formatted(.relative(presentation: .named))))
+                        .lineLimit(1)
+                        .fixedSize()
+                        .help(opened.formatted(date: .abbreviated, time: .shortened))
+                }
             }
-            if let review = mr.agentReview, let badge = Copy.agentReviewBadge(review.status) {
+            .font(.caption)
+            .foregroundStyle(.tertiary)
+            if let review = mr.agentReview, let badge = shownAgentBadge(review) {
                 Label(badge, systemImage: review.status == "queued" ? "hourglass" : "sparkles")
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(ReviewTint.agent(review.status))
@@ -170,6 +172,8 @@ private struct ReviewRow: View {
                     Label(Copy.changedSinceReview(change), systemImage: "arrow.triangle.2.circlepath")
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 4)
                     if mr.offersRereview {
                         Button(Copy.rereviewNow, action: onRereview)
                             .buttonStyle(.bordered)
@@ -195,6 +199,12 @@ private struct ReviewRow: View {
         }
         .padding(.vertical, 3)
         .accessibilityElement(children: .combine)
+    }
+
+    /// A failed run says nothing once you approved the MR yourself.
+    private func shownAgentBadge(_ review: AgentReviewInfo) -> String? {
+        if myState == "APPROVED" && review.status == "failed" { return nil }
+        return Copy.agentReviewBadge(review.status)
     }
 
     /// "Not reviewed" says nothing the group does not: it is the state of every MR waiting for you.

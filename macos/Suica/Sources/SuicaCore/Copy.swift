@@ -244,13 +244,11 @@ public enum Copy {
     public static let readyToApprove = "Ready to approve: only minor findings left"
     /// The list's badge for an MR that changed since the agent's posted review.
     public static func changedSinceReview(_ change: ChangedSinceReview) -> String {
-        let what =
-            switch (change.code, change.description) {
-            case (true, true): "code and description"
-            case (true, false): "code"
-            default: "description"
-            }
-        return "Changed since the agent's review: \(what)"
+        switch (change.code, change.description) {
+        case (true, true): "Code and description changed since review"
+        case (true, false): "Code changed since review"
+        default: "Description changed since review"
+        }
     }
     // Agent Review activity (Overview and menu bar)
     public static let agentReviewHeading = "Agent Review"

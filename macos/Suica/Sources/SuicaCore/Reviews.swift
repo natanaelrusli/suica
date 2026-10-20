@@ -94,7 +94,7 @@ public struct ReviewSummary: Codable, Equatable, Identifiable, Sendable {
     public let reviewers: [ReviewerInfo]
     /// Nil when the agent never reviewed it, or from an agent without Agent Review.
     public let agentReview: AgentReviewInfo?
-    /// Set when the MR changed since the agent's posted review and no newer review is open; absent from an older CLI.
+    /// Set when the MR changed since the agent's posted review, no newer review is open and you have not approved it; absent from an older CLI.
     public let changedSinceReview: ChangedSinceReview?
     /// Only minor findings are left on an unchanged MR nobody approved yet; false from an older CLI.
     public let readyToApprove: Bool

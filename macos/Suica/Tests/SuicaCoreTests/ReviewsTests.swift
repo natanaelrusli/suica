@@ -460,9 +460,9 @@ private func withAgent(_ status: String?) -> ReviewListDocument {
     #expect(list.mergeRequests.first?.changedSinceReview == nil)
     let changed = try #require(list.mergeRequests.last?.changedSinceReview)
     #expect(changed == ChangedSinceReview(code: true, description: false))
-    #expect(Copy.changedSinceReview(changed) == "Changed since the agent's review: code")
-    #expect(Copy.changedSinceReview(ChangedSinceReview(code: false, description: true)) == "Changed since the agent's review: description")
-    #expect(Copy.changedSinceReview(ChangedSinceReview(code: true, description: true)) == "Changed since the agent's review: code and description")
+    #expect(Copy.changedSinceReview(changed) == "Code changed since review")
+    #expect(Copy.changedSinceReview(ChangedSinceReview(code: false, description: true)) == "Description changed since review")
+    #expect(Copy.changedSinceReview(ChangedSinceReview(code: true, description: true)) == "Code and description changed since review")
     // The row offers Re-review only while no review is queued, running, ready or being posted.
     #expect(list.mergeRequests.last?.offersRereview == true)
     let open = ReviewSummary(

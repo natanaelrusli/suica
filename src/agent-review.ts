@@ -342,7 +342,9 @@ async function runCli(
     }));
   } catch (error) {
     const failure = execFailure(error);
-    if (failure.killed === true) throw new RunFailure(`${cli} was stopped (timeout or shutdown)`);
+    if (failure.killed === true || failure.code === "ABORT_ERR") {
+      throw new RunFailure(`${cli} was stopped (timeout or shutdown)`);
+    }
     // claude reports its own errors as JSON on stdout even when it exits non-zero.
     const out =
       typeof error === "object" && error !== null && "stdout" in error ? error.stdout : "";
@@ -452,7 +454,8 @@ async function prepareRereview(
 }
 
 /**
- * Runs one queued review to ready, skipped, failed or cancelled. Never throws. The Owner cancels a running
+ * Runs one queued review to ready, skipped, failed or cancelled, or back to queued when the agent
+ * shuts down during it. Never throws. The Owner cancels a running
  * review from another process (`suica review cancel`) by moving its row on: the run notices within
  * `cancelCheckMs`, stops the clone or the CLI, and leaves the row as cancelled.
  */
@@ -596,6 +599,11 @@ export async function runAgentReview(baseDeps: ReviewDeps, row: AgentReviewRow):
       });
     }
   } catch (error) {
+    // A restart of the agent is not the review's fault: it runs again after the restart.
+    if (baseDeps.signal?.aborted === true && store.requeueAgentReview(row.id, deps.now())) {
+      log.info("agent review queued again after shutdown", { id: row.id, mr_key: row.mrKey });
+      return;
+    }
     const skipped = error instanceof Skip;
     const reason =
       error instanceof Skip || error instanceof RunFailure
