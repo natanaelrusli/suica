@@ -81,3 +81,26 @@ import Testing
     #expect(model.missing)
     #expect(model.errorText == nil)
 }
+
+@MainActor @Test func modelKeepsOnlyTheLatestEntries() throws {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let lines = (1...LogsModel.maxEntries + 20).map {
+        #"{"timestamp":"2026-10-20T03:48:50.346Z","level":"info","message":"poll \#($0)"}"#
+    }
+    try lines.joined(separator: "\n").write(to: folder.appendingPathComponent("stdout.log"), atomically: true, encoding: .utf8)
+
+    let model = LogsModel()
+    model.load(folder: folder.path)
+    #expect(model.entries.count == LogsModel.maxEntries)
+    #expect(model.entries.first?.message == "poll 21")
+    #expect(model.entries.last?.message == "poll \(LogsModel.maxEntries + 20)")
+    #expect(model.truncated)
+
+    try lines.prefix(3).joined(separator: "\n")
+        .write(to: folder.appendingPathComponent("stdout.log"), atomically: true, encoding: .utf8)
+    model.load(folder: folder.path, force: true)
+    #expect(model.entries.count == 3)
+    #expect(!model.truncated)
+}
