@@ -166,6 +166,54 @@ export function countFindings(markdown: string): FindingCount[] {
     .sort((a, b) => rank(a.severity) - rank(b.severity));
 }
 
+/** `fixed` on its own; `not fixed`, `partly fixed`, `partially fixed` and `unfixed` are open. */
+const FIXED = /\bfixed\b/i;
+const OPEN = /\b(?:not|partly|partially)\s+fixed\b|\bunfixed\b/i;
+
+/**
+ * How many items of the review's Previous section (an Agent Re-review's check of the earlier
+ * review) are still open: everything not marked fixed, since the wording is a model's. Counted
+ * like `countFindings`: top-level items only, none-items and code fences skipped.
+ */
+export function countOpenPreviousItems(markdown: string): number {
+  let open = 0;
+  let previousLevel: number | undefined;
+  let itemIndent: number | undefined;
+  let inFence = false;
+  for (const line of markdown.replace(/\r\n/g, "\n").split("\n")) {
+    if (FENCE.test(line)) inFence = !inFence;
+    if (inFence) continue;
+    const heading = HEADING.exec(line);
+    if (heading !== null) {
+      const level = heading[1]?.length ?? 1;
+      const title = heading[2] ?? "";
+      if (previousLevel !== undefined && level > previousLevel) continue;
+      previousLevel = isPreviousHeading(title) ? level : undefined;
+      itemIndent = undefined;
+      continue;
+    }
+    const item = previousLevel === undefined ? null : LIST_MARKER.exec(line);
+    if (item === null) continue;
+    const indent = item[1]?.length ?? 0;
+    itemIndent ??= indent;
+    const text = (item[2] ?? "").trim();
+    if (indent !== itemIndent || NONE_ITEM.test(text)) continue;
+    if (!FIXED.test(text) || OPEN.test(text)) open += 1;
+  }
+  return open;
+}
+
+/**
+ * True when a review has no findings and no open item in its Previous section: what an Agent
+ * Re-review must say before the agent approves the MR.
+ */
+export function isCleanReview(markdown: string): boolean {
+  return (
+    countFindings(markdown).every((each) => each.count === 0) &&
+    countOpenPreviousItems(markdown) === 0
+  );
+}
+
 /** The line after an item: the next item, a heading, or an unindented line after a blank one. */
 function itemEnd(lines: readonly string[], from: number): number {
   let inFence = false;

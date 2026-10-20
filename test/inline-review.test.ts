@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   countFindings,
+  countOpenPreviousItems,
   diffLines,
   extractFindings,
+  isCleanReview,
   placeFinding,
   summaryWithout,
 } from "../src/inline-review.ts";
@@ -150,6 +152,71 @@ describe("countFindings", () => {
     expect(countFindings(body)).toEqual([{ severity: "Minor", count: 1 }]);
     expect(countFindings(NESTED_PREVIOUS)).toEqual([{ severity: "Minor", count: 1 }]);
     expect(countFindings(TOP_LEVEL_PREVIOUS)).toEqual([{ severity: "Minor", count: 1 }]);
+  });
+});
+
+describe("countOpenPreviousItems and isCleanReview", () => {
+  const rereview = (previous: readonly string[], findings: readonly string[] = ["None."]) =>
+    [
+      "# Re-review",
+      "## Previous review",
+      ...previous,
+      "## Findings",
+      ...findings,
+      "## Done well",
+      "- ok",
+    ].join("\n");
+
+  it("counts the previous items that are not marked fixed, at the top level only", () => {
+    const body = rereview([
+      "1. Major `a.ts:1` the timeout — fixed: `timeoutMs` is passed now.",
+      "   - evidence bullet, not fixed, ignored",
+      "2. Minor `b.ts:2` the name — not fixed, still `x`.",
+      "3. Minor `c.ts:3` the loop — partly fixed; one branch remains.",
+      "4. Nit `d.ts:4` the comment — partially fixed.",
+      "5. Nit `e.ts:5` the test — unfixed.",
+      "6. Nit `f.ts:6` the doc — still open, no status word.",
+      "```",
+      "7. not fixed inside a fence",
+      "```",
+    ]);
+    expect(countOpenPreviousItems(body)).toBe(5);
+    expect(isCleanReview(body)).toBe(false);
+  });
+
+  it("is clean with every previous item fixed and no findings, also when the section says none", () => {
+    const fixed = rereview([
+      "- Major `a.ts:1` — fixed, the guard is there.",
+      "- Minor `b.ts:2` — Fixed.",
+    ]);
+    expect(countOpenPreviousItems(fixed)).toBe(0);
+    expect(isCleanReview(fixed)).toBe(true);
+    expect(isCleanReview(rereview(["None."]))).toBe(true);
+    expect(isCleanReview(rereview(["Tidak ada."], ["None."]))).toBe(true);
+    expect(isCleanReview("# Review\n## Findings\nNone.")).toBe(true);
+  });
+
+  it("is not clean with a new finding, whatever the previous section says", () => {
+    const body = rereview(
+      ["- Major `a.ts:1` — fixed."],
+      ["### Minor", "1. `z.ts:9` — new problem."],
+    );
+    expect(countOpenPreviousItems(body)).toBe(0);
+    expect(isCleanReview(body)).toBe(false);
+  });
+
+  it("stops the previous section at the next sibling heading and ignores items outside it", () => {
+    const body = [
+      "## Previous review",
+      "### Checked",
+      "- `a.ts:1` — not fixed.",
+      "## Findings",
+      "None.",
+      "## Notes",
+      "- not fixed elsewhere, not a previous item",
+    ].join("\n");
+    expect(countOpenPreviousItems(body)).toBe(1);
+    expect(countOpenPreviousItems("## Findings\n1. `a.ts:1` x")).toBe(0);
   });
 });
 
