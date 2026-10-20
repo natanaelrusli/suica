@@ -18,6 +18,7 @@ import {
 import type { ReviewDeps } from "../src/agent-review.ts";
 import { parseConfig } from "../src/config.ts";
 import type { Exec, ExecOptions } from "../src/exec.ts";
+import { descriptionSha } from "../src/gitlab.ts";
 import type { Notification } from "../src/format.ts";
 import { createLogger } from "../src/log.ts";
 import type { DetectedCli } from "../src/model-cli.ts";
@@ -218,6 +219,20 @@ describe("buildPrompt", () => {
     });
     expect(prompt).toContain('<skill name="s:k">\nSKILL BODY\n</skill>');
     expect(prompt.startsWith("/")).toBe(false);
+  });
+
+  it("buildPrompt for a same-commit re-review says only the description changed", () => {
+    const text = buildPrompt({
+      cli: "claude",
+      skill: "madhani:madhani-code-review",
+      skillText: undefined,
+      detail: detail(),
+      headSha: SHA,
+      rereview: { previousSha: SHA, incremental: false, sameCommit: true },
+    });
+    expect(text).toContain("- The code has not changed since the previous review");
+    expect(text).not.toContain("is not available");
+    expect(text).toContain("`## Previous review`");
   });
 
   it("buildPrompt for a re-review asks for a ## Previous review section and new findings only", () => {
@@ -455,10 +470,22 @@ function harness(
     status: "posted" | "discarded" = "posted",
     headSha = PREV,
     body = PREVIOUS_REVIEW,
+    descriptionHash?: string,
   ): void => {
     const id = queue().id;
     db.transitionAgentReview(id, ["queued"], "running", {}, NOW);
-    db.transitionAgentReview(id, ["running"], "ready", { headSha, body, cli: "claude" }, NOW);
+    db.transitionAgentReview(
+      id,
+      ["running"],
+      "ready",
+      {
+        headSha,
+        body,
+        cli: "claude",
+        ...(descriptionHash === undefined ? {} : { descriptionSha: descriptionHash }),
+      },
+      NOW,
+    );
     if (status === "discarded") {
       discardAgentReview(db, id, NOW);
       return;
@@ -689,6 +716,40 @@ describe("runAgentReview", () => {
       status: "ready",
       headSha: SHA,
       previousSha: PREV,
+      descriptionSha: descriptionSha("desc"),
+    });
+  });
+
+  it("re-reviews a description-only change at the same commit: no compare, and the prompt says the code did not change", async () => {
+    const h = harness();
+    h.previous("posted", SHA, PREVIOUS_REVIEW, descriptionSha("The old description."));
+    const queued = h.queue();
+    await runAgentReview(h.deps, queued);
+
+    expect(h.file("previous-review.md")).toBe(PREVIOUS_REVIEW);
+    expect(h.file("since-last-review.diff")).toBeUndefined();
+    expect(h.restPaths.some((path) => path.includes("/repository/"))).toBe(false);
+    expect(h.prompt()).toContain(
+      `- This is a re-review. The previous Agent Review, of commit ${SHA}`,
+    );
+    expect(h.prompt()).toContain("- The code has not changed since the previous review");
+    expect(h.prompt()).not.toContain("./since-last-review.diff");
+    expect(h.db.getAgentReview(queued.id)).toMatchObject({
+      status: "ready",
+      headSha: SHA,
+      previousSha: SHA,
+      descriptionSha: descriptionSha("desc"),
+    });
+  });
+
+  it("skips a run at a commit and description that already have a review, and runs when only the description differs", async () => {
+    const same = harness();
+    same.previous("posted", SHA, PREVIOUS_REVIEW, descriptionSha("desc"));
+    const a = same.queue();
+    await runAgentReview(same.deps, a);
+    expect(same.db.getAgentReview(a.id)).toMatchObject({
+      status: "skipped",
+      detail: "this commit was already reviewed",
     });
   });
 
