@@ -14,49 +14,44 @@ struct OfficeView: View {
     @Environment(\.motionLevel) private var motion
 
     var body: some View {
-        ZStack {
-            // The sky above the street.
-            (scheme == .dark ? Color(red: 0.06, green: 0.08, blue: 0.14) : Color(red: 0.8, green: 0.9, blue: 0.98))
-            OfficeSceneView(model: model, controller: controller)
-            if model.loaded && model.sessions.isEmpty { emptyState }
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(alignment: .top) {
-                    summary
-                    Spacer()
-                    Button {
-                        controller.resetCamera()
-                        model.select(nil)
-                    } label: {
-                        Label(Copy.resetCamera, systemImage: "scope")
+        // The scene runs up under the title bar, which floats over it on a vignette. It sits in a
+        // ScrollView that never scrolls: over anything else, macOS 26 draws the title bar as an
+        // opaque band with a line under it.
+        GeometryReader { proxy in
+            let titleBar = proxy.safeAreaInsets.top
+            ScrollView {
+                ZStack {
+                    ZStack(alignment: .top) {
+                        // The sky above the street.
+                        (scheme == .dark
+                            ? Color(red: 0.06, green: 0.08, blue: 0.14) : Color(red: 0.8, green: 0.9, blue: 0.98))
+                        OfficeSceneView(model: model, controller: controller)
+                        vignette.frame(height: titleBar + 70)
                     }
-                    .help(Copy.resetCamera)
+                    .clipped()
+                    if model.loaded && model.sessions.isEmpty { emptyState }
+                    overlays.padding(.top, titleBar)
                 }
-                if let text = model.errorText { NoticeBox(text: text, tint: .red) }
-                Spacer()
-                if model.selected == nil && !model.sessions.isEmpty {
-                    Text(Copy.officeControlsHint)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .trailing)
-                }
-                if let session = model.selected {
-                    OfficeDetailCard(session: session) { model.select(nil) }
-                        .frame(maxWidth: 420)
-                        .transition(Motion.slide(from: .bottom, motion))
-                }
+                .frame(width: proxy.size.width, height: proxy.size.height + titleBar)
             }
-            .padding(16)
-            .motion(value: model.errorText)
-            .motion(value: model.selectedId)
+            .modifier(HiddenTopScrollEdge())
+            .ignoresSafeArea(.container, edges: .top)
         }
         .toolbar {
+            Button {
+                controller.resetCamera()
+                model.select(nil)
+            } label: {
+                Label(Copy.resetCamera, systemImage: "scope")
+            }
+            .help(Copy.resetCamera)
             Button { Task { await model.refresh() } } label: {
                 Label(Copy.refresh, systemImage: "arrow.clockwise")
             }
             .help("\(Copy.refresh) (⌘R)")
             .keyboardShortcut("r")
         }
-        .clipped()
+        .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
         .background(WindowVisibility { windowVisible = $0 })
         // Polls only while the page is on screen: the scene and the detection stop with it.
         .task(id: windowVisible) {
@@ -66,14 +61,55 @@ struct OfficeView: View {
         .accessibilityElement(children: .contain)
     }
 
+    /// What floats over the scene: the summary, errors, the hint and the detail card.
+    private var overlays: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            summary
+            if let text = model.errorText { NoticeBox(text: text, tint: .red) }
+            Spacer()
+            if model.selected == nil && !model.sessions.isEmpty {
+                Text(Copy.officeControlsHint)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .glass(in: Capsule())
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+            if let session = model.selected {
+                OfficeDetailCard(session: session) { model.select(nil) }
+                    .frame(maxWidth: 420)
+                    .transition(Motion.slide(from: .bottom, motion))
+            }
+        }
+        .padding(16)
+        .motion(value: model.errorText)
+        .motion(value: model.selectedId)
+    }
+
     private var summary: some View {
         Text(Copy.officeSummary(sessions: model.sessions.count, rooms: model.rooms.count))
             .font(.callout.weight(.medium))
             .foregroundStyle(.secondary)
             .padding(.horizontal, 10)
             .padding(.vertical, 5)
-            .background(.regularMaterial, in: Capsule())
+            .glass(in: Capsule())
             .opacity(model.sessions.isEmpty ? 0 : 1)
+    }
+
+    /// Fades the top of the scene into the window's background, so the title and the toolbar
+    /// buttons read over a bright sky or a busy room.
+    private var vignette: some View {
+        LinearGradient(
+            stops: [
+                .init(color: Color(nsColor: .windowBackgroundColor).opacity(0.85), location: 0),
+                .init(color: Color(nsColor: .windowBackgroundColor).opacity(0.4), location: 0.5),
+                .init(color: .clear, location: 1),
+            ],
+            startPoint: .top, endPoint: .bottom
+        )
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 
     private var emptyState: some View {
@@ -83,8 +119,19 @@ struct OfficeView: View {
             Text(Copy.officeEmptyHint).font(.callout).foregroundStyle(.secondary)
         }
         .padding(20)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .glass(in: RoundedRectangle(cornerRadius: 16))
         .allowsHitTesting(false)
+    }
+}
+
+/// No fade or line where the page meets the title bar: the Office draws its own vignette there.
+private struct HiddenTopScrollEdge: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(macOS 26, *) {
+            content.scrollEdgeEffectHidden(true, for: .top)
+        } else {
+            content
+        }
     }
 }
 
@@ -280,8 +327,7 @@ private struct OfficeDetailCard: View {
             }
         }
         .padding(14)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.separator))
+        .glass(in: RoundedRectangle(cornerRadius: 16))
     }
 
     private func row(_ label: String, _ value: String) -> some View {

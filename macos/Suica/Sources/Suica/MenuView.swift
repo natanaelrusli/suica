@@ -160,7 +160,7 @@ struct MenuView: View {
                 tabButton(.recent, Copy.recentTab(teams.recent.count))
             }
             .padding(2)
-            .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
+            .background(.quaternary.opacity(0.5), in: Capsule())
             .accessibilityElement(children: .contain)
             .accessibilityLabel(Copy.panelLists)
             ScrollView {
@@ -201,9 +201,9 @@ struct MenuView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 5)
                 .background(
-                    selected ? AnyShapeStyle(.background) : AnyShapeStyle(.clear), in: RoundedRectangle(cornerRadius: 6)
+                    selected ? AnyShapeStyle(.background) : AnyShapeStyle(.clear), in: Capsule()
                 )
-                .contentShape(RoundedRectangle(cornerRadius: 6))
+                .contentShape(Capsule())
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(selected ? .isSelected : [])

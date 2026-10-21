@@ -147,3 +147,15 @@ struct RefreshButton: View {
         .accessibilityLabel(Copy.refresh)
     }
 }
+
+extension View {
+    /// Liquid Glass on macOS 26 and the regular material before it, for what floats over a page
+    /// (the Office's overlays, a banner preview). The cards that make up a page stay opaque.
+    @ViewBuilder func glass<S: Shape>(in shape: S) -> some View {
+        if #available(macOS 26, *) {
+            glassEffect(.regular, in: shape)
+        } else {
+            background(.regularMaterial, in: shape)
+        }
+    }
+}
