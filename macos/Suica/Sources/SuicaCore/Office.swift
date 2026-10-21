@@ -100,6 +100,12 @@ public struct OfficeColour: Equatable, Sendable {
     public let red: Double
     public let green: Double
     public let blue: Double
+
+    public init(red: Double, green: Double, blue: Double) {
+        self.red = red
+        self.green = green
+        self.blue = blue
+    }
 }
 
 /// How a Coding Agent type looks and is called.
@@ -125,6 +131,101 @@ public struct OfficeAgent: Equatable, Sendable {
         case "gemini": OfficeColour(red: 0.55, green: 0.36, blue: 0.96)
         default: OfficeColour(red: 0.55, green: 0.55, blue: 0.58)
         }
+    }
+}
+
+extension OfficeColour {
+    init(_ red: Double, _ green: Double, _ blue: Double) { self.init(red: red, green: green, blue: blue) }
+
+    public func mixed(with other: OfficeColour, _ amount: Double) -> OfficeColour {
+        OfficeColour(
+            red + (other.red - red) * amount, green + (other.green - green) * amount,
+            blue + (other.blue - blue) * amount)
+    }
+
+    /// Nearly grey, keeping its lightness: how an idle or exited figure is drawn.
+    public var greyed: OfficeColour {
+        let light = red * 0.3 + green * 0.59 + blue * 0.11
+        return mixed(with: OfficeColour(light, light, light), 0.85)
+    }
+
+    static let black = OfficeColour(0, 0, 0)
+    static let white = OfficeColour(1, 1, 1)
+}
+
+/// A generator seeded by text: a figure or a Room looks the same on every poll and every launch
+/// (Swift's `Hasher` is seeded per process). FNV-1a for the seed, SplitMix64 for the stream.
+struct OfficeSeed: RandomNumberGenerator {
+    private var state: UInt64
+
+    init(_ text: String) {
+        var hash: UInt64 = 0xcbf2_9ce4_8422_2325
+        for byte in text.utf8 { hash = (hash ^ UInt64(byte)) &* 0x100_0000_01b3 }
+        state = hash
+    }
+
+    mutating func next() -> UInt64 {
+        state &+= 0x9e37_79b9_7f4a_7c15
+        var value = state
+        value = (value ^ (value >> 30)) &* 0xbf58_476d_1ce4_e5b9
+        value = (value ^ (value >> 27)) &* 0x94d0_49bb_1331_11eb
+        return value ^ (value >> 31)
+    }
+}
+
+// MARK: - Looks
+
+public enum OfficeHair: CaseIterable, Sendable {
+    case bald, short, long, bun, ponytail, spiky, cap
+}
+
+public enum OfficeShirt: CaseIterable, Sendable {
+    case tee, stripe, hoodie, collar
+}
+
+public enum OfficeExtra: CaseIterable, Sendable {
+    case none, glasses, headphones
+}
+
+/// How one Session's figure looks: picked from its id, so it keeps its look while it runs. The shirt
+/// stays a shade of the agent's colour, so the agent type still reads at a glance.
+public struct OfficeLook: Equatable, Sendable {
+    public let skin: OfficeColour
+    public let hair: OfficeHair
+    public let hairColour: OfficeColour
+    public let shirt: OfficeShirt
+    public let shirtColour: OfficeColour
+    public let trousers: OfficeColour
+    public let extra: OfficeExtra
+
+    static let skins = [
+        OfficeColour(0.98, 0.85, 0.74), OfficeColour(0.94, 0.76, 0.6), OfficeColour(0.85, 0.64, 0.47),
+        OfficeColour(0.72, 0.5, 0.34), OfficeColour(0.55, 0.37, 0.24), OfficeColour(0.38, 0.25, 0.17),
+    ]
+    static let hairColours = [
+        OfficeColour(0.1, 0.08, 0.07), OfficeColour(0.28, 0.18, 0.1), OfficeColour(0.45, 0.3, 0.17),
+        OfficeColour(0.88, 0.74, 0.45), OfficeColour(0.75, 0.38, 0.16), OfficeColour(0.72, 0.72, 0.74),
+        OfficeColour(0.3, 0.45, 0.9), OfficeColour(0.92, 0.45, 0.65),
+    ]
+    static let trouserColours = [
+        OfficeColour(0.16, 0.2, 0.34), OfficeColour(0.22, 0.22, 0.24), OfficeColour(0.66, 0.58, 0.42),
+        OfficeColour(0.3, 0.42, 0.6), OfficeColour(0.1, 0.1, 0.11),
+    ]
+
+    public init(session: OfficeSession) {
+        var seed = OfficeSeed("figure:\(session.id)")
+        let agent = OfficeAgent(kind: session.agent).colour
+        let shades = [
+            agent.mixed(with: .black, 0.25), agent, agent.mixed(with: .white, 0.25), agent.mixed(with: .white, 0.45),
+        ]
+        skin = Self.skins.randomElement(using: &seed)!
+        hair = OfficeHair.allCases.randomElement(using: &seed)!
+        hairColour = Self.hairColours.randomElement(using: &seed)!
+        shirt = OfficeShirt.allCases.randomElement(using: &seed)!
+        shirtColour = shades.randomElement(using: &seed)!
+        trousers = Self.trouserColours.randomElement(using: &seed)!
+        // Half wear nothing extra.
+        extra = Bool.random(using: &seed) ? .none : [OfficeExtra.glasses, .headphones].randomElement(using: &seed)!
     }
 }
 
@@ -163,6 +264,28 @@ public struct PlacedDesk: Equatable, Sendable, Identifiable {
     public var id: String { sessionId }
 }
 
+public enum OfficeFurniture: CaseIterable, Sendable {
+    case plant, tree, bookshelf, cabinet, waterCooler, lamp, whiteboard, armchair, beanBag, bin
+
+    /// Taller than a seated figure: kept to the back half of a room, so it never hides a Desk.
+    public var isTall: Bool {
+        switch self {
+        case .tree, .bookshelf, .waterCooler, .lamp, .whiteboard: true
+        case .plant, .cabinet, .armchair, .beanBag, .bin: false
+        }
+    }
+}
+
+/// A piece of furniture against a side wall of a room.
+public struct PlacedFurniture: Equatable, Sendable {
+    public let kind: OfficeFurniture
+    public let position: OfficePoint
+    /// The wall behind it; it faces away from it.
+    public let against: OfficeSide
+    /// Which of a few colours it comes in.
+    public let variant: Int
+}
+
 /// A room of the building: a project Room, or the Center Room they all open onto.
 public struct PlacedRoom: Equatable, Sendable, Identifiable {
     public let path: String
@@ -176,6 +299,8 @@ public struct PlacedRoom: Equatable, Sendable, Identifiable {
     /// The side with a doorway; the one facing the Center Room.
     public let door: OfficeSide?
     public let isCenter: Bool
+    /// Seeded by the room's path, so it stays put while the room keeps its size.
+    public internal(set) var furniture: [PlacedFurniture] = []
 
     public var id: String { path }
 }
@@ -204,9 +329,10 @@ public struct OfficeLayout: Equatable, Sendable {
     public static func make(_ rooms: [OfficeRoom]) -> OfficeLayout {
         let centerName = Copy.officeCenterRoom
         guard !rooms.isEmpty else {
-            let center = PlacedRoom(
-                path: "", name: centerName, center: OfficePoint(x: 0, z: 0), width: emptyWidth, depth: emptyDepth,
-                desks: [], walls: [.north, .west, .east], door: nil, isCenter: true)
+            let center = furnish(
+                PlacedRoom(
+                    path: "", name: centerName, center: OfficePoint(x: 0, z: 0), width: emptyWidth,
+                    depth: emptyDepth, desks: [], walls: [.north, .west, .east], door: nil, isCenter: true))
             return OfficeLayout(rooms: [], center: center, width: emptyWidth, depth: emptyDepth)
         }
         struct Size {
@@ -247,19 +373,66 @@ public struct OfficeLayout: Equatable, Sendable {
                             x: centre.x + (Double(column) - Double(size.columns - 1) / 2) * deskSpacingX,
                             z: centre.z + (Double(line) - Double(size.rows - 1) / 2) * deskSpacingZ))
                 }
-                return PlacedRoom(
-                    path: size.room.path, name: size.room.name, center: centre, width: roomWidth, depth: rowDepth,
-                    desks: desks, walls: [.north, .south, .west, .east], door: door, isCenter: false)
+                return furnish(
+                    PlacedRoom(
+                        path: size.room.path, name: size.room.name, center: centre, width: roomWidth,
+                        depth: rowDepth, desks: desks, walls: [.north, .south, .west, .east], door: door,
+                        isCenter: false))
             }
         }
         let placed =
             place(far, centreZ: top + farDepth / 2, rowDepth: farDepth, door: .south)
             + place(near, centreZ: top + farDepth + hallDepth + nearDepth / 2, rowDepth: nearDepth, door: .north)
         // The near side of the Center Room is open when no Room stands there.
-        let center = PlacedRoom(
-            path: "", name: centerName, center: OfficePoint(x: 0, z: top + farDepth + hallDepth / 2), width: width,
-            depth: hallDepth, desks: [], walls: [.west, .east], door: nil, isCenter: true)
+        let center = furnish(
+            PlacedRoom(
+                path: "", name: centerName, center: OfficePoint(x: 0, z: top + farDepth + hallDepth / 2),
+                width: width, depth: hallDepth, desks: [], walls: [.west, .east], door: nil, isCenter: true))
         return OfficeLayout(rooms: placed, center: center, width: width, depth: depth)
+    }
+
+    /// Every piece of furniture fits in a square this wide.
+    public static let furnitureSize = 0.8
+
+    /// Furniture along the side walls, where Desks never stand: a piece in most corners and now and
+    /// then one between them in a deep room. Tall pieces stay in the back half, so the camera sees
+    /// every Desk. The near west corner stays free: a room's name stands on that wall (on the Center
+    /// Room's floor), and anything behind it made it hard to read.
+    static func furnish(_ room: PlacedRoom) -> PlacedRoom {
+        var seed = OfficeSeed("room:\(room.path)")
+        let inset = furnitureSize / 2 + 0.1
+        let back = -room.depth / 2 + inset
+        let front = room.depth / 2 - inset
+        let between = max(0, Int((front - back) / 1.6) - 1)
+        var corners: [OfficePoint] = []
+        var middles: [OfficePoint] = []
+        for side in [-1.0, 1.0] {
+            let x = side * (room.width / 2 - inset)
+            corners.append(OfficePoint(x: x, z: back))
+            if side > 0 { corners.append(OfficePoint(x: x, z: front)) }
+            for step in 0..<between {
+                middles.append(OfficePoint(x: x, z: back + (front - back) * Double(step + 1) / Double(between + 1)))
+            }
+        }
+        // One corner may stay empty; each middle place is filled half the time.
+        let empty = Int.random(in: 0...corners.count, using: &seed)
+        var spots = corners.enumerated().filter { $0.offset != empty }.map(\.element)
+        spots += middles.filter { _ in Bool.random(using: &seed) }
+
+        var bag: [OfficeFurniture] = []
+        var placed = room
+        for spot in spots {
+            if !bag.contains(where: { spot.z < 0 || !$0.isTall }) {
+                bag = OfficeFurniture.allCases.shuffled(using: &seed)
+            }
+            let index = bag.firstIndex { spot.z < 0 || !$0.isTall }!
+            placed.furniture.append(
+                PlacedFurniture(
+                    kind: bag.remove(at: index),
+                    position: OfficePoint(x: room.center.x + spot.x, z: room.center.z + spot.z),
+                    against: spot.x < 0 ? .west : .east, variant: Int.random(in: 0..<4, using: &seed)))
+        }
+        return placed
     }
 }
 

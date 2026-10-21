@@ -17,20 +17,19 @@ private struct Palette {
     let label: NSColor
     let bubble: NSColor
     let bubbleText: NSColor
-    let figureIdle: NSColor
     let background: NSColor
 
     static let light = Palette(
         floor: NSColor(white: 0.88, alpha: 1), hallFloor: NSColor(red: 0.8, green: 0.84, blue: 0.9, alpha: 1),
         wall: NSColor(white: 0.78, alpha: 1),
         desk: NSColor(red: 0.78, green: 0.66, blue: 0.5, alpha: 1), label: NSColor(white: 0.25, alpha: 1),
-        bubble: .white, bubbleText: NSColor(white: 0.12, alpha: 1), figureIdle: NSColor(white: 0.66, alpha: 1),
+        bubble: .white, bubbleText: NSColor(white: 0.12, alpha: 1),
         background: NSColor(white: 0.96, alpha: 1))
     static let dark = Palette(
         floor: NSColor(white: 0.2, alpha: 1), hallFloor: NSColor(red: 0.16, green: 0.19, blue: 0.25, alpha: 1),
         wall: NSColor(white: 0.3, alpha: 1),
         desk: NSColor(red: 0.45, green: 0.37, blue: 0.28, alpha: 1), label: NSColor(white: 0.85, alpha: 1),
-        bubble: NSColor(white: 0.32, alpha: 1), bubbleText: .white, figureIdle: NSColor(white: 0.45, alpha: 1),
+        bubble: NSColor(white: 0.32, alpha: 1), bubbleText: .white,
         background: NSColor(white: 0.11, alpha: 1))
 }
 
@@ -50,12 +49,17 @@ private struct RoomNode {
     let signature: String
 }
 
+/// A part of a figure and the colour it has while its Session is live.
+private struct FigurePart {
+    let entity: ModelEntity
+    let colour: OfficeColour
+}
+
 /// One Desk: its furniture, its figure and its bubble.
 private struct DeskNode {
     let entity: Entity
     let figure: Entity
-    let body: ModelEntity
-    let head: ModelEntity
+    var parts: [FigurePart]
     let screen: ModelEntity
     let bubble: Entity
     let rug: ModelEntity
@@ -337,6 +341,11 @@ final class OfficeSceneController {
         for side in [OfficeSide.north, .south, .west, .east] where room.walls.contains(side) {
             addWall(to: entity, side: side, room: room, palette: palette)
         }
+        for piece in room.furniture {
+            let item = makeFurniture(piece, palette)
+            item.position = [Float(piece.position.x - room.center.x), 0, Float(piece.position.z - room.center.z)]
+            entity.addChild(item)
+        }
         guard !room.name.isEmpty else { return entity }
         let mesh = textMesh(room.name, size: 0.3)
         let label = ModelEntity(mesh: mesh, materials: [UnlitMaterial(color: palette.label)])
@@ -369,14 +378,8 @@ final class OfficeSceneController {
             box([0.42, 0.05, 0.42], NSColor(white: 0.3, alpha: 1), at: [0, 0.3, 0.55]))
         entity.addChild(box([0.05, 0.28, 0.05], NSColor(white: 0.3, alpha: 1), at: [0, 0.15, 0.55]))
 
-        // The figure: a body and a head, bobbing as one.
+        // The figure, dressed by its look, bobbing as one.
         let figure = Entity()
-        let body = ModelEntity(mesh: .generateCylinder(height: 0.46, radius: 0.17), materials: [material(.gray)])
-        body.position = [0, 0.58, 0.55]
-        let head = ModelEntity(mesh: .generateSphere(radius: 0.14), materials: [material(.gray)])
-        head.position = [0, 0.97, 0.55]
-        figure.addChild(body)
-        figure.addChild(head)
         entity.addChild(figure)
 
         // The bubble above it, always facing the camera.
@@ -400,7 +403,7 @@ final class OfficeSceneController {
         entity.addChild(hit)
 
         var node = DeskNode(
-            entity: entity, figure: figure, body: body, head: head, screen: screen, bubble: bubble, rug: rug,
+            entity: entity, figure: figure, parts: [], screen: screen, bubble: bubble, rug: rug,
             bubbleText: "", status: .idle, agent: "", dark: dark, target: entity.position)
         update(&node, with: session, palette: palette, force: true)
         return node
@@ -409,10 +412,14 @@ final class OfficeSceneController {
     private func update(_ node: inout DeskNode, with session: OfficeSession, palette: Palette, force: Bool) {
         let live = session.status == .working || session.status == .waiting
         let text = session.bubble
+        if node.agent != session.agent {
+            for child in Array(node.figure.children) { child.removeFromParent() }
+            node.parts = dress(node.figure, OfficeLook(session: session))
+        }
         if force || node.status != session.status || node.agent != session.agent {
-            let colour = live ? nsColour(OfficeAgent(kind: session.agent).colour) : palette.figureIdle
-            node.body.model?.materials = [material(colour)]
-            node.head.model?.materials = [material(colour)]
+            for part in node.parts {
+                part.entity.model?.materials = [material(nsColour(live ? part.colour : part.colour.greyed))]
+            }
             let screen: NSColor =
                 switch session.status {
                 case .working: NSColor(red: 0.45, green: 0.85, blue: 1, alpha: 1)
@@ -443,6 +450,219 @@ final class OfficeSceneController {
         node.status = session.status
         node.agent = session.agent
         node.dark = dark
+    }
+
+    /// Seats a figure dressed by `look` at the chair, facing its monitor (the viewer sees its back).
+    private func dress(_ figure: Entity, _ look: OfficeLook) -> [FigurePart] {
+        var parts: [FigurePart] = []
+        func add(
+            _ mesh: MeshResource, _ colour: OfficeColour, at position: SIMD3<Float>,
+            turn: simd_quatf = simd_quatf(angle: 0, axis: [0, 1, 0]), scale: SIMD3<Float> = .one
+        ) {
+            let entity = ModelEntity(mesh: mesh, materials: [material(nsColour(colour))])
+            entity.position = position
+            entity.orientation = turn
+            entity.scale = scale
+            figure.addChild(entity)
+            parts.append(FigurePart(entity: entity, colour: colour))
+        }
+        let alongZ = simd_quatf(angle: .pi / 2, axis: [1, 0, 0])
+        let alongX = simd_quatf(angle: .pi / 2, axis: [0, 0, 1])
+        let dark = OfficeColour(red: 0.12, green: 0.12, blue: 0.14)
+        let head = SIMD3<Float>(0, 0.97, 0.55)
+
+        // Seated legs: thighs on the chair, shins down under the desk.
+        for x: Float in [-0.08, 0.08] {
+            add(.generateBox(size: [0.12, 0.11, 0.38]), look.trousers, at: [x, 0.39, 0.36])
+            add(.generateBox(size: [0.11, 0.36, 0.11]), look.trousers, at: [x, 0.18, 0.2])
+        }
+        add(.generateCylinder(height: 0.46, radius: 0.17), look.shirtColour, at: [0, 0.58, 0.55])
+        switch look.shirt {
+        case .tee: break
+        case .stripe:
+            add(
+                .generateCylinder(height: 0.07, radius: 0.176), look.shirtColour.mixed(with: dark, 0.5),
+                at: [0, 0.62, 0.55])
+        case .hoodie:
+            add(.generateSphere(radius: 0.12), look.shirtColour.mixed(with: dark, 0.2), at: [0, 0.8, 0.67])
+        case .collar:
+            add(
+                .generateCylinder(height: 0.04, radius: 0.1), OfficeColour(red: 0.95, green: 0.95, blue: 0.95),
+                at: [0, 0.82, 0.55])
+        }
+        // Arms reaching to the keyboard.
+        for x: Float in [-0.19, 0.19] {
+            add(.generateCylinder(height: 0.4, radius: 0.045), look.shirtColour, at: [x, 0.75, 0.36], turn: alongZ)
+            add(.generateSphere(radius: 0.05), look.skin, at: [x * 0.9, 0.77, 0.14])
+        }
+        add(.generateSphere(radius: 0.14), look.skin, at: head)
+        for x: Float in [-0.05, 0.05] { add(.generateSphere(radius: 0.018), dark, at: head + [x, 0.01, -0.13]) }
+
+        // Hair sits up and back, leaving the face.
+        let cap = head + [0, 0.035, 0.03]
+        switch look.hair {
+        case .bald: break
+        case .short: add(.generateSphere(radius: 0.142), look.hairColour, at: cap)
+        case .long:
+            add(.generateSphere(radius: 0.142), look.hairColour, at: cap)
+            add(.generateBox(size: [0.26, 0.3, 0.09]), look.hairColour, at: head + [0, -0.09, 0.09])
+        case .bun:
+            add(.generateSphere(radius: 0.142), look.hairColour, at: cap)
+            add(.generateSphere(radius: 0.07), look.hairColour, at: head + [0, 0.12, 0.1])
+        case .ponytail:
+            add(.generateSphere(radius: 0.142), look.hairColour, at: cap)
+            add(.generateCylinder(height: 0.22, radius: 0.04), look.hairColour, at: head + [0, -0.06, 0.17])
+        case .spiky:
+            add(.generateSphere(radius: 0.14), look.hairColour, at: cap)
+            for (x, z): (Float, Float) in [(0, 0), (-0.07, 0.04), (0.07, 0.04), (-0.04, -0.06), (0.04, -0.06), (0, 0.09)] {
+                add(
+                    .generateBox(size: [0.05, 0.1, 0.05]), look.hairColour, at: head + [x, 0.15, z + 0.02],
+                    turn: simd_quatf(angle: x * 4 - z * 3, axis: [0, 0, 1]) * simd_quatf(angle: z * 4, axis: [1, 0, 0]))
+            }
+        case .cap:
+            // Worn backwards, so the brim shows from behind.
+            add(.generateSphere(radius: 0.148), look.trousers, at: head + [0, 0.03, 0], scale: [1, 0.85, 1])
+            add(.generateBox(size: [0.2, 0.02, 0.14]), look.trousers, at: head + [0, 0.06, 0.18])
+        }
+        switch look.extra {
+        case .none: break
+        case .glasses:
+            for x: Float in [-0.055, 0.055] {
+                add(.generateBox(size: [0.075, 0.05, 0.015]), dark, at: head + [x, 0.01, -0.135])
+                add(.generateBox(size: [0.01, 0.015, 0.15]), dark, at: head + [x * 2.5, 0.01, -0.06])
+            }
+        case .headphones:
+            add(.generateBox(size: [0.3, 0.025, 0.045]), dark, at: head + [0, 0.16, 0])
+            for x: Float in [-0.145, 0.145] {
+                add(.generateBox(size: [0.025, 0.12, 0.045]), dark, at: head + [x, 0.08, 0])
+                add(.generateCylinder(height: 0.05, radius: 0.055), dark, at: head + [x, 0, 0], turn: alongX)
+            }
+        }
+        return parts
+    }
+
+    // MARK: Furniture
+
+    /// One piece, its back on the wall it stands against.
+    private func makeFurniture(_ piece: PlacedFurniture, _ palette: Palette) -> Entity {
+        let entity = Entity()
+        func add(_ size: SIMD3<Float>, _ colour: NSColor, at position: SIMD3<Float>) {
+            entity.addChild(box(size, colour, at: position))
+        }
+        func add(_ mesh: MeshResource, _ colour: NSColor, at position: SIMD3<Float>, scale: SIMD3<Float> = .one) {
+            let model = ModelEntity(mesh: mesh, materials: [material(colour)])
+            model.position = position
+            model.scale = scale
+            entity.addChild(model)
+        }
+        func pick(_ colours: [NSColor]) -> NSColor { colours[piece.variant % colours.count] }
+        let leaf = NSColor(red: 0.3, green: 0.6, blue: 0.32, alpha: 1)
+        let leafDark = NSColor(red: 0.2, green: 0.47, blue: 0.26, alpha: 1)
+        let pots = [
+            NSColor(red: 0.76, green: 0.42, blue: 0.3, alpha: 1), NSColor(white: 0.92, alpha: 1),
+            NSColor(white: 0.25, alpha: 1), NSColor(red: 0.6, green: 0.68, blue: 0.56, alpha: 1),
+        ]
+        let fabrics = [
+            NSColor(red: 0.2, green: 0.55, blue: 0.58, alpha: 1), NSColor(red: 0.88, green: 0.68, blue: 0.24, alpha: 1),
+            NSColor(red: 0.72, green: 0.34, blue: 0.24, alpha: 1), NSColor(red: 0.38, green: 0.44, blue: 0.56, alpha: 1),
+        ]
+        let metal = NSColor(white: 0.35, alpha: 1)
+
+        switch piece.kind {
+        case .plant:
+            add(.generateCylinder(height: 0.3, radius: 0.16), pick(pots), at: [0, 0.15, 0])
+            add(.generateSphere(radius: 0.2), leaf, at: [0, 0.45, 0])
+            add(.generateSphere(radius: 0.14), leafDark, at: [0.08, 0.6, 0.02])
+            add(.generateSphere(radius: 0.12), leaf, at: [-0.09, 0.56, -0.04])
+        case .tree:
+            add(.generateCylinder(height: 0.36, radius: 0.2), pick(pots), at: [0, 0.18, 0])
+            add(.generateCylinder(height: 0.75, radius: 0.035), NSColor(red: 0.42, green: 0.3, blue: 0.2, alpha: 1), at: [0, 0.72, 0])
+            add(.generateSphere(radius: 0.3), leafDark, at: [0, 1.15, 0])
+            add(.generateSphere(radius: 0.22), leaf, at: [0.12, 1.38, 0.05])
+            add(.generateSphere(radius: 0.2), leaf, at: [-0.14, 1.3, -0.06])
+        case .bookshelf:
+            add([0.76, 1.5, 0.04], palette.desk, at: [0, 0.75, -0.38])
+            for x: Float in [-0.36, 0.36] { add([0.04, 1.5, 0.32], palette.desk, at: [x, 0.75, -0.24]) }
+            let shelves: [Float] = [0.02, 0.4, 0.78, 1.16, 1.49]
+            for y in shelves { add([0.72, 0.03, 0.3], palette.desk, at: [0, y, -0.24]) }
+            let books = [
+                NSColor(red: 0.75, green: 0.25, blue: 0.22, alpha: 1), NSColor(red: 0.2, green: 0.4, blue: 0.7, alpha: 1),
+                NSColor(red: 0.9, green: 0.75, blue: 0.3, alpha: 1), NSColor(red: 0.25, green: 0.55, blue: 0.4, alpha: 1),
+                NSColor(white: 0.9, alpha: 1), NSColor(red: 0.5, green: 0.3, blue: 0.6, alpha: 1),
+            ]
+            for (shelf, y) in shelves.dropLast().enumerated() {
+                var x: Float = -0.32
+                var index = shelf * 3 + piece.variant
+                // Each shelf ends a little earlier, so the rows of books do not line up.
+                while x < 0.3 - Float((shelf + piece.variant) % 3) * 0.08 {
+                    let width: Float = [0.05, 0.07, 0.06][index % 3]
+                    let height: Float = [0.26, 0.3, 0.22, 0.28][index % 4]
+                    add([width, height, 0.22], books[(index * 7) % books.count], at: [x + width / 2, y + 0.015 + height / 2, -0.24])
+                    x += width + 0.005
+                    index += 1
+                }
+            }
+        case .cabinet:
+            let colours = [
+                NSColor(white: 0.6, alpha: 1), NSColor(red: 0.45, green: 0.52, blue: 0.62, alpha: 1),
+                NSColor(red: 0.8, green: 0.75, blue: 0.66, alpha: 1), NSColor(white: 0.3, alpha: 1),
+            ]
+            add([0.5, 0.78, 0.5], pick(colours), at: [0, 0.39, -0.15])
+            for y: Float in [0.26, 0.52] { add([0.46, 0.012, 0.01], metal, at: [0, y, 0.105]) }
+            for y: Float in [0.13, 0.39, 0.65] { add([0.12, 0.025, 0.02], metal, at: [0, y, 0.11]) }
+        case .waterCooler:
+            add([0.32, 0.95, 0.32], NSColor(white: 0.92, alpha: 1), at: [0, 0.475, -0.2])
+            add(.generateCylinder(height: 0.42, radius: 0.14), NSColor(red: 0.6, green: 0.8, blue: 0.95, alpha: 1), at: [0, 1.16, -0.2])
+            add([0.04, 0.05, 0.04], NSColor(red: 0.3, green: 0.5, blue: 0.9, alpha: 1), at: [-0.06, 0.75, -0.03])
+            add([0.04, 0.05, 0.04], NSColor(red: 0.85, green: 0.3, blue: 0.25, alpha: 1), at: [0.06, 0.75, -0.03])
+        case .lamp:
+            add(.generateCylinder(height: 0.03, radius: 0.16), metal, at: [0, 0.015, -0.15])
+            add(.generateCylinder(height: 1.45, radius: 0.018), metal, at: [0, 0.74, -0.15])
+            let shade = ModelEntity(
+                mesh: .generateCylinder(height: 0.26, radius: 0.2),
+                materials: [UnlitMaterial(color: NSColor(red: 1, green: 0.9, blue: 0.7, alpha: 1))])
+            shade.position = [0, 1.5, -0.15]
+            entity.addChild(shade)
+        case .whiteboard:
+            for x: Float in [-0.36, 0.36] {
+                add([0.04, 1.5, 0.04], metal, at: [x, 0.75, -0.3])
+                add([0.04, 0.03, 0.4], metal, at: [x, 0.015, -0.2])
+            }
+            add([0.8, 0.57, 0.03], metal, at: [0, 1.15, -0.29])
+            let board = ModelEntity(
+                mesh: .generateBox(size: [0.76, 0.53, 0.01]), materials: [UnlitMaterial(color: NSColor(white: 0.97, alpha: 1))])
+            board.position = [0, 1.15, -0.27]
+            entity.addChild(board)
+            let ink = [NSColor.systemBlue, .systemRed, .systemGreen, .darkGray]
+            for line in 0..<3 {
+                let width: Float = [0.5, 0.36, 0.44][(line + piece.variant) % 3]
+                let scribble = ModelEntity(
+                    mesh: .generateBox(size: [width, 0.02, 0.004]),
+                    materials: [UnlitMaterial(color: ink[(line + piece.variant) % ink.count])])
+                scribble.position = [-0.3 + width / 2, 1.3 - Float(line) * 0.12, -0.262]
+                entity.addChild(scribble)
+            }
+        case .armchair:
+            let fabric = pick(fabrics)
+            add([0.56, 0.22, 0.6], fabric, at: [0, 0.2, 0])
+            add([0.66, 0.55, 0.16], fabric, at: [0, 0.45, -0.3])
+            for x: Float in [-0.33, 0.33] { add([0.1, 0.38, 0.6], fabric, at: [x, 0.3, 0]) }
+            add([0.48, 0.06, 0.42], fabric.blended(withFraction: 0.25, of: .white) ?? fabric, at: [0, 0.34, 0.06])
+        case .beanBag:
+            add(.generateSphere(radius: 0.32), pick(fabrics), at: [0, 0.2, 0], scale: [1, 0.62, 1])
+        case .bin:
+            add(.generateCylinder(height: 0.36, radius: 0.14), pick([metal, NSColor(red: 0.3, green: 0.45, blue: 0.35, alpha: 1)]), at: [0, 0.18, 0])
+            add(.generateSphere(radius: 0.05), NSColor(white: 0.95, alpha: 1), at: [0.03, 0.37, 0.02])
+        }
+        let turn: Float =
+            switch piece.against {
+            case .north: 0
+            case .south: .pi
+            case .west: .pi / 2
+            case .east: -.pi / 2
+            }
+        entity.orientation = simd_quatf(angle: turn, axis: [0, 1, 0])
+        return entity
     }
 
     /// The Desk a tap landed on, from the entity that was hit.
