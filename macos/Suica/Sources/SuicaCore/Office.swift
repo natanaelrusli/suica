@@ -167,6 +167,11 @@ public struct PlacedRoom: Equatable, Sendable, Identifiable {
     public let desks: [PlacedDesk]
 
     public var id: String { path }
+
+    /// The floor of an office with nobody in it.
+    public static func bare(width: Double, depth: Double) -> PlacedRoom {
+        PlacedRoom(path: "", name: "", center: OfficePoint(x: 0, z: 0), width: width, depth: depth, desks: [])
+    }
 }
 
 /// Where each Room and Desk stands: Rooms in a grid, three to a row, each sized by its Desks.
@@ -181,8 +186,8 @@ public struct OfficeLayout: Equatable, Sendable {
     static let desksPerRow = 3
     static let roomsPerRow = 3
     static let roomGap = 1.4
-    static let emptyWidth = 8.0
-    static let emptyDepth = 6.0
+    static let emptyWidth = 5.4
+    static let emptyDepth = 3.6
 
     public static func make(_ rooms: [OfficeRoom]) -> OfficeLayout {
         guard !rooms.isEmpty else { return OfficeLayout(rooms: [], width: emptyWidth, depth: emptyDepth) }

@@ -32,6 +32,10 @@ extension UnconfiguredClient: ReviewsClient {
     func approve(key: String, sha: String) async throws(AgentError) -> ActionResult { throw AgentError.launchFailed }
 }
 
+extension UnconfiguredClient: OfficeClient {
+    func office() async throws(AgentError) -> OfficeDocument { throw AgentError.launchFailed }
+}
+
 extension UnconfiguredClient: TemplatesClient {
     func templates() async throws(AgentError) -> TemplatesDocument { throw AgentError.launchFailed }
     func saveTemplate(name: String, text: String?) async throws(AgentError) -> TemplateSaveResult {
@@ -79,6 +83,7 @@ struct SuicaApp: App {
     @State private var editor: ConfigEditorModel
     @State private var reviews: ReviewsModel
     @State private var templates: TemplateEditorModel
+    @State private var office: OfficeModel
     @State private var appearance = AppearanceSettings()
     @State private var navigator = Navigator()
     @State private var celebrations = CelebrationCounter()
@@ -88,17 +93,20 @@ struct SuicaApp: App {
         let dashboard: any DashboardClient
         let reviewsClient: any ReviewsClient
         let templatesClient: any TemplatesClient
+        let officeClient: any OfficeClient
         if let config = AgentConfig.fromBundle(.main) {
             let client = CLIAgentClient(config: config, runner: ProcessRunner())
             agent = client
             dashboard = client
             reviewsClient = client
             templatesClient = client
+            officeClient = client
         } else {
             agent = UnconfiguredClient()
             dashboard = UnconfiguredClient()
             reviewsClient = UnconfiguredClient()
             templatesClient = UnconfiguredClient()
+            officeClient = UnconfiguredClient()
         }
         let model = MenuModel(client: agent)
         _model = State(initialValue: model)
@@ -109,6 +117,7 @@ struct SuicaApp: App {
         _editor = State(initialValue: ConfigEditorModel(client: dashboard))
         _reviews = State(initialValue: ReviewsModel(client: reviewsClient))
         _templates = State(initialValue: TemplateEditorModel(client: templatesClient))
+        _office = State(initialValue: OfficeModel(client: officeClient))
         Task { @MainActor in await model.runRefreshLoop(every: refreshInterval) }
     }
 
@@ -126,8 +135,8 @@ struct SuicaApp: App {
 
         Window(Copy.appName, id: "main") {
             MainWindow(
-                window: window, editor: editor, reviews: reviews, templates: templates, settings: appearance,
-                navigator: navigator
+                window: window, editor: editor, reviews: reviews, templates: templates, office: office,
+                settings: appearance, navigator: navigator
             )
             .modifier(Celebrations(model: model, reviews: reviews, settings: appearance, counter: celebrations))
             .appearance(appearance)

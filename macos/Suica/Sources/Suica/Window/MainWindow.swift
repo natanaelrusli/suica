@@ -190,6 +190,7 @@ struct MainWindow: View {
     let editor: ConfigEditorModel
     let reviews: ReviewsModel
     let templates: TemplateEditorModel
+    let office: OfficeModel
     let settings: AppearanceSettings
     @Bindable var navigator: Navigator
     @State private var columns: NavigationSplitViewVisibility = .all
@@ -381,6 +382,7 @@ struct MainWindow: View {
         case .logs: LogsView(window: window)
         case .configuration: ConfigurationView(window: window, editor: editor, navigator: navigator, category: item.category)
         case .appearance: AppearanceView(settings: settings)
+        case .office: OfficeView(model: office)
         }
     }
 }
