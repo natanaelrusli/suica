@@ -181,7 +181,7 @@ private struct OfficeSceneView: View {
 }
 
 /// Reports whether the view's window can be seen: not minimized, hidden or fully covered.
-private struct WindowVisibility: NSViewRepresentable {
+struct WindowVisibility: NSViewRepresentable {
     let onChange: (Bool) -> Void
 
     func makeNSView(context: Context) -> ObserverView {
