@@ -82,25 +82,96 @@ import Testing
     #expect(model.errorText == nil)
 }
 
-@MainActor @Test func modelKeepsOnlyTheLatestEntries() throws {
+/// A log folder holding `stdout.log` with these lines; removed by the caller.
+private func logFolder(_ lines: [String]) throws -> URL {
     let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-    defer { try? FileManager.default.removeItem(at: folder) }
-    let lines = (1...LogsModel.maxEntries + 20).map {
-        #"{"timestamp":"2026-10-20T03:48:50.346Z","level":"info","message":"poll \#($0)"}"#
-    }
     try lines.joined(separator: "\n").write(to: folder.appendingPathComponent("stdout.log"), atomically: true, encoding: .utf8)
+    return folder
+}
+
+private func line(_ day: Int, _ message: String) -> String {
+    #"{"timestamp":"2026-10-\#(day)T03:48:50.346Z","level":"info","message":"\#(message)"}"#
+}
+
+private func utc(_ text: String) -> Date { ISO8601DateFormatter().date(from: text)! }
+
+@MainActor @Test func modelShowsTheLatest200EntriesByDefault() throws {
+    let folder = try logFolder((1...220).map { line(20, "poll \($0)") })
+    defer { try? FileManager.default.removeItem(at: folder) }
 
     let model = LogsModel()
     model.load(folder: folder.path)
-    #expect(model.entries.count == LogsModel.maxEntries)
+    #expect(model.entries.count == 200)
     #expect(model.entries.first?.message == "poll 21")
-    #expect(model.entries.last?.message == "poll \(LogsModel.maxEntries + 20)")
+    #expect(model.entries.last?.message == "poll 220")
     #expect(model.truncated)
 
-    try lines.prefix(3).joined(separator: "\n")
-        .write(to: folder.appendingPathComponent("stdout.log"), atomically: true, encoding: .utf8)
-    model.load(folder: folder.path, force: true)
-    #expect(model.entries.count == 3)
+    // A new limit is read without `force`.
+    model.limit = 500
+    model.load(folder: folder.path)
+    #expect(model.entries.count == 220)
     #expect(!model.truncated)
+}
+
+@MainActor @Test func modelReadsFurtherBackForALargeLimit() throws {
+    // About 100 bytes a line, so 2000 lines are well past the first read.
+    let folder = try logFolder((1...3000).map { line(20, "poll \($0)") })
+    defer { try? FileManager.default.removeItem(at: folder) }
+
+    let model = LogsModel()
+    model.limit = 2000
+    model.load(folder: folder.path)
+    #expect(model.entries.count == 2000)
+    #expect(model.entries.first?.message == "poll 1001")
+    #expect(model.truncated)
+}
+
+@MainActor @Test func modelShowsOnlyEntriesInTheDateRange() throws {
+    // Day 18 lies before the first read of the end of the file.
+    let folder = try logFolder(
+        (1...10).map { line(17, "old \($0)") } + (1...300).map { line(18, "in \($0)") }
+            + (1...3000).map { line(19, "new \($0)") })
+    defer { try? FileManager.default.removeItem(at: folder) }
+
+    let model = LogsModel()
+    model.dateRange = utc("2026-10-18T00:00:00Z")...utc("2026-10-18T23:59:59Z")
+    model.load(folder: folder.path)
+    #expect(model.entries.count == 200)
+    #expect(model.entries.first?.message == "in 101")
+    #expect(model.entries.last?.message == "in 300")
+    #expect(model.truncated)
+
+    model.limit = 500
+    model.load(folder: folder.path)
+    #expect(model.entries.count == 300)
+    #expect(model.entries.first?.message == "in 1")
+    // The read reached day 17, so nothing in the range was left out.
+    #expect(!model.truncated)
+
+    model.dateRange = utc("2026-10-25T00:00:00Z")...utc("2026-10-26T00:00:00Z")
+    model.load(folder: folder.path)
+    #expect(model.entries.isEmpty)
+}
+
+@Test func undatedEntriesGoWithTheDatedEntryBeforeThem() {
+    let entries = [
+        LogEntry(id: 0, date: nil, level: nil, message: "orphan", attributes: nil),
+        LogEntry(id: 1, date: utc("2026-10-17T10:00:00Z"), level: "info", message: "before", attributes: nil),
+        LogEntry(id: 2, date: nil, level: nil, message: "trace before", attributes: nil),
+        LogEntry(id: 3, date: utc("2026-10-18T10:00:00Z"), level: "error", message: "inside", attributes: nil),
+        LogEntry(id: 4, date: nil, level: nil, message: "trace inside", attributes: nil),
+    ]
+    let range = utc("2026-10-18T00:00:00Z")...utc("2026-10-19T00:00:00Z")
+    #expect(LogFilter.within(entries, range).map(\.message) == ["inside", "trace inside"])
+}
+
+@Test func dayRangeCoversWholeDaysInEitherOrder() {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(identifier: "Asia/Jakarta")!
+    let range = LogFilter.days(from: utc("2026-10-20T18:00:00Z"), to: utc("2026-10-18T01:00:00Z"), calendar: calendar)
+    // 20 Oct 18:00 UTC is already 21 Oct in Jakarta (UTC+7).
+    #expect(range.lowerBound == utc("2026-10-17T17:00:00Z"))
+    #expect(range.contains(utc("2026-10-21T16:59:59Z")))
+    #expect(!range.contains(utc("2026-10-21T17:00:00Z")))
 }

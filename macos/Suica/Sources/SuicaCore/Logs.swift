@@ -114,25 +114,61 @@ public struct LogTail: Equatable, Sendable {
     }
 }
 
+/// Entries written within a date range. An entry without a date (a stack trace) belongs with the
+/// dated entry before it; one with no dated entry before it is left out.
+public enum LogFilter {
+    public static func within(_ entries: [LogEntry], _ range: ClosedRange<Date>) -> [LogEntry] {
+        var date: Date?
+        return entries.filter { entry in
+            date = entry.date ?? date
+            return date.map(range.contains) ?? false
+        }
+    }
+
+    /// From the start of the day of `from` to the end of the day of `to`, in either order.
+    public static func days(from: Date, to: Date, calendar: Calendar = .current) -> ClosedRange<Date> {
+        let first = calendar.startOfDay(for: min(from, to))
+        let lastDay = calendar.startOfDay(for: max(from, to))
+        let end = calendar.date(byAdding: .day, value: 1, to: lastDay)!.addingTimeInterval(-0.001)
+        return first...end
+    }
+}
+
 /// The Logs page: the end of the agent's output or error log, read again when the file changes.
 @MainActor @Observable
 public final class LogsModel {
-    /// Only the last entries are kept, so the page parses and lays out a few hundred rows, not
-    /// thousands, each time the agent writes.
-    public static let maxEntries = 500
-    /// Enough for `maxEntries` lines of about 180 bytes, the agent's usual line, with room to spare.
-    public static let maxBytes = 128 * 1024
+    /// How many entries the page shows unless the person picks another number, so it parses and
+    /// lays out a few hundred rows, not thousands, each time the agent writes.
+    public static let defaultLimit = 200
+    public static let limitChoices = [50, 100, 200, 500, 1000, 2000]
+    /// The first read: about 700 lines of 180 bytes, the agent's usual line.
+    static let firstReadBytes = 128 * 1024
+    /// Reads grow fourfold until they hold enough entries, up to this much. The agent does not
+    /// rotate its logs, so a date range far back in a large file stops here.
+    public static let maxBytes = 32 * 1024 * 1024
 
     public var stream: LogStream = .output
+    /// The most entries shown, the latest ones.
+    public var limit = LogsModel.defaultLimit
+    /// Only entries written in this range are shown; nil shows them all.
+    public var dateRange: ClosedRange<Date>?
     public private(set) var entries: [LogEntry] = []
-    /// Earlier entries were left out, by `maxBytes` or `maxEntries`.
+    /// Earlier entries were left out, by `limit` or `maxBytes`.
     public private(set) var truncated = false
     /// The file does not exist yet.
     public private(set) var missing = false
     public private(set) var errorText: String?
-    /// The file's size and modification date when it was last read, so an unchanged file is not
-    /// parsed again on every tick.
-    @ObservationIgnored private var lastRead: (stream: LogStream, folder: String, size: Int, modified: Date?)?
+    /// What was read last time, so an unchanged file is not parsed again on every tick.
+    @ObservationIgnored private var lastRead: ReadKey?
+
+    private struct ReadKey: Equatable {
+        let stream: LogStream
+        let folder: String
+        let size: Int
+        let modified: Date?
+        let limit: Int
+        let dateRange: ClosedRange<Date>?
+    }
 
     public init() {}
 
@@ -140,25 +176,36 @@ public final class LogsModel {
         URL(fileURLWithPath: folder).appendingPathComponent(stream.fileName)
     }
 
-    /// Reads the file again when it changed since the last read, or `force` is set.
+    /// Reads the file again when it, the limit or the range changed since the last read, or
+    /// `force` is set.
     public func load(folder: String, force: Bool = false) {
         let url = url(in: folder)
         let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
-        let size = (attributes?[.size] as? NSNumber)?.intValue ?? -1
-        let modified = attributes?[.modificationDate] as? Date
-        if !force, let last = lastRead, last.stream == stream, last.folder == folder, last.size == size,
-            last.modified == modified
-        {
-            return
-        }
-        lastRead = (stream, folder, size, modified)
+        let key = ReadKey(
+            stream: stream, folder: folder, size: (attributes?[.size] as? NSNumber)?.intValue ?? -1,
+            modified: attributes?[.modificationDate] as? Date, limit: limit, dateRange: dateRange)
+        if !force, key == lastRead { return }
+        lastRead = key
         do {
-            let tail = try LogTail.read(url, maxBytes: Self.maxBytes)
-            let parsed = tail.map { LogParser.entries($0.text) } ?? []
-            missing = tail == nil
-            truncated = (tail?.truncated ?? false) || parsed.count > Self.maxEntries
-            entries = Array(parsed.suffix(Self.maxEntries))
-            errorText = nil
+            var bytes = Self.firstReadBytes
+            while true {
+                let tail = try LogTail.read(url, maxBytes: bytes)
+                let parsed = tail.map { LogParser.entries($0.text) } ?? []
+                let kept = dateRange.map { LogFilter.within(parsed, $0) } ?? parsed
+                // Entries come in the order they were written, so once the read reaches back past
+                // the range, reading further finds nothing more in it.
+                let firstDate = parsed.lazy.compactMap(\.date).first
+                let pastRange = dateRange.map { range in firstDate.map { $0 < range.lowerBound } ?? false } ?? false
+                let readAll = !(tail?.truncated ?? false) || pastRange
+                if readAll || kept.count > limit || bytes >= Self.maxBytes {
+                    missing = tail == nil
+                    truncated = !readAll || kept.count > limit
+                    entries = Array(kept.suffix(limit))
+                    errorText = nil
+                    return
+                }
+                bytes = min(bytes * 4, Self.maxBytes)
+            }
         } catch {
             errorText = Copy.logReadFailed(error.localizedDescription)
         }

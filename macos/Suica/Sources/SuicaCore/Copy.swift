@@ -883,7 +883,13 @@ public enum Copy {
     public static let logEmpty = "Nothing logged yet."
     public static let logNoMatches = "No entries match the search."
     public static func logMissing(_ file: String) -> String { "\(file) does not exist yet." }
-    public static func logTruncated(_ entries: Int) -> String { "Showing the latest \(entries) entries at most." }
+    public static let logNoneInRange = "Nothing was logged in this date range."
+    public static func logTruncated(_ entries: Int) -> String { "Showing the latest \(entries) entries." }
+    public static let logLimit = "Show"
+    public static func logLimitChoice(_ entries: Int) -> String { "Latest \(entries)" }
+    public static let logDateRange = "Date range"
+    public static let logFrom = "From"
+    public static let logTo = "to"
 
     public static let searchMessages = "Search messages"
     public static let searchReviews = "Search review requests"

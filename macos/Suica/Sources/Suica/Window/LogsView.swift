@@ -8,17 +8,24 @@ struct LogsView: View {
     let window: WindowModel
     @State private var model = LogsModel()
     @State private var query = ""
+    @AppStorage("logsLimit") private var limit = LogsModel.defaultLimit
+    @State private var rangeOn = false
+    @State private var from = Date()
+    @State private var to = Date()
 
     private var folder: String? { window.status?.paths.logs }
 
     private var shown: [LogEntry] { model.entries.filter { $0.matches(query) } }
 
+    private var dateRange: ClosedRange<Date>? { rangeOn ? LogFilter.days(from: from, to: to) : nil }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             toolbar
+            filters
             if let folder {
                 if let text = model.errorText { NoticeBox(text: text, tint: .red) }
-                if model.truncated { NoticeBox(text: Copy.logTruncated(LogsModel.maxEntries), tint: .secondary) }
+                if model.truncated { NoticeBox(text: Copy.logTruncated(model.entries.count), tint: .secondary) }
                 entries(folder: folder)
             } else if window.errorText != nil {
                 NoticeBox(text: Copy.logFolderUnknown, tint: .red, closable: false)
@@ -31,8 +38,10 @@ struct LogsView: View {
         .motion(value: model.errorText)
         .motion(value: model.truncated)
         .searchable(text: $query, prompt: Copy.searchLogs)
-        // Restarted when the stream or folder changes; cancelled when the page goes away.
-        .task(id: "\(folder ?? "")|\(model.stream.rawValue)") {
+        // Restarted when the stream, folder, limit or range changes; cancelled when the page goes away.
+        .task(id: "\(folder ?? "")|\(model.stream.rawValue)|\(limit)|\(String(describing: dateRange))") {
+            model.limit = limit
+            model.dateRange = dateRange
             guard let folder else { return }
             while !Task.isCancelled {
                 model.load(folder: folder)
@@ -69,13 +78,34 @@ struct LogsView: View {
         .buttonStyle(.bordered)
     }
 
+    private var filters: some View {
+        HStack(spacing: 8) {
+            Toggle(Copy.logDateRange, isOn: $rangeOn)
+            Group {
+                DatePicker(Copy.logFrom, selection: $from, displayedComponents: .date)
+                Text(Copy.logTo).foregroundStyle(.secondary)
+                DatePicker(Copy.logTo, selection: $to, displayedComponents: .date)
+            }
+            .labelsHidden()
+            .datePickerStyle(.compact)
+            .fixedSize()
+            .disabled(!rangeOn)
+            Spacer()
+            Picker(Copy.logLimit, selection: $limit) {
+                ForEach(LogsModel.limitChoices, id: \.self) { Text(Copy.logLimitChoice($0)).tag($0) }
+            }
+            .fixedSize()
+        }
+    }
+
     @ViewBuilder private func entries(folder: String) -> some View {
         let shown = shown
         if shown.isEmpty {
             let text =
                 model.missing
                 ? Copy.logMissing(model.stream.fileName)
-                : model.entries.isEmpty ? Copy.logEmpty : Copy.logNoMatches
+                : !model.entries.isEmpty ? Copy.logNoMatches
+                : dateRange != nil ? Copy.logNoneInRange : Copy.logEmpty
             Text(text)
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
