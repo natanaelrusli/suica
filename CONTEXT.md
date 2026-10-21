@@ -55,3 +55,19 @@ _Avoid_: incremental review, follow-up review
 **Pending Message**:
 A Reviewer Nudge, Re-review Nudge or Review Notice written by the agent but held until the Owner sends or skips it, when that flow is set to require approval.
 _Avoid_: Draft, queued message
+
+**Coding Agent**:
+A coding assistant process running on the Owner's Mac (Claude Code, Codex, Gemini CLI, …). Not Suica's own background agent, and not an Agent Review.
+_Avoid_: Agent (alone), bot
+
+**Session**:
+One running conversation of a Coding Agent, in one folder.
+_Avoid_: Run, process
+
+**Room**:
+A project folder (its git repository root; worktrees join the main repository's Room) that has at least one live Session, drawn as a room in the Office.
+_Avoid_: Project (alone), workspace
+
+**Desk**:
+One Session's place in its Room.
+_Avoid_: Seat, slot
