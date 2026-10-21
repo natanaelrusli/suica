@@ -81,5 +81,23 @@
         "dueAt": 1792152800000
       }
     }
+  ],
+  "yourMergeRequests": [
+    {
+      "key": "g/p!8",
+      "title": "MR 8",
+      "url": "https://gitlab.example/g/p/-/merge_requests/8",
+      "draft": false,
+      "createdAt": null,
+      "reviewers": [],
+      "approvedByAll": false,
+      "fix": {
+        "id": 5,
+        "status": "ready",
+        "threads": 2,
+        "changed": 1,
+        "detail": ""
+      }
+    }
   ]
 }

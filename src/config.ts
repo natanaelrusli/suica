@@ -9,6 +9,11 @@ import { errorMessage } from "./util.ts";
 
 const positiveInt = z.number().int().positive();
 
+// Passed as one argument after --model / -m; a leading letter or digit keeps it from being a flag.
+const modelSchema = z
+  .string()
+  .regex(/^[A-Za-z0-9][\w.:[\]/-]*$/, "must be a model name such as sonnet, opus or haiku");
+
 const sendModeSchema = z.enum(["auto", "approval", "dry-run"]);
 const clockSchema = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "must be HH:MM (24 hours)");
 
@@ -96,11 +101,7 @@ export const configSchema = z
           .string()
           .regex(/^[\w-]+(:[\w-]+)?$/, "must be a skill name such as plugin:skill")
           .default("madhani:madhani-code-review"),
-        // Passed as one argument after --model / -m; a leading letter or digit keeps it from being a flag.
-        model: z
-          .string()
-          .regex(/^[A-Za-z0-9][\w.:[\]/-]*$/, "must be a model name such as sonnet, opus or haiku")
-          .optional(),
+        model: modelSchema.optional(),
         // How hard the CLI thinks: claude --effort, codex model_reasoning_effort (max is xhigh there).
         effort: z.enum(REVIEW_EFFORTS).default("medium"),
         maxChangedLines: positiveInt.default(800),
@@ -109,6 +110,18 @@ export const configSchema = z
         timeoutMinutes: positiveInt.default(20),
         // How many reviews run at once, each with its own CLI process and checkout.
         concurrency: z.number().int().min(1).max(4).default(2),
+      })
+      .strict()
+      .default({}),
+    // Agent Fix: answers Reviewer threads on the Owner's own MRs; nothing is pushed before the Owner confirms.
+    fix: z
+      .object({
+        // Watch the Owner's MRs and queue fixes by themselves.
+        auto: z.boolean().default(true),
+        model: modelSchema.optional(),
+        effort: z.enum(REVIEW_EFFORTS).default("medium"),
+        timeoutMinutes: positiveInt.default(20),
+        maxPerDay: positiveInt.default(10),
       })
       .strict()
       .default({}),

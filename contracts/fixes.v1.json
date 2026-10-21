@@ -1,0 +1,141 @@
+{
+  "version": 1,
+  "fixes": [
+    {
+      "id": 2,
+      "mrKey": "g/p!8",
+      "mrTitle": null,
+      "status": "failed",
+      "threads": [
+        {
+          "id": "gid://gitlab/Discussion/6a9c1750b37d513a43987b574953fceb50b03ce7",
+          "noteId": "n1",
+          "author": {
+            "username": "bob",
+            "name": "Bob"
+          },
+          "filePath": "src/a.ts",
+          "line": 3,
+          "notes": [
+            {
+              "author": {
+                "username": "bob",
+                "name": "Bob"
+              },
+              "body": "Rename this",
+              "createdAt": "2026-10-21T09:00:00Z"
+            }
+          ],
+          "action": null,
+          "reply": "",
+          "post": false,
+          "posted": false
+        }
+      ],
+      "note": "",
+      "baseSha": null,
+      "commitMessage": "",
+      "diff": null,
+      "pushedSha": null,
+      "cli": null,
+      "model": null,
+      "detail": "the model gave no answer block",
+      "activity": [],
+      "createdAt": 1792576799500,
+      "updatedAt": 1792576799600,
+      "startedAt": null
+    },
+    {
+      "id": 1,
+      "mrKey": "g/p!7",
+      "mrTitle": "Add thing",
+      "status": "ready",
+      "threads": [
+        {
+          "id": "gid://gitlab/Discussion/6a9c1750b37d513a43987b574953fceb50b03ce7",
+          "noteId": "n1",
+          "author": {
+            "username": "bob",
+            "name": "Bob"
+          },
+          "filePath": "src/a.ts",
+          "line": 3,
+          "notes": [
+            {
+              "author": {
+                "username": "bob",
+                "name": "Bob"
+              },
+              "body": "Rename this",
+              "createdAt": "2026-10-21T09:00:00Z"
+            }
+          ],
+          "action": "changed",
+          "reply": "Fixed in {{sha}}: renamed.",
+          "post": true,
+          "posted": false
+        },
+        {
+          "id": "gid://gitlab/Discussion/1111111111111111111111111111111111111111",
+          "noteId": "n2",
+          "author": {
+            "username": "bob",
+            "name": "Bob"
+          },
+          "filePath": "src/a.ts",
+          "line": 3,
+          "notes": [
+            {
+              "author": {
+                "username": "bob",
+                "name": "Bob"
+              },
+              "body": "Rename this",
+              "createdAt": "2026-10-21T09:00:00Z"
+            }
+          ],
+          "action": "reply",
+          "reply": "This is on purpose.",
+          "post": true,
+          "posted": false
+        },
+        {
+          "id": "gid://gitlab/Discussion/2222222222222222222222222222222222222222",
+          "noteId": "n3",
+          "author": {
+            "username": "bob",
+            "name": "Bob"
+          },
+          "filePath": "src/a.ts",
+          "line": 3,
+          "notes": [
+            {
+              "author": {
+                "username": "bob",
+                "name": "Bob"
+              },
+              "body": "Rename this",
+              "createdAt": "2026-10-21T09:00:00Z"
+            }
+          ],
+          "action": "reply",
+          "reply": "",
+          "post": false,
+          "posted": false
+        }
+      ],
+      "note": "",
+      "baseSha": "0123456789abcdef0123456789abcdef01234567",
+      "commitMessage": "Rename the total",
+      "diff": "diff --git a b\n",
+      "pushedSha": null,
+      "cli": null,
+      "model": null,
+      "detail": "",
+      "activity": [],
+      "createdAt": 1792576799000,
+      "updatedAt": 1792576799200,
+      "startedAt": null
+    }
+  ]
+}

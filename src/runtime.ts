@@ -2,11 +2,13 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { defaultStatePath, loadConfig } from "./config.ts";
 import type { Config } from "./config.ts";
+import { queueAutomaticFixes } from "./agent-fix.ts";
 import { createReviewWorker, queueAutomaticReviews } from "./agent-review.ts";
 import type { ReviewWorker } from "./agent-review.ts";
 import { defaultExec } from "./exec.ts";
 import { createFailureTracker } from "./failures.ts";
 import {
+  fetchCurrentUsername,
   fetchPerson,
   fetchSnapshot,
   glabPost,
@@ -18,6 +20,8 @@ import { createLogger } from "./log.ts";
 import type { Logger } from "./log.ts";
 import { loadAlerts } from "./alerts.ts";
 import { createNotifier } from "./notifier.ts";
+import { createFixWorker } from "./fix-runner.ts";
+import { fetchFixDetail } from "./reviews.ts";
 import { pollOnce } from "./poller.ts";
 import type { PollDeps, PollStatus } from "./poller.ts";
 import { openStore } from "./store.ts";
@@ -35,6 +39,10 @@ export interface Runtime {
   readonly teams: TeamsService | undefined;
   /** Runs queued Agent Reviews; only the daemon ticks it. */
   readonly reviews: ReviewWorker;
+  /** Runs queued Agent Fixes, one at a time; only the daemon ticks it. */
+  readonly fixes: ReviewWorker;
+  /** The state database's path; Agent Fix checkouts live beside it. */
+  readonly statePath: string;
   poll(): Promise<PollStatus>;
 }
 
@@ -48,7 +56,8 @@ function defaultTeamsCommand(): string {
 export function createRuntime(configPath: string, signal?: AbortSignal): Runtime {
   const log = createLogger();
   const config = loadConfig(configPath);
-  const store = openStore(config.statePath ?? defaultStatePath());
+  const statePath = config.statePath ?? defaultStatePath();
+  const store = openStore(statePath);
   const run = glabRunner(config.gitlab);
 
   // A bad template stops startup (TemplateError) instead of producing broken messages later.
@@ -89,6 +98,30 @@ export function createRuntime(configPath: string, signal?: AbortSignal): Runtime
     ...(signal === undefined ? {} : { signal }),
   });
 
+  // Asked once per run of the agent; a failed lookup is asked again by the next fix.
+  let owner: Promise<string> | undefined;
+  const ownerName = (): Promise<string> => {
+    owner ??= fetchCurrentUsername(glabRest(config.gitlab)).catch((error: unknown) => {
+      owner = undefined;
+      throw error;
+    });
+    return owner;
+  };
+  const fixes = createFixWorker({
+    owner: ownerName,
+    store,
+    config,
+    exec: defaultExec,
+    graphql: run,
+    rest: glabRest(config.gitlab),
+    notifier,
+    alerts,
+    log,
+    now: Date.now,
+    statePath,
+    ...(signal === undefined ? {} : { signal }),
+  });
+
   const deps: PollDeps = {
     fetchSnapshot: () => fetchSnapshot(run),
     lookupPerson: (username) => fetchPerson(glabRest(config.gitlab), username),
@@ -98,11 +131,23 @@ export function createRuntime(configPath: string, signal?: AbortSignal): Runtime
     queueReviews: (snapshot, newRequests) => {
       queueAutomaticReviews({ store, config, log, now: Date.now }, snapshot, newRequests);
     },
+    queueFixes: (snapshot, previous) =>
+      queueAutomaticFixes(
+        {
+          store,
+          config,
+          log,
+          now: Date.now,
+          detail: (key) => fetchFixDetail(run, glabRest(config.gitlab), key),
+        },
+        snapshot,
+        previous.seenNotes,
+      ),
     failures: createFailureTracker(),
     log,
     config,
     now: Date.now,
     ...(teams === undefined ? {} : { teams }),
   };
-  return { config, store, log, teams, reviews, poll: () => pollOnce(deps) };
+  return { config, store, log, teams, reviews, fixes, statePath, poll: () => pollOnce(deps) };
 }

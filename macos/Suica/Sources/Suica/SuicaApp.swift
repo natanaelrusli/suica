@@ -32,6 +32,21 @@ extension UnconfiguredClient: ReviewsClient {
     func approve(key: String, sha: String) async throws(AgentError) -> ActionResult { throw AgentError.launchFailed }
 }
 
+extension UnconfiguredClient: FixesClient {
+    func fixes() async throws(AgentError) -> FixListDocument { throw AgentError.launchFailed }
+    func queueFix(key: String) async throws(AgentError) -> ActionResult { throw AgentError.launchFailed }
+    func confirmFix(id: Int, edits: ConfirmEdits) async throws(AgentError) -> ActionResult { throw AgentError.launchFailed }
+    func retryFix(id: Int, note: String) async throws(AgentError) -> ActionResult { throw AgentError.launchFailed }
+    func discardFix(id: Int) async throws(AgentError) -> ActionResult { throw AgentError.launchFailed }
+    func cancelFix(id: Int) async throws(AgentError) -> ActionResult { throw AgentError.launchFailed }
+    func postMissingReplies(id: Int) async throws(AgentError) -> ActionResult { throw AgentError.launchFailed }
+    func comment(key: String, body: String) async throws(AgentError) -> ActionResult { throw AgentError.launchFailed }
+    func merge(key: String, sha: String, choice: MergeChoice) async throws(AgentError) -> ActionResult {
+        throw AgentError.launchFailed
+    }
+    func close(key: String) async throws(AgentError) -> ActionResult { throw AgentError.launchFailed }
+}
+
 extension UnconfiguredClient: TemplatesClient {
     func templates() async throws(AgentError) -> TemplatesDocument { throw AgentError.launchFailed }
     func saveTemplate(name: String, text: String?) async throws(AgentError) -> TemplateSaveResult {
@@ -78,6 +93,7 @@ struct SuicaApp: App {
     @State private var window: WindowModel
     @State private var editor: ConfigEditorModel
     @State private var reviews: ReviewsModel
+    @State private var fixes: FixesModel
     @State private var templates: TemplateEditorModel
     @State private var appearance = AppearanceSettings()
     @State private var navigator = Navigator()
@@ -87,17 +103,20 @@ struct SuicaApp: App {
         let agent: any AgentClient
         let dashboard: any DashboardClient
         let reviewsClient: any ReviewsClient
+        let fixesClient: any FixesClient
         let templatesClient: any TemplatesClient
         if let config = AgentConfig.fromBundle(.main) {
             let client = CLIAgentClient(config: config, runner: ProcessRunner())
             agent = client
             dashboard = client
             reviewsClient = client
+            fixesClient = client
             templatesClient = client
         } else {
             agent = UnconfiguredClient()
             dashboard = UnconfiguredClient()
             reviewsClient = UnconfiguredClient()
+            fixesClient = UnconfiguredClient()
             templatesClient = UnconfiguredClient()
         }
         let model = MenuModel(client: agent)
@@ -108,6 +127,7 @@ struct SuicaApp: App {
         LinkDelegate.window = window
         _editor = State(initialValue: ConfigEditorModel(client: dashboard))
         _reviews = State(initialValue: ReviewsModel(client: reviewsClient))
+        _fixes = State(initialValue: FixesModel(client: fixesClient))
         _templates = State(initialValue: TemplateEditorModel(client: templatesClient))
         Task { @MainActor in await model.runRefreshLoop(every: refreshInterval) }
     }
@@ -126,7 +146,7 @@ struct SuicaApp: App {
 
         Window(Copy.appName, id: "main") {
             MainWindow(
-                window: window, editor: editor, reviews: reviews, templates: templates, settings: appearance,
+                window: window, editor: editor, reviews: reviews, fixes: fixes, templates: templates, settings: appearance,
                 navigator: navigator
             )
             .modifier(Celebrations(model: model, reviews: reviews, settings: appearance, counter: celebrations))

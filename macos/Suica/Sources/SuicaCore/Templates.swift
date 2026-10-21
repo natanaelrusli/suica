@@ -195,6 +195,8 @@ public enum AlertPreview {
         "alert.titles": "Diminta review: [ABC-12] feat: export | !7: fix: login +2 lainnya",
         "reviewers.names": "Budi Santoso dan Rina Wijaya",
         "review.reason": "the model CLI timed out after 20 minutes",
+        "fix.threads": "3",
+        "fix.reason": "the model gave no answer block",
     ]
 
     /// The title (first line) and body (the rest) of an alert template.

@@ -52,6 +52,18 @@ _Avoid_: Auto review, bot review
 An Agent Review of an MR whose previous Agent Review was posted, written after the Author pushed new commits (or, when the Owner asks for one, changed the description). It reviews the changes since the commit the previous review covered and says, for each finding of the previous review, whether it was fixed.
 _Avoid_: incremental review, follow-up review
 
+**Finding Thread**:
+An unresolved, resolvable discussion on the Owner's own MR whose newest note was written by someone other than the Owner, bots included. A Reviewer's new thread is one, and so is a Reviewer's answer to a reply the agent posted.
+_Avoid_: comment, finding (alone)
+
+**Watched MR**:
+An open MR the Owner authored that is not yet approved (it has Reviewers and not all of them approved). Only Watched MRs get automatic Agent Fixes.
+_Avoid_: tracked MR
+
+**Agent Fix**:
+A change to the Owner's own MR that the agent writes with a language model to answer Finding Threads: it changes code, drafts replies, or both. It is committed, pushed (never with force) and replied as the Owner only once the Owner confirms it; the Reviewers resolve their threads.
+_Avoid_: auto fix, bot commit
+
 **Pending Message**:
 A Reviewer Nudge, Re-review Nudge or Review Notice written by the agent but held until the Owner sends or skips it, when that flow is set to require approval.
 _Avoid_: Draft, queued message

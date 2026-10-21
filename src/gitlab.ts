@@ -244,13 +244,24 @@ export type PostRunner = (
   fields: Readonly<Record<string, string>>,
 ) => Promise<unknown>;
 
-export function glabPost(config: Config["gitlab"], exec: Exec = defaultExec): PostRunner {
+function formRunner(config: Config["gitlab"], exec: Exec, method: "POST" | "PUT"): PostRunner {
   return (path, fields) =>
     runGlab(config, exec, path, [
       "-X",
-      "POST",
+      method,
       ...Object.entries(fields).flatMap(([name, value]) => ["-f", `${name}=${value}`]),
     ]);
+}
+
+export function glabPost(config: Config["gitlab"], exec: Exec = defaultExec): PostRunner {
+  return formRunner(config, exec, "POST");
+}
+
+/** A REST PUT with string form fields, such as a merge. */
+export type PutRunner = PostRunner;
+
+export function glabPut(config: Config["gitlab"], exec: Exec = defaultExec): PutRunner {
+  return formRunner(config, exec, "PUT");
 }
 
 /** A REST POST with a JSON body, for nested fields such as a diff thread's `position`. */
@@ -287,6 +298,15 @@ export async function fetchPerson(rest: RestRunner, username: string): Promise<P
   const users = usersSchema.safeParse(await rest(`users?username=${encodeURIComponent(username)}`));
   if (!users.success) throw new FetchFailure("gitlab-error", "unexpected users response shape");
   return users.data.find((user) => user.username === username);
+}
+
+const currentUserSchema = z.object({ username: z.string() });
+
+/** The username of the account glab is signed in as: the Owner. */
+export async function fetchCurrentUsername(rest: RestRunner): Promise<string> {
+  const user = currentUserSchema.safeParse(await rest("user"));
+  if (!user.success) throw new FetchFailure("gitlab-error", "unexpected user response shape");
+  return user.data.username;
 }
 
 export async function fetchSnapshot(run: GraphqlRunner): Promise<Snapshot> {

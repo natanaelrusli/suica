@@ -6,6 +6,7 @@ import { FetchFailure } from "./gitlab.ts";
 import type { GraphqlRunner, PostRunner, RestRunner } from "./gitlab.ts";
 import { isReadyToApprove } from "./inline-review.ts";
 import type { Logger } from "./log.ts";
+import type { FixRow, FixStatus } from "./fix-store.ts";
 import type { ActivityLine, AgentReviewRow, AgentReviewStatus } from "./store.ts";
 
 /** The newest Agent Review of an MR. */
@@ -125,6 +126,32 @@ export interface ReviewListJson {
   /** The Owner, so the app can find the Owner among each MR's reviewers. */
   readonly me: Person;
   readonly mergeRequests: readonly ReviewSummaryJson[];
+  /** The Owner's own open MRs, in GitLab's order. */
+  readonly yourMergeRequests: readonly YourMrJson[];
+}
+
+/** The newest Agent Fix of one of the Owner's MRs, in short. */
+export interface FixSummaryJson {
+  readonly id: number;
+  readonly status: FixStatus;
+  readonly threads: number;
+  /** Threads the fix changed code for. */
+  readonly changed: number;
+  readonly detail: string;
+}
+
+/** One of the Owner's own open MRs. See contracts/reviews.v1.json. */
+export interface YourMrJson {
+  readonly key: string;
+  readonly title: string;
+  readonly url: string;
+  readonly draft: boolean;
+  readonly createdAt: string | null;
+  readonly reviewers: readonly Reviewer[];
+  /** Every Reviewer approved: the watcher no longer queues fixes for it. */
+  readonly approvedByAll: boolean;
+  /** Null when the agent never fixed anything on it. */
+  readonly fix: FixSummaryJson | null;
 }
 
 function toAgentReviewJson(row: AgentReviewRow): AgentReviewJson {
@@ -186,10 +213,34 @@ export function buildReviewList(
   agentReviews: ReadonlyMap<string, AgentReviewRow> = new Map(),
   bases: ReadonlyMap<string, AgentReviewRow> = new Map(),
   rereviewWaiting: ReadonlyMap<string, RereviewWaitingJson> = new Map(),
+  fixes: ReadonlyMap<string, FixRow> = new Map(),
 ): ReviewListJson {
   return {
     version: 1,
     me: snapshot.me,
+    yourMergeRequests: snapshot.authored.map((mr) => {
+      const fix = fixes.get(mr.key);
+      return {
+        key: mr.key,
+        title: mr.title,
+        url: mr.url,
+        draft: mr.draft,
+        createdAt: mr.createdAt,
+        reviewers: mr.reviewers,
+        approvedByAll:
+          mr.reviewers.length > 0 && mr.reviewers.every((each) => each.state === "APPROVED"),
+        fix:
+          fix === undefined
+            ? null
+            : {
+                id: fix.id,
+                status: fix.status,
+                threads: fix.threads.length,
+                changed: fix.threads.filter((each) => each.action === "changed").length,
+                detail: fix.detail,
+              },
+      };
+    }),
     mergeRequests: snapshot.reviewRequested.map((mr) => {
       const latest = agentReviews.get(mr.key);
       const approvedByMe = mr.reviewers.some(
@@ -264,6 +315,14 @@ export interface MrDetailJson {
   readonly approvedBy: readonly Person[];
   /** True when merging squashes the commits, with the project's squash setting applied. */
   readonly squashOnMerge: boolean;
+  /** True when the project decides squashing (always or never), so the Owner cannot choose. */
+  readonly squashReadOnly: boolean;
+  /** True when merging deletes the source branch, as the MR is set now. */
+  readonly removeSourceBranch: boolean;
+  /** GitLab's merge readiness (MERGEABLE, NOT_APPROVED, CI_STILL_RUNNING, …); null when not reported. */
+  readonly detailedMergeStatus: string | null;
+  readonly defaultMergeCommitMessage: string | null;
+  readonly defaultSquashCommitMessage: string | null;
   /** The commit the diff was taken at; an approval is tied to it. Null when GitLab has none. */
   readonly headSha: string | null;
   /** True when GitLab lets the Owner approve this MR now. */
@@ -295,6 +354,7 @@ const MAX_TOTAL_DIFF_CHARS = 1_500_000;
 export const MR_DETAIL_QUERY = `
 query SuicaMergeRequest($path: ID!, $iid: String!) {
   project(fullPath: $path) {
+    squashReadOnly
     mergeRequest(iid: $iid) {
       title
       description
@@ -311,6 +371,10 @@ query SuicaMergeRequest($path: ID!, $iid: String!) {
       reviewers { nodes { username name mergeRequestInteraction { reviewState } } }
       approvedBy { nodes { username name } }
       squashOnMerge
+      detailedMergeStatus
+      forceRemoveSourceBranch
+      defaultMergeCommitMessage
+      defaultSquashCommitMessage
       diffHeadSha
       userPermissions { canApprove }
       discussions(first: ${DISCUSSIONS_PAGE}) {
@@ -359,6 +423,7 @@ const detailSchema = z.object({
     .object({
       project: z
         .object({
+          squashReadOnly: z.boolean().optional(),
           mergeRequest: z
             .object({
               title: z.string(),
@@ -386,6 +451,10 @@ const detailSchema = z.object({
               }),
               approvedBy: z.object({ nodes: z.array(personSchema) }),
               squashOnMerge: z.boolean(),
+              detailedMergeStatus: z.string().nullable().optional(),
+              forceRemoveSourceBranch: z.boolean().nullable().optional(),
+              defaultMergeCommitMessage: z.string().nullable().optional(),
+              defaultSquashCommitMessage: z.string().nullable().optional(),
               diffHeadSha: z.string().nullable(),
               userPermissions: z.object({ canApprove: z.boolean() }),
               discussions: z.object({
@@ -445,6 +514,111 @@ export function parseDiffs(raw: unknown): { files: DiffFileJson[]; truncated: bo
   return { files, truncated: parsed.data.length >= FILES_PAGE };
 }
 
+const discussionNodeSchema = z.object({
+  id: z.string(),
+  resolvable: z.boolean(),
+  resolved: z.boolean(),
+  notes: z.object({ nodes: z.array(noteSchema) }),
+});
+
+function toDiscussionJson(discussion: z.infer<typeof discussionNodeSchema>): DiscussionJson {
+  return {
+    id: discussion.id,
+    resolvable: discussion.resolvable,
+    resolved: discussion.resolved,
+    notes: discussion.notes.nodes.map((note) => ({
+      id: note.id,
+      body: note.body,
+      system: note.system,
+      createdAt: note.createdAt,
+      author: note.author ?? GHOST,
+      filePath: note.position?.filePath ?? null,
+      line: note.position?.newLine ?? note.position?.oldLine ?? null,
+    })),
+  };
+}
+
+const ALL_DISCUSSIONS_QUERY = `
+query SuicaAllDiscussions($path: ID!, $iid: String!, $after: String) {
+  project(fullPath: $path) {
+    mergeRequest(iid: $iid) {
+      discussions(first: ${DISCUSSIONS_PAGE}, after: $after) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id
+          resolvable
+          resolved
+          notes {
+            nodes {
+              id
+              body
+              system
+              createdAt
+              author { username name }
+              position { filePath newLine oldLine }
+            }
+          }
+        }
+      }
+    }
+  }
+}`;
+const discussionPageSchema = z.object({
+  data: z.object({
+    project: z.object({
+      mergeRequest: z.object({
+        discussions: z.object({
+          pageInfo: z.object({ hasNextPage: z.boolean(), endCursor: z.string().nullable() }),
+          nodes: z.array(discussionNodeSchema),
+        }),
+      }),
+    }),
+  }),
+});
+/** 2,000 discussions: far beyond any MR on this team, and a bound on the calls. */
+const MAX_DISCUSSION_PAGES = 20;
+
+/**
+ * Every discussion of the MR with its notes in full, a page at a time. The detail reads only the
+ * first 100, oldest first, so on a long MR the newest threads would be cut off.
+ */
+export async function fetchAllDiscussions(
+  graphql: GraphqlRunner,
+  key: string,
+): Promise<DiscussionJson[]> {
+  const parts = parseMrKey(key);
+  if (parts === undefined) throw new FetchFailure("gitlab-error", "malformed merge request key");
+  const all: DiscussionJson[] = [];
+  let after: string | null = null;
+  for (let page = 0; page < MAX_DISCUSSION_PAGES; page++) {
+    const variables: Record<string, string> = { path: parts.projectPath, iid: parts.iid };
+    if (after !== null) variables["after"] = after;
+    const parsed = discussionPageSchema.safeParse(await graphql(ALL_DISCUSSIONS_QUERY, variables));
+    if (!parsed.success)
+      throw new FetchFailure("gitlab-error", "unexpected GraphQL response shape");
+    const { pageInfo, nodes } = parsed.data.data.project.mergeRequest.discussions;
+    all.push(...nodes.map(toDiscussionJson));
+    if (!pageInfo.hasNextPage || pageInfo.endCursor === null) return all;
+    after = pageInfo.endCursor;
+  }
+  throw new FetchFailure("gitlab-error", "too many discussions");
+}
+
+/** The MR's detail with every discussion, for Agent Fix: it must see the newest threads. */
+export async function fetchFixDetail(
+  graphql: GraphqlRunner,
+  rest: RestRunner,
+  key: string,
+): Promise<MrDetailJson> {
+  const detail = await fetchMrDetail(graphql, rest, key);
+  if (!detail.discussionsTruncated) return detail;
+  return {
+    ...detail,
+    discussions: await fetchAllDiscussions(graphql, key),
+    discussionsTruncated: false,
+  };
+}
+
 export function parseMrDetail(
   key: string,
   raw: unknown,
@@ -483,22 +657,14 @@ export function parseMrDetail(
     })),
     approvedBy: mr.approvedBy.nodes,
     squashOnMerge: mr.squashOnMerge,
+    squashReadOnly: data?.project?.squashReadOnly ?? false,
+    removeSourceBranch: mr.forceRemoveSourceBranch ?? false,
+    detailedMergeStatus: mr.detailedMergeStatus ?? null,
+    defaultMergeCommitMessage: mr.defaultMergeCommitMessage ?? null,
+    defaultSquashCommitMessage: mr.defaultSquashCommitMessage ?? null,
     headSha: mr.diffHeadSha,
     canApprove: mr.userPermissions.canApprove,
-    discussions: mr.discussions.nodes.map((discussion) => ({
-      id: discussion.id,
-      resolvable: discussion.resolvable,
-      resolved: discussion.resolved,
-      notes: discussion.notes.nodes.map((note) => ({
-        id: note.id,
-        body: note.body,
-        system: note.system,
-        createdAt: note.createdAt,
-        author: note.author ?? GHOST,
-        filePath: note.position?.filePath ?? null,
-        line: note.position?.newLine ?? note.position?.oldLine ?? null,
-      })),
-    })),
+    discussions: mr.discussions.nodes.map(toDiscussionJson),
     discussionsTruncated: mr.discussions.pageInfo.hasNextPage,
     files: diffs.files,
     filesTruncated: diffs.truncated,

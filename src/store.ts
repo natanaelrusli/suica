@@ -1,8 +1,11 @@
 import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { z } from "zod";
 import type { Person, Snapshot } from "./domain.ts";
+import { createFixStore } from "./fix-store.ts";
+import type { FixStore } from "./fix-store.ts";
+import { integer, nullableText, parseActivity, text } from "./sql-row.ts";
+import type { ActivityLine, Row } from "./sql-row.ts";
 import { myReviewState, reviewerKey } from "./events.ts";
 import type { PreviousState } from "./events.ts";
 import { isOutboxKind, isOutboxStatus, isTemplateName } from "./teams/types.ts";
@@ -64,7 +67,7 @@ const HISTORY_KINDS: readonly string[] = [
 ];
 
 /** What a language model run was for. Stored as text, so a later purpose needs no migration. */
-export type TokenPurpose = "review" | "reply" | "other";
+export type TokenPurpose = "review" | "fix" | "reply" | "other";
 
 /** One language model run, as the model reported it. */
 export interface TokenUsageEntry {
@@ -125,11 +128,6 @@ export interface AgentReviewRow {
   readonly updatedAt: number;
 }
 
-export interface ActivityLine {
-  readonly at: number;
-  readonly text: string;
-}
-
 export interface AgentReviewFields {
   readonly mrTitle?: string;
   readonly model?: string;
@@ -161,7 +159,11 @@ function isHistoryKind(value: string): value is HistoryKind {
   return HISTORY_KINDS.includes(value);
 }
 
+export type { ActivityLine } from "./sql-row.ts";
+
 export interface Store {
+  /** Agent Fix runs and the threads they handled. */
+  readonly fixes: FixStore;
   load(): PreviousState;
   /**
    * Replaces the stored state with `snapshot` in one transaction and marks the baseline as done.
@@ -262,7 +264,27 @@ export interface Store {
   close(): void;
 }
 
-const SCHEMA_VERSION = 13;
+const SCHEMA_VERSION = 14;
+/**
+ * Agent Fix runs; the newest note of each thread a fix handled, so a thread stays quiet until
+ * someone writes on it; and when the watcher last read each of the Owner's MRs.
+ */
+const SCHEMA_V14 = `
+CREATE TABLE IF NOT EXISTS fix_run (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  mr_key TEXT NOT NULL, trigger TEXT NOT NULL, status TEXT NOT NULL, mr_title TEXT,
+  threads TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', base_sha TEXT,
+  commit_message TEXT NOT NULL DEFAULT '', diff TEXT, pushed_sha TEXT, cli TEXT, model TEXT,
+  detail TEXT NOT NULL DEFAULT '', activity TEXT NOT NULL DEFAULT '[]',
+  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, started_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS fix_run_mr ON fix_run (mr_key, id);
+CREATE TABLE IF NOT EXISTS fix_thread (
+  mr_key TEXT NOT NULL, discussion_id TEXT NOT NULL, note_id TEXT NOT NULL,
+  PRIMARY KEY (mr_key, discussion_id)
+);
+CREATE TABLE IF NOT EXISTS fix_watch (mr_key TEXT PRIMARY KEY, checked_at INTEGER NOT NULL);
+`;
 /**
  * When each of the Owner's MRs was first approved, and the display names of the people on open
  * MRs, so the history's usernames can be shown by name.
@@ -421,20 +443,6 @@ const DIRECTORY_MODE = 0o700;
 const FILE_MODE = 0o600;
 const BUSY_TIMEOUT_MS = 5000;
 
-type Row = Record<string, unknown>;
-
-function text(row: Row, column: string): string {
-  const value = row[column];
-  if (typeof value !== "string") throw new Error(`column ${column} is not text`);
-  return value;
-}
-
-function integer(row: Row, column: string): number {
-  const value = row[column];
-  if (typeof value !== "number") throw new Error(`column ${column} is not an integer`);
-  return value;
-}
-
 function toOutboxRow(row: Row): OutboxRow {
   const kind = text(row, "kind");
   const variant = text(row, "variant");
@@ -498,24 +506,6 @@ function toPollLogEntry(row: Row): PollLogEntry {
     failure: typeof failure === "string" ? failure : null,
     durationMs: integer(row, "duration_ms"),
   };
-}
-
-function nullableText(row: Row, column: string): string | null {
-  const value = row[column];
-  return typeof value === "string" ? value : null;
-}
-
-const activitySchema = z.array(z.object({ at: z.number(), text: z.string() }));
-
-/** A column that does not read as activity counts as none: it is only ever shown. */
-function parseActivity(value: unknown): ActivityLine[] {
-  if (typeof value !== "string") return [];
-  try {
-    const parsed = activitySchema.safeParse(JSON.parse(value));
-    return parsed.success ? parsed.data : [];
-  } catch {
-    return [];
-  }
 }
 
 function toAgentReview(row: Row): AgentReviewRow {
@@ -606,6 +596,7 @@ function initSchema(db: DatabaseSync): void {
   }
   if (version < 12 && !hasColumn(db, "agent_review", "activity")) db.exec(SCHEMA_V12);
   if (version < 13) db.exec(SCHEMA_V13);
+  if (version < 14) db.exec(SCHEMA_V14);
   if (version !== SCHEMA_VERSION) db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 }
 
@@ -644,6 +635,7 @@ export function openStore(path: string): Store {
   };
 
   return {
+    fixes: createFixStore(db),
     load() {
       return {
         baselineDone: metaValue(META_BASELINE) === "1",

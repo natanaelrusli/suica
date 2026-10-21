@@ -7,12 +7,22 @@ import { defaultConfigPath, defaultStatePath, loadConfig } from "./config.ts";
 import { applyConfigEdits, parseSaveRequest, showConfig } from "./config-edit.ts";
 import type { SaveResultJson } from "./config-edit.ts";
 import { defaultExec } from "./exec.ts";
-import { fetchSnapshot, glabPost, glabPostJson, glabRest, glabRunner } from "./gitlab.ts";
+import {
+  fetchCurrentUsername,
+  fetchSnapshot,
+  glabPost,
+  glabPostJson,
+  glabPut,
+  glabRest,
+  glabRunner,
+} from "./gitlab.ts";
 import { detectModelClis } from "./model-cli.ts";
+import { closeMergeRequest, commentOnMergeRequest, mergeMergeRequest } from "./mr-actions.ts";
 import {
   approveMergeRequest,
   buildReviewActivity,
   buildReviewList,
+  fetchFixDetail,
   fetchMrDetail,
   parseMrKey,
   resolveOwnThreads,
@@ -26,6 +36,18 @@ import {
 import { parseTemplateRequest, saveTemplate, showTemplates } from "./template-edit.ts";
 import { defaultTemplatesPath } from "./teams/templates.ts";
 import type { TemplateSaveJson } from "./template-edit.ts";
+import { queueManualFix } from "./agent-fix.ts";
+import {
+  buildFixList,
+  cancelFix,
+  confirmFix,
+  discardFix,
+  parseConfirmEdits,
+  postMissingReplies,
+  retryFix,
+} from "./fix-confirm.ts";
+import { createNotifier } from "./notifier.ts";
+import { loadAlerts } from "./alerts.ts";
 import { createLogger } from "./log.ts";
 import { createRuntime } from "./runtime.ts";
 import type { Runtime } from "./runtime.ts";
@@ -36,7 +58,7 @@ import { OUTBOX_STATUSES } from "./teams/types.ts";
 import { buildUsage } from "./usage.ts";
 
 const USAGE =
-  "usage: suica <once|status|state|stats|usage|pause|resume|pending [--all]|send <id> [--json]|skip <id> [--json]|retry <id> [--json]|selftest|reviews --json|mr <key> --json|mr approve <key> <sha> --json|review queue <key> --json|review post <id> [--inline|--comment] --json|review discard <id> --json|review cancel <id> --json|config show --json|config set --json|templates show --json|templates set --json|agent install|agent uninstall|agent restart --json>\n";
+  "usage: suica <once|status|state|stats|usage|pause|resume|pending [--all]|send <id> [--json]|skip <id> [--json]|retry <id> [--json]|selftest|reviews --json|mr <key> --json|mr approve <key> <sha> --json|mr comment <key> --json (body on stdin)|mr close <key> --json|mr merge <key> <sha> [--squash] [--remove-source-branch] [--when-pipeline-succeeds] --json (message on stdin)|review queue <key> --json|review post <id> [--inline|--comment] --json|review discard <id> --json|review cancel <id> --json|fix list --json|fix queue <key> --json|fix confirm <id> --json (edits on stdin)|fix retry <id> --json (note on stdin)|fix discard <id> --json|fix cancel <id> --json|fix replies <id> --json|config show --json|config set --json|templates show --json|templates set --json|agent install|agent uninstall|agent restart --json>\n";
 const TEAMS_DISABLED = "teams is disabled: set teams.enabled to true in the config\n";
 const SHOWN_WITH_ALL = 50;
 
@@ -221,6 +243,7 @@ async function reviewsJson(): Promise<number> {
       store.latestAgentReviews(),
       store.rereviewBases(),
       rereviewWaitingReasons(store, config, snapshot, Date.now()),
+      store.fixes.latestByMr(),
     );
     process.stdout.write(`${JSON.stringify(document)}\n`);
     return 0;
@@ -287,6 +310,97 @@ async function reviewCommand(argv: readonly string[]): Promise<number> {
   }
 }
 
+/** Finished fixes stay in `suica fix list` this long; open ones always do. */
+const FIX_LIST_DAYS_MS = 7 * 86_400_000;
+
+/**
+ * `suica fix list|queue|confirm|retry|discard|cancel|replies`: the background agent runs a queued
+ * fix within a few seconds; confirm commits, pushes and replies as the Owner. Each action prints
+ * `{"status": …}`.
+ */
+async function fixCommand(argv: readonly string[]): Promise<number> {
+  const [action, target] = [argv[1], argv[2]];
+  const config = loadConfig(defaultConfigPath());
+  const statePath = config.statePath ?? defaultStatePath();
+  const store = openStore(statePath);
+  const log = createLogger();
+  const reply = (status: string, ok: boolean): number => {
+    process.stdout.write(`${actionJson(status)}\n`);
+    return ok ? 0 : 1;
+  };
+  try {
+    if (action === "list") {
+      process.stdout.write(
+        `${JSON.stringify(buildFixList(store.fixes.list(Date.now() - FIX_LIST_DAYS_MS)))}\n`,
+      );
+      return 0;
+    }
+    const graphql = glabRunner(config.gitlab);
+    const rest = glabRest(config.gitlab);
+    // A fix only ever changes an MR the signed-in GitLab user wrote.
+    const owner = (): Promise<string> => fetchCurrentUsername(rest);
+    if (action === "queue") {
+      if (target === undefined || parseMrKey(target) === undefined) return reply("bad-key", false);
+      const outcome = await queueManualFix(
+        { store, log, now: Date.now, detail: (key) => fetchFixDetail(graphql, rest, key) },
+        target,
+        await owner(),
+      );
+      return reply(outcome, outcome === "queued" || outcome === "added");
+    }
+    const id = parseId(target);
+    if (
+      id === undefined ||
+      !["confirm", "retry", "discard", "cancel", "replies"].includes(action ?? "")
+    ) {
+      process.stderr.write(USAGE);
+      return 2;
+    }
+    const deps = {
+      store,
+      config,
+      exec: defaultExec,
+      graphql,
+      rest,
+      post: glabPost(config.gitlab),
+      notifier: createNotifier(),
+      alerts: loadAlerts(config.teams.templatesPath ?? defaultTemplatesPath()),
+      log,
+      now: Date.now,
+      statePath,
+      owner,
+    };
+    switch (action) {
+      case "confirm": {
+        const text = await readLimitedStdin(MAX_REQUEST_BYTES);
+        const edits = text === undefined ? undefined : parseConfirmEdits(text);
+        if (edits === undefined) return reply("bad-request", false);
+        const outcome = await confirmFix(deps, id, edits);
+        return reply(outcome, outcome === "pushed" || outcome === "partial");
+      }
+      case "retry": {
+        const note = (await readLimitedStdin(MAX_REQUEST_BYTES)) ?? "";
+        const outcome = retryFix(deps, id, note);
+        return reply(outcome.status, outcome.status === "queued");
+      }
+      case "discard": {
+        const done = discardFix(deps, id);
+        return reply(done ? "discarded" : "nothing", done);
+      }
+      case "cancel": {
+        const done = cancelFix(store, id, Date.now());
+        return reply(done ? "cancelled" : "nothing", done);
+      }
+      default: {
+        const outcome = await postMissingReplies(deps, id);
+        return reply(outcome, outcome !== "nothing");
+      }
+    }
+  } finally {
+    store.close();
+  }
+}
+
 async function mrJson(key: string): Promise<number> {
   const { gitlab } = loadConfig(defaultConfigPath());
   const document = await fetchMrDetail(glabRunner(gitlab), glabRest(gitlab), key);
@@ -305,6 +419,54 @@ async function approveCommand(key: string, sha: string): Promise<number> {
   if (outcome === "approved") await resolveOwnThreads({ graphql: glabRunner(gitlab), log }, key);
   process.stdout.write(`${actionJson(outcome)}\n`);
   return outcome === "approved" ? 0 : 1;
+}
+
+/** `suica mr comment <key> --json`: the Markdown body comes on stdin; prints `{"status": …}`. */
+async function commentCommand(key: string): Promise<number> {
+  const { gitlab } = loadConfig(defaultConfigPath());
+  const body = await readLimitedStdin(MAX_REQUEST_BYTES);
+  const outcome =
+    body === undefined ? "failed" : await commentOnMergeRequest(glabPost(gitlab), key, body);
+  createLogger().info("mr comment posted", { mr_key: key, outcome });
+  process.stdout.write(`${actionJson(outcome)}\n`);
+  return outcome === "posted" ? 0 : 1;
+}
+
+/**
+ * `suica mr merge <key> <sha> --json`: merges at the commit the Owner saw, with the commit message
+ * on stdin; prints `{"status": …}`.
+ */
+async function mergeCommand(key: string, sha: string, argv: readonly string[]): Promise<number> {
+  const { gitlab } = loadConfig(defaultConfigPath());
+  const message = await readLimitedStdin(MAX_REQUEST_BYTES);
+  const outcome =
+    message === undefined
+      ? "failed"
+      : await mergeMergeRequest(glabPut(gitlab), key, sha, {
+          squash: argv.includes("--squash"),
+          removeSourceBranch: argv.includes("--remove-source-branch"),
+          message,
+          whenPipelineSucceeds: argv.includes("--when-pipeline-succeeds"),
+        });
+  createLogger().info("mr merge", { mr_key: key, outcome });
+  process.stdout.write(`${actionJson(outcome)}\n`);
+  return outcome === "merged" || outcome === "scheduled" ? 0 : 1;
+}
+
+/** `suica mr close <key> --json`: closes an MR you wrote, without merging; prints `{"status": …}`. */
+async function closeCommand(key: string): Promise<number> {
+  const { gitlab } = loadConfig(defaultConfigPath());
+  let outcome: string;
+  if (parseMrKey(key) === undefined) {
+    outcome = "bad-key";
+  } else {
+    const detail = await fetchMrDetail(glabRunner(gitlab), glabRest(gitlab), key);
+    const me = await fetchCurrentUsername(glabRest(gitlab));
+    outcome = await closeMergeRequest(glabPut(gitlab), key, detail.author.username, me);
+  }
+  createLogger().info("mr close", { mr_key: key, outcome });
+  process.stdout.write(`${actionJson(outcome)}\n`);
+  return outcome === "closed" ? 0 : 1;
 }
 
 async function installAgentCommand(): Promise<number> {
@@ -426,6 +588,7 @@ async function main(argv: readonly string[]): Promise<number> {
   }
   if (command === "reviews" && argv.includes("--json")) return reviewsJson();
   if (command === "review" && argv.includes("--json")) return reviewCommand(argv);
+  if (command === "fix" && argv.includes("--json")) return fixCommand(argv);
   if (command === "mr" && argv[1] === "approve" && argv.includes("--json")) {
     const [key, sha] = [argv[2], argv[3]];
     if (key === undefined || sha === undefined) {
@@ -433,6 +596,30 @@ async function main(argv: readonly string[]): Promise<number> {
       return 2;
     }
     return approveCommand(key, sha);
+  }
+  if (command === "mr" && argv[1] === "comment" && argv.includes("--json")) {
+    const key = argv[2];
+    if (key === undefined) {
+      process.stderr.write(USAGE);
+      return 2;
+    }
+    return commentCommand(key);
+  }
+  if (command === "mr" && argv[1] === "close" && argv.includes("--json")) {
+    const key = argv[2];
+    if (key === undefined) {
+      process.stderr.write(USAGE);
+      return 2;
+    }
+    return closeCommand(key);
+  }
+  if (command === "mr" && argv[1] === "merge" && argv.includes("--json")) {
+    const [key, sha] = [argv[2], argv[3]];
+    if (key === undefined || sha === undefined) {
+      process.stderr.write(USAGE);
+      return 2;
+    }
+    return mergeCommand(key, sha, argv);
   }
   if (command === "mr" && argv.includes("--json")) {
     const key = argv[1];

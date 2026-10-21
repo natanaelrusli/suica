@@ -40,7 +40,7 @@ import {
   parseCodexOutput,
   RunFailure,
 } from "./review-runner.ts";
-import type { RunResult } from "./review-runner.ts";
+import type { InvocationMode, ReviewEffort, RunResult } from "./review-runner.ts";
 import { approveMergeRequest, fetchMrDetail, parseMrKey, resolveOwnThreads } from "./reviews.ts";
 import type { ApproveOutcome, DiffFileJson, MrDetailJson, ResolveOutcome } from "./reviews.ts";
 import type { AgentReviewRow, Store } from "./store.ts";
@@ -275,7 +275,7 @@ export function buildPrompt(input: PromptInput): string {
   ].join("\n");
 }
 
-function renderMrFile(detail: MrDetailJson): string {
+export function renderMrFile(detail: MrDetailJson): string {
   return [
     `# ${detail.title}`,
     "",
@@ -355,28 +355,38 @@ async function notifyQuietly(
   }
 }
 
-async function runCli(
-  deps: ReviewDeps,
+/** How the model CLI runs: an Agent Review reads, an Agent Fix also edits files. */
+export interface CliSettings {
+  readonly model: string | undefined;
+  readonly effort: ReviewEffort;
+  readonly timeoutMinutes: number;
+  readonly mode: InvocationMode;
+}
+
+export async function runCli(
+  deps: Pick<ReviewDeps, "exec" | "signal">,
   cli: Exclude<ModelCliId, "gemini">,
   path: string,
   prompt: string,
   workDir: string,
   /** Each step of the run, as the Owner sees it. */
   onActivity: (text: string) => void,
+  settings: CliSettings,
 ): Promise<RunResult> {
   const invocation = buildInvocation(
     cli,
     prompt,
     workDir,
-    deps.config.review.model,
-    deps.config.review.effort,
+    settings.model,
+    settings.effort,
+    settings.mode,
   );
   const describe = (line: string): string[] =>
     cli === "claude" ? describeClaudeEvent(line, workDir) : describeCodexEvent(line);
   let stdout: string;
   try {
     ({ stdout } = await deps.exec(path, invocation.args, {
-      timeoutMs: deps.config.review.timeoutMinutes * 60_000,
+      timeoutMs: settings.timeoutMinutes * 60_000,
       cwd: workDir,
       onStdoutLine: (line) => {
         for (const text of describe(line)) onActivity(text);
@@ -412,7 +422,13 @@ const SSH_URL = /^(?:ssh:\/\/[\w.-]+@[\w.-]+(?::\d+)?\/|[\w.-]+@[\w.-]+:)[\w./~-
  * Clones the source branch shallowly over SSH, the way the Owner's own git reaches GitLab (glab
  * would clone over HTTPS when given a URL). Git LFS content is not downloaded.
  */
-async function checkout(deps: ReviewDeps, detail: MrDetailJson, repoDir: string): Promise<string> {
+export async function cloneSourceBranch(
+  deps: Pick<ReviewDeps, "rest" | "exec" | "signal">,
+  detail: MrDetailJson,
+  repoDir: string,
+  /** Keeps the git folder here instead of inside `repoDir`. */
+  gitDir?: string,
+): Promise<string> {
   const parts = parseMrKey(detail.key);
   if (parts === undefined) throw new RunFailure("malformed merge request key");
   const project = projectSchema.safeParse(
@@ -437,6 +453,7 @@ async function checkout(deps: ReviewDeps, detail: MrDetailJson, repoDir: string)
         "--single-branch",
         "--no-tags",
         `--branch=${detail.sourceBranch}`,
+        ...(gitDir === undefined ? [] : [`--separate-git-dir=${gitDir}`]),
         "--",
         project.data.ssh_url_to_repo,
         repoDir,
@@ -568,7 +585,7 @@ export async function runAgentReview(baseDeps: ReviewDeps, row: AgentReviewRow):
 
     workDir = mkdtempSync(join(tmpdir(), "suica-review-"));
     store.appendAgentReviewActivity(row.id, deps.now(), "Cloning the source branch");
-    const headSha = await checkout(deps, detail, join(workDir, "repo"));
+    const headSha = await cloneSourceBranch(deps, detail, join(workDir, "repo"));
     const descriptionHash = descriptionSha(detail.description);
     if (store.hasAgentReviewAt(row.mrKey, headSha, descriptionHash))
       throw new Skip("this commit was already reviewed");
@@ -595,9 +612,22 @@ export async function runAgentReview(baseDeps: ReviewDeps, row: AgentReviewRow):
       incremental: rereview?.incremental ?? false,
     });
     store.appendAgentReviewActivity(row.id, deps.now(), `Starting ${CLI_NAMES[cliId] ?? cliId}`);
-    const result = await runCli(deps, cliId, path, prompt, workDir, (text) => {
-      store.appendAgentReviewActivity(row.id, deps.now(), text);
-    });
+    const result = await runCli(
+      deps,
+      cliId,
+      path,
+      prompt,
+      workDir,
+      (text) => {
+        store.appendAgentReviewActivity(row.id, deps.now(), text);
+      },
+      {
+        model: deps.config.review.model,
+        effort: deps.config.review.effort,
+        timeoutMinutes: deps.config.review.timeoutMinutes,
+        mode: "review",
+      },
+    );
     if (result.tokens !== null) {
       store.recordTokenUsage({ at: deps.now(), purpose: "review", ...result.tokens });
     }

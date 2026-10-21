@@ -4,8 +4,10 @@ import {
   FetchFailure,
   SNAPSHOT_QUERY,
   descriptionSha,
+  fetchCurrentUsername,
   fetchPerson,
   glabPost,
+  glabPut,
   glabRest,
   glabRunner,
   parseSnapshot,
@@ -282,6 +284,27 @@ describe("glabRunner", () => {
     await expect(unknown).rejects.toMatchObject({ httpStatus: undefined });
   });
 
+  it("sends a PUT with form fields", async () => {
+    const calls: string[][] = [];
+    await glabPut(config, (file, args) => {
+      calls.push([file, ...args]);
+      return Promise.resolve({ stdout: "{}", stderr: "" });
+    })("projects/g%2Fp/merge_requests/7/merge", { sha: "abc" });
+    expect(calls).toEqual([
+      [
+        "glab",
+        "api",
+        "projects/g%2Fp/merge_requests/7/merge",
+        "--hostname",
+        "gitlab.example",
+        "-X",
+        "PUT",
+        "-f",
+        "sha=abc",
+      ],
+    ]);
+  });
+
   it("treats non-JSON output as a GitLab error", async () => {
     expect(await kindOfRun(() => Promise.resolve({ stdout: "<html>", stderr: "" }))).toBe(
       "gitlab-error",
@@ -309,5 +332,18 @@ describe("fetchPerson", () => {
     await expect(fetchPerson(() => Promise.resolve({ message: "x" }), "x")).rejects.toThrow(
       FetchFailure,
     );
+  });
+});
+
+describe("fetchCurrentUsername", () => {
+  it("reads the signed-in user's username", async () => {
+    const paths: string[] = [];
+    const name = await fetchCurrentUsername((path) => {
+      paths.push(path);
+      return Promise.resolve({ id: 1, username: "nata", name: "Nata" });
+    });
+    expect(name).toBe("nata");
+    expect(paths).toEqual(["user"]);
+    await expect(fetchCurrentUsername(() => Promise.resolve({}))).rejects.toThrow(FetchFailure);
   });
 });
