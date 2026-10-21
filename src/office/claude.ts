@@ -2,7 +2,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { describeTool } from "./describe.ts";
 import { processesRunning } from "./proc.ts";
-import { classifyByActivity } from "./status.ts";
+import { activityFor, classifyByActivity } from "./status.ts";
 import { readTail } from "./tail.ts";
 import {
   EXITED_STAY_MS,
@@ -14,8 +14,6 @@ import {
   type RecentAction,
 } from "./types.ts";
 
-/** A tool call made this recently is shown; older, and the agent is thinking about the result. */
-const FRESH_TOOL_MS = 20_000;
 const MAX_ACTIONS = 5;
 const WINDOWS = [256 * 1024, 1024 * 1024, 4 * 1024 * 1024];
 
@@ -104,19 +102,12 @@ function build(args: {
 }): RawSession {
   const actions =
     args.transcript === undefined ? [] : recentActions(args.transcript, sizeOf(args.transcript));
-  const last = actions.at(-1);
-  let activity = "";
-  if (args.status === "working") {
-    activity = last !== undefined && args.now - last.at <= FRESH_TOOL_MS ? last.text : "Thinking";
-  } else if (args.status === "waiting") {
-    activity = last?.text ?? "";
-  }
   return {
     agent: "claude",
     sessionId: args.sessionId,
     cwd: args.cwd,
     status: args.status,
-    activity,
+    activity: activityFor(args.status, actions, args.now),
     recentActions: actions,
     startedAt: args.startedAt,
     updatedAt: args.updatedAt,
