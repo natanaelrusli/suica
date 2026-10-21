@@ -4,6 +4,8 @@ import SwiftUI
 
 enum WindowSection: String, CaseIterable, Identifiable {
     case overview, reviews, messages, statistics, usage, logs, configuration, appearance
+    /// Last, so it takes ⌘9 and the other pages keep their shortcuts; the sidebar lists it under Work.
+    case office
 
     var id: String { rawValue }
 
@@ -17,6 +19,7 @@ enum WindowSection: String, CaseIterable, Identifiable {
         case .logs: Copy.logs
         case .configuration: Copy.configuration
         case .appearance: Copy.appearance
+        case .office: Copy.office
         }
     }
 
@@ -30,6 +33,7 @@ enum WindowSection: String, CaseIterable, Identifiable {
         case .logs: "doc.text.magnifyingglass"
         case .configuration: "gearshape"
         case .appearance: "paintpalette"
+        case .office: "cube.transparent"
         }
     }
 
@@ -44,6 +48,7 @@ enum WindowSection: String, CaseIterable, Identifiable {
         case .logs: .brown
         case .configuration: .gray
         case .appearance: .indigo
+        case .office: .cyan
         }
     }
 
@@ -138,6 +143,7 @@ extension ConfigCategory {
         case "teams": "bubble.left.and.bubble.right"
         case "model": "sparkles"
         case "review": "checkmark.bubble"
+        case "office": "building.2"
         default: "internaldrive"
         }
     }
@@ -150,6 +156,7 @@ extension ConfigCategory {
         case "teams": .indigo
         case "model": .purple
         case "review": .green
+        case "office": .cyan
         default: .gray
         }
     }
@@ -183,7 +190,7 @@ struct SidebarNode: Identifiable {
     /// are set up. Statistics' pages are nested under it; Configuration's categories, the
     /// templates and Appearance open from its overview page.
     static let groups: [(title: String, nodes: [SidebarNode])] = [
-        (Copy.workGroup, [SidebarNode(.overview), SidebarNode(.reviews), SidebarNode(.messages)]),
+        (Copy.workGroup, [SidebarNode(.overview), SidebarNode(.reviews), SidebarNode(.messages), SidebarNode(.office)]),
         (
             Copy.insightsGroup,
             [
@@ -223,7 +230,7 @@ struct OpenPageAction {
     }
 }
 
-/// The Go menu (⌘1 to ⌘8, one per section) and Settings… (⌘,), which opens Appearance.
+/// The Go menu (⌘1 to ⌘9, one per section) and Settings… (⌘,), which opens Appearance.
 struct NavigationCommands: Commands {
     let navigator: Navigator
 

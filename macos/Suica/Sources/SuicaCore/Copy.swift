@@ -594,6 +594,7 @@ public enum Copy {
         case "model": "Language model"
         case "review": "Agent Review"
         case "fix": "Agent Fix"
+        case "office": "Office"
         default: key.prefix(1).uppercased() + key.dropFirst()
         }
     }
@@ -671,6 +672,7 @@ public enum Copy {
         case "model": "The coding agent CLI"
         case "review": "Posting, model and limits"
         case "fix": "Fixes for your MRs"
+        case "office": "Which coding agents it shows"
         default: "Where the history is kept"
         }
     }
@@ -816,6 +818,35 @@ public enum Copy {
     // MARK: Overview widgets
 
     public static let openLogs = "Open logs"
+
+    // MARK: Office
+
+    public static let office = "Office"
+    public static let officeEmpty = "No coding agents running"
+    public static let officeEmptyHint = "Start Claude Code, Codex or Gemini CLI and it appears at a desk."
+    public static let bubbleWaiting = "Waiting for you"
+    public static let bubbleWorking = "Working"
+    public static let bubbleIdle = "Idle"
+    public static let bubbleExited = "Left the office"
+    public static let resetCamera = "Reset view"
+    public static let openAgent = "Open"
+    public static let officeProject = "Project"
+    public static let officeStatus = "Status"
+    public static let officeStarted = "Started"
+    public static let officeLastActions = "Last actions"
+    public static let officeNoActions = "No actions seen yet."
+    public static let closeDetails = "Close"
+    public static func officeSummary(sessions: Int, rooms: Int) -> String {
+        "\(sessions) \(sessions == 1 ? "agent" : "agents") in \(rooms) \(rooms == 1 ? "room" : "rooms")"
+    }
+    public static func officeStatusName(_ status: String) -> String {
+        switch status {
+        case "working": "Working"
+        case "waiting": "Waiting for you"
+        case "exited": "Left"
+        default: "Idle"
+        }
+    }
 
     // MARK: Logs
 

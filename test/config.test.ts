@@ -42,6 +42,7 @@ describe("parseConfig", () => {
         agentName: "Suica",
       },
       model: { cli: "auto" },
+      office: { agents: ["claude", "codex", "gemini"], custom: [] },
       review: {
         auto: true,
         post: "approval",
@@ -261,5 +262,30 @@ describe("review.model", () => {
         /review.model/,
       );
     }
+  });
+});
+
+describe("office config", () => {
+  it("keeps the agents asked for and rejects an unknown one", () => {
+    expect(parseConfig(`${MINIMAL}office:\n  agents: [claude]\n`).office.agents).toEqual([
+      "claude",
+    ]);
+    expect(() => parseConfig(`${MINIMAL}office:\n  agents: [claude, bard]\n`)).toThrow(
+      /office\.agents\.1/,
+    );
+  });
+
+  it("accepts a custom agent and names the entry that is malformed", () => {
+    const ok = parseConfig(
+      `${MINIMAL}office:\n  custom:\n    - aider|aider|~/.aider/*.jsonl|cwd|tool\n`,
+    );
+    expect(ok.office.custom).toEqual(["aider|aider|~/.aider/*.jsonl|cwd|tool"]);
+    expect(() => parseConfig(`${MINIMAL}office:\n  custom:\n    - aider|aider\n`)).toThrow(
+      /office\.custom\.0: must be name\|process\|log glob\|cwd key\|activity key/,
+    );
+  });
+
+  it("rejects an unknown key under office", () => {
+    expect(() => parseConfig(`${MINIMAL}office:\n  rooms: 3\n`)).toThrow(/rooms/);
   });
 });

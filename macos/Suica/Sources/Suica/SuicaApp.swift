@@ -47,6 +47,10 @@ extension UnconfiguredClient: FixesClient {
     func close(key: String) async throws(AgentError) -> ActionResult { throw AgentError.launchFailed }
 }
 
+extension UnconfiguredClient: OfficeClient {
+    func office() async throws(AgentError) -> OfficeDocument { throw AgentError.launchFailed }
+}
+
 extension UnconfiguredClient: TemplatesClient {
     func templates() async throws(AgentError) -> TemplatesDocument { throw AgentError.launchFailed }
     func saveTemplate(name: String, text: String?) async throws(AgentError) -> TemplateSaveResult {
@@ -95,6 +99,7 @@ struct SuicaApp: App {
     @State private var reviews: ReviewsModel
     @State private var fixes: FixesModel
     @State private var templates: TemplateEditorModel
+    @State private var office: OfficeModel
     @State private var appearance = AppearanceSettings()
     @State private var navigator = Navigator()
     @State private var celebrations = CelebrationCounter()
@@ -105,6 +110,7 @@ struct SuicaApp: App {
         let reviewsClient: any ReviewsClient
         let fixesClient: any FixesClient
         let templatesClient: any TemplatesClient
+        let officeClient: any OfficeClient
         if let config = AgentConfig.fromBundle(.main) {
             let client = CLIAgentClient(config: config, runner: ProcessRunner())
             agent = client
@@ -112,12 +118,14 @@ struct SuicaApp: App {
             reviewsClient = client
             fixesClient = client
             templatesClient = client
+            officeClient = client
         } else {
             agent = UnconfiguredClient()
             dashboard = UnconfiguredClient()
             reviewsClient = UnconfiguredClient()
             fixesClient = UnconfiguredClient()
             templatesClient = UnconfiguredClient()
+            officeClient = UnconfiguredClient()
         }
         let model = MenuModel(client: agent)
         _model = State(initialValue: model)
@@ -129,6 +137,7 @@ struct SuicaApp: App {
         _reviews = State(initialValue: ReviewsModel(client: reviewsClient))
         _fixes = State(initialValue: FixesModel(client: fixesClient))
         _templates = State(initialValue: TemplateEditorModel(client: templatesClient))
+        _office = State(initialValue: OfficeModel(client: officeClient))
         Task { @MainActor in await model.runRefreshLoop(every: refreshInterval) }
     }
 
@@ -146,8 +155,8 @@ struct SuicaApp: App {
 
         Window(Copy.appName, id: "main") {
             MainWindow(
-                window: window, editor: editor, reviews: reviews, fixes: fixes, templates: templates, settings: appearance,
-                navigator: navigator
+                window: window, editor: editor, reviews: reviews, fixes: fixes, templates: templates,
+                office: office, settings: appearance, navigator: navigator
             )
             .modifier(Celebrations(model: model, reviews: reviews, settings: appearance, counter: celebrations))
             .appearance(appearance)

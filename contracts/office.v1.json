@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "generatedAt": 1792550000000,
+  "sessions": [
+    {
+      "agent": "gemini",
+      "sessionId": "g1",
+      "cwd": "/work/cli-probe",
+      "status": "idle",
+      "activity": "",
+      "recentActions": [],
+      "startedAt": 1792549940000,
+      "updatedAt": 1792549910000,
+      "pid": null,
+      "room": "/work/cli-probe",
+      "roomName": "cli-probe",
+      "hostApp": null
+    },
+    {
+      "agent": "codex",
+      "sessionId": "x1",
+      "cwd": "/work/kinsen",
+      "status": "waiting",
+      "activity": "Running rm -rf build",
+      "recentActions": [],
+      "startedAt": null,
+      "updatedAt": 1792549999000,
+      "pid": null,
+      "room": "/work/kinsen",
+      "roomName": "kinsen",
+      "hostApp": null
+    },
+    {
+      "agent": "claude",
+      "sessionId": "c1",
+      "cwd": "/work/suica/macos",
+      "status": "working",
+      "activity": "Editing OfficeView.swift",
+      "recentActions": [
+        {
+          "at": 1792549960000,
+          "text": "Reading Package.swift"
+        },
+        {
+          "at": 1792549997000,
+          "text": "Editing OfficeView.swift"
+        }
+      ],
+      "startedAt": 1792549940000,
+      "updatedAt": 1792549999000,
+      "pid": 4001,
+      "room": "/work/suica",
+      "roomName": "suica",
+      "hostApp": "/System/Applications/Utilities/Terminal.app"
+    }
+  ]
+}

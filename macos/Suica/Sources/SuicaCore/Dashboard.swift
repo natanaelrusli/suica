@@ -308,7 +308,9 @@ public struct ConfigCategory: Hashable, Identifiable, Sendable {
     static let storageKey = "storage"
 
     /// In the order the agent lists its fields, so the sidebar can show them before the config loads.
-    public static let known = ["gitlab", "polling", "notifications", "teams", "model", "review", "fix", storageKey]
+    public static let known = [
+        "gitlab", "polling", "notifications", "teams", "model", "review", "fix", "office", storageKey,
+    ]
         .map(ConfigCategory.init)
 
     public static func of(_ field: ConfigField) -> ConfigCategory {
