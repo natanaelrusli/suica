@@ -18,13 +18,60 @@ It comes as two apps, each installed on its own from this repository:
 
 ## Setup
 
+Clone the repository and run everything below from its root. `make` lists every target, and each one is a thin wrapper over the script or command named beside it, so you can run those directly instead.
+
+Check the requirements first: `node --version` (24 or newer) and `glab auth status`. The CLI alone is all you need to get notifications; add the app when you want the window, the menu bar badge and one-click actions.
+
+### Option 1: CLI only
+
+The `suica` command and the background agent. Nothing is built, and no Swift is needed.
+
+```bash
+make install        # install-cli + config + agent-install, in that order
+make status         # check that the agent is running and polled
+```
+
+or the same by hand:
+
 ```bash
 scripts/install-cli.sh               # installs ~/.local/lib/suica and the command ~/.local/bin/suica
 mkdir -p ~/.config/suica
 printf 'gitlab:\n  hostname: repo.madhani.one\n' > ~/.config/suica/config.yaml
 suica agent install                  # starts the background agent (see Run in the background)
-scripts/install-macos-app.sh         # optional: the menu bar app (see Menu bar app)
 ```
+
+`make config` writes the config file only when none exists; set `GITLAB_HOSTNAME=<host>` to use another GitLab host. Put `~/.local/bin` on your `PATH` (the install script tells you when it is not). Without that, `make` still works: it runs the command by its full path.
+
+### Option 2: CLI and the menu bar app
+
+Install the CLI first, as above, because Suica.app runs the installed `suica` command for everything. Then build and install the app; this needs Swift (Xcode or the Command Line Tools).
+
+```bash
+make install        # Option 1
+make install-app    # builds, installs ~/Applications/Suica.app and starts it
+```
+
+or by hand: `scripts/install-macos-app.sh` after the three CLI steps. The app bakes in the absolute path of the `suica` command it finds (set `SUICA_CLI` for another one), so run `make install-app` again if the CLI moves. Add Suica under System Settings → General → Login Items to start it at login (see Menu bar app).
+
+### Update and remove
+
+```bash
+make update         # CLI from this checkout; restarts the agent if it is installed
+make update-app     # CLI and app
+make uninstall      # app, agent and CLI; config, state database and logs stay
+```
+
+`make uninstall-cli` and `make uninstall-app` remove one of them. After switching Node versions, run `make update` (and `make install-app` if the CLI path changed); coming from the old name, run `make migrate` first (see Moving from MR Review Assistant).
+
+### Everyday commands
+
+```bash
+make status | once | pause | resume    # the suica commands of the same name
+make restart                           # apply config edits
+make logs | errors                     # follow the agent's output or error log
+```
+
+### What the install script does
 
 `scripts/install-cli.sh` copies `src/` with `package.json` and `package-lock.json`, installs the production dependencies with `npm ci --omit=dev --ignore-scripts`, and writes `~/.local/bin/suica`, a two-line wrapper with the absolute path of the `node` it found (Node 24 or newer). Set `SUICA_PREFIX` to install somewhere other than `~/.local`, and put `<prefix>/bin` on your `PATH` (the script tells you when it is not). Re-run it to update from the checkout, and after switching Node versions. When a LaunchAgent is already installed, the script runs `suica agent install` again so the agent uses the new copy right away. `scripts/uninstall-cli.sh` stops and removes the agent and the installed CLI; the config, state database and logs stay.
 
@@ -262,9 +309,12 @@ Logs are JSON lines captured by launchd in `~/Library/Logs/suica/` (`stdout.log`
 ## Development
 
 ```bash
-npm ci           # dev dependencies, in the checkout
-npm run check    # typecheck, lint, prettier, tests
-scripts/suica status   # the CLI straight from the checkout, without installing it
+make deps        # npm ci: dev dependencies, in the checkout
+make check       # typecheck, lint, prettier, tests (npm run check)
+make test-app    # the menu bar app's tests (cd macos/Suica && swift test)
+make test-all    # both of the above
+make format-fix  # rewrite files with prettier
+make run ARGS="status --json"   # the CLI straight from the checkout (scripts/suica), without installing it
 ```
 
 Source of truth for each behaviour is a test in `test/`. `src/events.ts`, `src/format.ts` and `src/scheduler.ts` are pure; process spawning (`src/exec.ts`), SQLite (`src/store.ts`) and the clock sit behind small interfaces.

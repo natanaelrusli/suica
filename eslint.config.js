@@ -15,6 +15,7 @@ export default tseslint.config(
       ".next/**",
       "coverage/**",
       "node_modules/**",
+      ".claude/worktrees/**",
     ],
   },
   eslint.configs.recommended,
