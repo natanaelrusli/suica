@@ -386,6 +386,7 @@ struct MainWindow: View {
         case .configuration: ConfigurationView(window: window, editor: editor, navigator: navigator, category: item.category)
         case .appearance: AppearanceView(settings: settings)
         case .office: OfficeView(model: office)
+        case .system: SystemView()
         }
     }
 }

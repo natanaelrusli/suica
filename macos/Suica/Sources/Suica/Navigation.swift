@@ -6,6 +6,8 @@ enum WindowSection: String, CaseIterable, Identifiable {
     case overview, reviews, messages, statistics, usage, logs, configuration, appearance
     /// Last, so it takes ⌘9 and the other pages keep their shortcuts; the sidebar lists it under Work.
     case office
+    /// After the Office, so it takes ⌘0; the sidebar lists it under Insights.
+    case system
 
     var id: String { rawValue }
 
@@ -20,6 +22,7 @@ enum WindowSection: String, CaseIterable, Identifiable {
         case .configuration: Copy.configuration
         case .appearance: Copy.appearance
         case .office: Copy.office
+        case .system: Copy.systemPage
         }
     }
 
@@ -34,6 +37,7 @@ enum WindowSection: String, CaseIterable, Identifiable {
         case .configuration: "gearshape"
         case .appearance: "paintpalette"
         case .office: "cube.transparent"
+        case .system: "cpu"
         }
     }
 
@@ -49,6 +53,7 @@ enum WindowSection: String, CaseIterable, Identifiable {
         case .configuration: .gray
         case .appearance: .indigo
         case .office: .cyan
+        case .system: .mint
         }
     }
 
@@ -199,7 +204,7 @@ struct SidebarNode: Identifiable {
                     children: StatisticsPage.allCases.map {
                         SidebarNode(item: .statistics($0), title: $0.title, symbol: $0.symbol, tint: $0.tint)
                     }),
-                SidebarNode(.usage), SidebarNode(.logs),
+                SidebarNode(.usage), SidebarNode(.logs), SidebarNode(.system),
             ]
         ),
         (
@@ -230,7 +235,7 @@ struct OpenPageAction {
     }
 }
 
-/// The Go menu (⌘1 to ⌘9, one per section) and Settings… (⌘,), which opens Appearance.
+/// The Go menu (⌘1 to ⌘9 and ⌘0, one per section) and Settings… (⌘,), which opens Appearance.
 struct NavigationCommands: Commands {
     let navigator: Navigator
 
@@ -242,7 +247,7 @@ struct NavigationCommands: Commands {
         CommandMenu(Copy.goMenu) {
             ForEach(Array(WindowSection.allCases.enumerated()), id: \.element) { index, section in
                 PageButton(navigator: navigator, item: .section(section), title: section.title)
-                    .keyboardShortcut(KeyEquivalent(Character(String(index + 1))))
+                    .keyboardShortcut(KeyEquivalent(Character(String((index + 1) % 10))))
             }
         }
     }

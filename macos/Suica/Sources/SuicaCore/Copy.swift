@@ -874,6 +874,77 @@ public enum Copy {
         }
     }
 
+    // MARK: System
+
+    public static let systemPage = "System"
+    public static let cpu = "CPU"
+    public static let memory = "Memory"
+    public static let disk = "Disk"
+    public static let network = "Network"
+    public static let battery = "Battery"
+    public static let thermal = "Thermal"
+    public static let topProcesses = "Top processes"
+    public static let processName = "Name"
+    public static let processID = "PID"
+    public static let download = "Download"
+    public static let upload = "Upload"
+    public static let lastTwoMinutes = "Last 2 minutes"
+    public static let measuring = "Measuring…"
+    public static let noProcesses = "Could not list the processes."
+    public static let chartTime = "Time"
+    public static let chartUsage = "Usage"
+    /// 0.423 → "42%".
+    public static func percent(_ fraction: Double) -> String { "\(Int((fraction * 100).rounded()))%" }
+    /// A process's share of one core: "12.3%".
+    public static func processCPU(_ percent: Double) -> String {
+        percent.formatted(.number.precision(.fractionLength(1)).locale(Locale(identifier: "en_US"))) + "%"
+    }
+    /// Memory in binary units, as Activity Monitor shows it: "12.4 GB".
+    public static func memoryBytes(_ bytes: UInt64) -> String {
+        Int64(clamping: bytes).formatted(.byteCount(style: .memory).locale(Locale(identifier: "en_US")))
+    }
+    /// Disk space and traffic in decimal units, as Finder shows them: "245.1 GB".
+    public static func diskBytes(_ bytes: UInt64) -> String {
+        Int64(clamping: bytes).formatted(.byteCount(style: .file).locale(Locale(identifier: "en_US")))
+    }
+    public static func rate(_ bytesPerSecond: Double) -> String {
+        "\(diskBytes(UInt64(max(bytesPerSecond, 0).rounded())))/s"
+    }
+    public static func usedOf(_ used: String, _ total: String) -> String { "\(used) of \(total)" }
+    public static func free(_ amount: String) -> String { "\(amount) free" }
+    public static func swapUsed(_ amount: String) -> String { "Swap \(amount)" }
+    public static func cores(_ count: Int) -> String { count == 1 ? "1 core" : "\(count) cores" }
+    /// The 1, 5 and 15 minute load averages.
+    public static func loadAverages(_ values: [Double]) -> String {
+        let numbers = values.map { $0.formatted(.number.precision(.fractionLength(2)).locale(Locale(identifier: "en_US"))) }
+        return "Load \(numbers.joined(separator: " · "))"
+    }
+    public static func powerState(_ state: PowerState) -> String {
+        switch state {
+        case .charging: "Charging"
+        case .pluggedIn: "On power adapter"
+        case .onBattery: "On battery"
+        }
+    }
+    public static func timeLeft(_ minutes: Int) -> String { "\(Copy.minutes(minutes)) left" }
+    public static func thermalState(_ level: ThermalLevel) -> String {
+        switch level {
+        case .nominal: "Nominal"
+        case .fair: "Fair"
+        case .serious: "Serious"
+        case .critical: "Critical"
+        }
+    }
+    public static func thermalHint(_ level: ThermalLevel) -> String {
+        switch level {
+        case .nominal: "Running cool."
+        case .fair: "A little warm. The fans may spin up."
+        case .serious: "Hot. macOS slows the Mac down to cool it."
+        case .critical: "Very hot. macOS slows the Mac down hard."
+        }
+    }
+    public static func uptime(_ seconds: TimeInterval) -> String { "Up \(duration(Int(seconds / 60)))" }
+
     // MARK: Logs
 
     public static let logs = "Logs"
