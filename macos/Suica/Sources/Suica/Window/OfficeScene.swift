@@ -11,9 +11,21 @@ struct DeskTag: Component {
 /// The floor, wall and desk colours of one appearance.
 private struct Palette {
     let floor: NSColor
+    /// Every other plank of a project Room's wooden floor.
+    let plank: NSColor
     let hallFloor: NSColor
+    /// Every other carpet tile in the Center Room.
+    let hallTile: NSColor
     let wall: NSColor
+    /// The dark top of a wall, where it is cut away to show the room.
+    let wallCap: NSColor
+    /// The concrete slab the building stands on.
+    let plinth: NSColor
     let desk: NSColor
+    let deskTop: NSColor
+    let deskFrame: NSColor
+    let chair: NSColor
+    let hedge: NSColor
     let label: NSColor
     let bubble: NSColor
     let bubbleText: NSColor
@@ -26,18 +38,32 @@ private struct Palette {
     let lampGlow: NSColor
 
     static let light = Palette(
-        floor: NSColor(white: 0.88, alpha: 1), hallFloor: NSColor(red: 0.8, green: 0.84, blue: 0.9, alpha: 1),
-        wall: NSColor(white: 0.78, alpha: 1),
-        desk: NSColor(red: 0.78, green: 0.66, blue: 0.5, alpha: 1), label: NSColor(white: 0.25, alpha: 1),
+        floor: NSColor(red: 0.86, green: 0.71, blue: 0.52, alpha: 1),
+        plank: NSColor(red: 0.81, green: 0.65, blue: 0.46, alpha: 1),
+        hallFloor: NSColor(red: 0.74, green: 0.79, blue: 0.84, alpha: 1),
+        hallTile: NSColor(red: 0.68, green: 0.74, blue: 0.8, alpha: 1),
+        wall: NSColor(white: 0.97, alpha: 1), wallCap: NSColor(white: 0.24, alpha: 1),
+        plinth: NSColor(white: 0.72, alpha: 1),
+        desk: NSColor(red: 0.78, green: 0.66, blue: 0.5, alpha: 1), deskTop: NSColor(white: 0.96, alpha: 1),
+        deskFrame: NSColor(white: 0.42, alpha: 1), chair: NSColor(white: 0.2, alpha: 1),
+        hedge: NSColor(red: 0.3, green: 0.56, blue: 0.27, alpha: 1),
+        label: NSColor(white: 0.25, alpha: 1),
         bubble: .white, bubbleText: NSColor(white: 0.12, alpha: 1),
         background: NSColor(white: 0.96, alpha: 1),
-        grass: NSColor(red: 0.55, green: 0.75, blue: 0.42, alpha: 1), pavement: NSColor(white: 0.8, alpha: 1),
+        grass: NSColor(red: 0.5, green: 0.76, blue: 0.36, alpha: 1), pavement: NSColor(white: 0.84, alpha: 1),
         road: NSColor(white: 0.36, alpha: 1), sun: NSColor(red: 1, green: 0.9, blue: 0.45, alpha: 1),
         lampGlow: NSColor(white: 0.92, alpha: 1))
     static let dark = Palette(
-        floor: NSColor(white: 0.2, alpha: 1), hallFloor: NSColor(red: 0.16, green: 0.19, blue: 0.25, alpha: 1),
-        wall: NSColor(white: 0.3, alpha: 1),
-        desk: NSColor(red: 0.45, green: 0.37, blue: 0.28, alpha: 1), label: NSColor(white: 0.85, alpha: 1),
+        floor: NSColor(red: 0.42, green: 0.33, blue: 0.24, alpha: 1),
+        plank: NSColor(red: 0.38, green: 0.29, blue: 0.21, alpha: 1),
+        hallFloor: NSColor(red: 0.2, green: 0.24, blue: 0.31, alpha: 1),
+        hallTile: NSColor(red: 0.17, green: 0.21, blue: 0.28, alpha: 1),
+        wall: NSColor(white: 0.62, alpha: 1), wallCap: NSColor(white: 0.12, alpha: 1),
+        plinth: NSColor(white: 0.3, alpha: 1),
+        desk: NSColor(red: 0.45, green: 0.37, blue: 0.28, alpha: 1), deskTop: NSColor(white: 0.66, alpha: 1),
+        deskFrame: NSColor(white: 0.25, alpha: 1), chair: NSColor(white: 0.12, alpha: 1),
+        hedge: NSColor(red: 0.13, green: 0.25, blue: 0.14, alpha: 1),
+        label: NSColor(white: 0.85, alpha: 1),
         bubble: NSColor(white: 0.32, alpha: 1), bubbleText: .white,
         background: NSColor(white: 0.11, alpha: 1),
         grass: NSColor(red: 0.17, green: 0.27, blue: 0.17, alpha: 1), pavement: NSColor(white: 0.32, alpha: 1),
@@ -111,6 +137,7 @@ final class OfficeSceneController {
     private var dark = false
     private var layoutExtent = SIMD2<Float>(8, 6)
     private static let doorWidth: Float = 1.4
+    private static let wallHeight: Float = 0.55
 
     // The camera: where it looks, how it is turned and how far it stands.
     static let defaultYaw: Float = 0.42
@@ -132,10 +159,12 @@ final class OfficeSceneController {
         camera.addChild(sun)
         sun.addChild(ModelEntity(mesh: .generateSphere(radius: 2.55), materials: []))
         let key = DirectionalLight()
-        key.light.intensity = 3_500
+        key.light.intensity = 3_800
+        // Soft shadows under the desks, figures and furniture give the floor plan its depth.
+        key.shadow = DirectionalLightComponent.Shadow(maximumDistance: 60, depthBias: 3)
         key.look(at: .zero, from: [-4, 8, 6], relativeTo: nil)
         let fill = DirectionalLight()
-        fill.light.intensity = 1_800
+        fill.light.intensity = 1_500
         fill.look(at: .zero, from: [6, 5, 3], relativeTo: nil)
         root.addChild(key)
         root.addChild(fill)
@@ -351,21 +380,24 @@ final class OfficeSceneController {
         let width = Float(room.width)
         let depth = Float(room.depth)
         let thickness: Float = 0.06
-        let height: Float = 0.5
+        let height = Self.wallHeight
         let walls = room.walls
+        /// A wall piece in plaster with the dark cut-away cap along its top.
+        func piece(_ size: SIMD3<Float>, at position: SIMD3<Float>) {
+            entity.addChild(box(size, palette.wall, at: position))
+            entity.addChild(
+                box([size.x + 0.004, 0.025, size.z + 0.004], palette.wallCap, at: [position.x, height, position.z]))
+        }
         switch side {
         case .north, .south:
             let z = (side == .north ? -1 : 1) * (depth / 2 - thickness / 2)
             guard room.door == side else {
-                entity.addChild(box([width, height, thickness], palette.wall, at: [0, height / 2, z]))
+                piece([width, height, thickness], at: [0, height / 2, z])
                 return
             }
-            let piece = (width - Self.doorWidth) / 2
+            let side = (width - Self.doorWidth) / 2
             for direction: Float in [-1, 1] {
-                entity.addChild(
-                    box(
-                        [piece, height, thickness], palette.wall,
-                        at: [direction * (Self.doorWidth + piece) / 2, height / 2, z]))
+                piece([side, height, thickness], at: [direction * (Self.doorWidth + side) / 2, height / 2, z])
             }
             // A mat in the doorway, so the way through reads from above.
             entity.addChild(box([Self.doorWidth, 0.014, 0.5], palette.desk, at: [0, 0.007, z]))
@@ -374,10 +406,7 @@ final class OfficeSceneController {
             let top = walls.contains(.north) ? thickness : 0
             let bottom = walls.contains(.south) ? thickness : 0
             let x = (side == .west ? -1 : 1) * (width / 2 - thickness / 2)
-            entity.addChild(
-                box(
-                    [thickness, height, depth - top - bottom], palette.wall,
-                    at: [x, height / 2, (top - bottom) / 2]))
+            piece([thickness, height, depth - top - bottom], at: [x, height / 2, (top - bottom) / 2])
         }
     }
 
@@ -387,6 +416,28 @@ final class OfficeSceneController {
         let depth = Float(room.depth)
         entity.addChild(
             box([width, 0.06, depth], room.isCenter ? palette.hallFloor : palette.floor, at: [0, -0.03, 0]))
+        if room.isCenter {
+            // Carpet tiles in two tones, laid as a chequerboard.
+            let tile: Float = 0.8
+            for column in 0..<Int((width / tile).rounded(.up)) {
+                for row in 0..<Int((depth / tile).rounded(.up)) where (column + row).isMultiple(of: 2) {
+                    let x = -width / 2 + Float(column) * tile
+                    let z = -depth / 2 + Float(row) * tile
+                    let size = SIMD2(min(tile, width / 2 - x), min(tile, depth / 2 - z))
+                    entity.addChild(
+                        box([size.x, 0.004, size.y], palette.hallTile, at: [x + size.x / 2, 0.002, z + size.y / 2]))
+                }
+            }
+        } else {
+            // Wooden planks across the room, every other one a shade darker.
+            let plank: Float = 0.3
+            var z = -depth / 2 + plank
+            while z < depth / 2 {
+                let size = min(plank, depth / 2 - z)
+                entity.addChild(box([width, 0.004, size], palette.plank, at: [0, 0.002, z + size / 2]))
+                z += 2 * plank
+            }
+        }
         for side in [OfficeSide.north, .south, .west, .east] where room.walls.contains(side) {
             addWall(to: entity, side: side, room: room, palette: palette)
         }
@@ -407,7 +458,7 @@ final class OfficeSceneController {
         } else {
             // Standing on the near wall, which faces the viewer: a name on the floor would be hidden
             // behind that wall or behind the Desks.
-            label.position = [x, 0.52 - bounds.min.y, depth / 2 - 0.03]
+            label.position = [x, Self.wallHeight + 0.02 - bounds.min.y, depth / 2 - 0.03]
         }
         entity.addChild(label)
         return entity
@@ -415,17 +466,41 @@ final class OfficeSceneController {
 
     private func makeDesk(_ session: OfficeSession, _ palette: Palette) -> DeskNode {
         let entity = Entity()
-        // Furniture: a desk, a monitor facing the viewer, a chair.
-        entity.addChild(box([1.2, 0.05, 0.6], palette.desk, at: [0, 0.72, -0.15]))
-        entity.addChild(box([0.05, 0.72, 0.55], palette.desk, at: [-0.55, 0.36, -0.15]))
-        entity.addChild(box([0.05, 0.72, 0.55], palette.desk, at: [0.55, 0.36, -0.15]))
-        entity.addChild(box([0.05, 0.22, 0.05], .darkGray, at: [0, 0.86, -0.3]))
-        let screen = ModelEntity(mesh: .generateBox(size: [0.56, 0.34, 0.03]), materials: [UnlitMaterial(color: .darkGray)])
+        // Furniture: a light desk on a metal frame, a monitor facing the viewer with a keyboard in
+        // front of it, and an office chair on wheels.
+        entity.addChild(box([1.2, 0.04, 0.6], palette.deskTop, at: [0, 0.72, -0.15]))
+        entity.addChild(box([1.2, 0.015, 0.6], palette.deskFrame, at: [0, 0.693, -0.15]))
+        for x: Float in [-0.56, 0.56] {
+            entity.addChild(box([0.04, 0.69, 0.04], palette.deskFrame, at: [x, 0.345, -0.15]))
+            entity.addChild(box([0.05, 0.02, 0.55], palette.deskFrame, at: [x, 0.01, -0.15]))
+        }
+        entity.addChild(box([1.08, 0.3, 0.02], palette.deskFrame, at: [0, 0.53, -0.43]))
+        entity.addChild(box([0.18, 0.015, 0.12], palette.deskFrame, at: [0, 0.748, -0.32]))
+        entity.addChild(box([0.04, 0.2, 0.04], palette.deskFrame, at: [0, 0.85, -0.32]))
+        entity.addChild(box([0.6, 0.38, 0.025], NSColor(white: 0.1, alpha: 1), at: [0, 1.1, -0.31]))
+        let screen = ModelEntity(mesh: .generateBox(size: [0.54, 0.32, 0.03]), materials: [UnlitMaterial(color: .darkGray)])
         screen.position = [0, 1.1, -0.3]
         entity.addChild(screen)
-        entity.addChild(
-            box([0.42, 0.05, 0.42], NSColor(white: 0.3, alpha: 1), at: [0, 0.3, 0.55]))
-        entity.addChild(box([0.05, 0.28, 0.05], NSColor(white: 0.3, alpha: 1), at: [0, 0.15, 0.55]))
+        entity.addChild(box([0.44, 0.015, 0.14], NSColor(white: 0.22, alpha: 1), at: [0, 0.748, 0.0]))
+        // The chair: a five-spoke base on wheels, a column, a padded seat and a low back.
+        for spoke in 0..<5 {
+            let angle = Float(spoke) * 2 * .pi / 5
+            let leg = box([0.24, 0.03, 0.04], palette.chair, at: [0, 0.06, 0])
+            leg.orientation = simd_quatf(angle: angle, axis: [0, 1, 0])
+            leg.position = [cos(angle) * 0.12, 0.06, 0.55 - sin(angle) * 0.12]
+            entity.addChild(leg)
+            let wheel = ModelEntity(mesh: .generateSphere(radius: 0.03), materials: [material(palette.chair)])
+            wheel.position = [cos(angle) * 0.24, 0.03, 0.55 - sin(angle) * 0.24]
+            entity.addChild(wheel)
+        }
+        entity.addChild(box([0.05, 0.22, 0.05], palette.deskFrame, at: [0, 0.18, 0.55]))
+        for (size, position) in [
+            (SIMD3<Float>(0.46, 0.06, 0.44), SIMD3<Float>(0, 0.31, 0.55)), ([0.42, 0.3, 0.05], [0, 0.55, 0.78]),
+        ] {
+            let pad = ModelEntity(mesh: .generateBox(size: size, cornerRadius: 0.025), materials: [material(palette.chair)])
+            pad.position = position
+            entity.addChild(pad)
+        }
 
         // The figure, dressed by its look, bobbing as one.
         let figure = Entity()
@@ -645,8 +720,21 @@ final class OfficeSceneController {
             let z = road + side * (roadWidth / 2 - Float(OfficeStreet.bikeLaneWidth))
             entity.addChild(box([length + 6, 0.005, 0.05], marking, at: [0, -0.028, z]))
         }
-        // A path from the door to the pavement.
-        entity.addChild(box([1.4, 0.06, 0.42], palette.pavement, at: [0, -0.05, Float(layout.depth) / 2 + 0.21]))
+        // The concrete slab the building stands on, a step proud of the lawn, and a path from its
+        // edge to the pavement.
+        let depth = Float(layout.depth)
+        let rim: Float = 0.15
+        entity.addChild(box([width + 2 * rim, 0.09, depth + 2 * rim], palette.plinth, at: [0, -0.055, 0]))
+        entity.addChild(box([1.4, 0.06, 0.4 - rim], palette.pavement, at: [0, -0.05, depth / 2 + rim + (0.4 - rim) / 2]))
+        // Low clipped hedges along the back and the sides, clear of the street side so they hide no Desk.
+        func hedge(_ size: SIMD3<Float>, at position: SIMD3<Float>) {
+            let model = ModelEntity(
+                mesh: .generateBox(size: size, cornerRadius: 0.1), materials: [material(palette.hedge, roughness: 0.9)])
+            model.position = position
+            entity.addChild(model)
+        }
+        hedge([width + 1.2, 0.4, 0.4], at: [0, 0.14, back - 0.5])
+        for side: Float in [-1, 1] { hedge([0.4, 0.4, depth - 0.4], at: [side * (width / 2 + 0.5), 0.14, -0.2]) }
 
         // Trees behind the building and along the far pavement, street lamps between them. Nothing
         // tall stands between the building and the road, so the Desks stay in view.
