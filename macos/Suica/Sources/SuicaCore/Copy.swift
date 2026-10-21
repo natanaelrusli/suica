@@ -572,8 +572,9 @@ public enum Copy {
     public static func yourState(_ state: String) -> String { "You: \(reviewerState(state))" }
     public static let descriptionTab = "Description"
     public static let noDescription = "No description."
-    public static func changesTab(_ count: Int) -> String { "Changes (\(count))" }
-    public static func commentsTab(_ count: Int) -> String { "Comments (\(count))" }
+    public static let changesTab = "Changes"
+    public static let commentsTab = "Comments"
+    public static let copyCode = "Copy"
     public static let noComments = "No comments yet."
     public static let showActivity = "Show GitLab activity"
     public static let resolved = "Resolved"

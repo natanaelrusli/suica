@@ -268,19 +268,121 @@ private struct ReviewRow: View {
 struct Badge: View {
     let text: String
     let tint: AnyShapeStyle
+    var symbol: String?
 
-    init(text: String, tint: some ShapeStyle) {
+    init(text: String, tint: some ShapeStyle, symbol: String? = nil) {
         self.text = text
         self.tint = AnyShapeStyle(tint)
+        self.symbol = symbol
     }
 
     var body: some View {
-        Text(text)
-            .font(.caption2.weight(.semibold))
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .foregroundStyle(tint)
-            .background(tint.opacity(0.15), in: Capsule())
+        Group {
+            if let symbol { Label(text, systemImage: symbol).labelStyle(BadgeLabelStyle()) } else { Text(text) }
+        }
+        .font(.caption2.weight(.semibold))
+        .padding(.horizontal, 6)
+        .padding(.vertical, 2)
+        .foregroundStyle(tint)
+        .background(tint.opacity(0.15), in: Capsule())
+    }
+}
+
+/// A badge's icon sits close to its text.
+private struct BadgeLabelStyle: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 3) {
+            configuration.icon.imageScale(.small)
+            configuration.title
+        }
+    }
+}
+
+/// The MR's tabs as text with an accent underline under the one shown, its count beside it and a
+/// dot when something there waits for you.
+private struct DetailTabBar: View {
+    struct Item {
+        let tab: DetailTab
+        let title: String
+        var count: Int?
+        var waiting = false
+    }
+
+    @Binding var selection: DetailTab
+    let tabs: [Item]
+    @Namespace private var underline
+    @Environment(\.motionLevel) private var motion
+
+    var body: some View {
+        HStack(spacing: 22) {
+            ForEach(tabs, id: \.tab) { item in
+                let selected = item.tab == selection
+                Button {
+                    withAnimation(Motion.animation(Motion.content, motion)) { selection = item.tab }
+                } label: {
+                    HStack(spacing: 6) {
+                        Text(item.title)
+                            .fontWeight(selected ? .semibold : .regular)
+                            .foregroundStyle(selected ? .primary : .secondary)
+                        if let count = item.count {
+                            Text("\(count)")
+                                .font(.caption.monospacedDigit().weight(.medium))
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 1)
+                                .background(.quaternary.opacity(0.7), in: Capsule())
+                        }
+                        if item.waiting {
+                            Circle().fill(.tint).frame(width: 6, height: 6)
+                        }
+                    }
+                    .padding(.vertical, 8)
+                    .contentShape(Rectangle())
+                    .overlay(alignment: .bottom) {
+                        if selected {
+                            Capsule()
+                                .fill(.tint)
+                                .frame(height: 2)
+                                .matchedGeometryEffect(id: "underline", in: underline)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(item.count.map { "\(item.title), \($0)" } ?? item.title)
+                .accessibilityAddTraits(selected ? .isSelected : [])
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 20)
+        .overlay(alignment: .bottom) { Divider() }
+    }
+}
+
+extension EnvironmentValues {
+    /// Set by an MR's page: a tab's scroll view collapses the page header once it is scrolled.
+    @Entry var headerCollapsed: Binding<Bool>? = nil
+}
+
+extension View {
+    /// Collapses the MR page's header once this scroll view leaves the top, and expands it near
+    /// the top again; the gap between the two keeps it from flickering at the edge.
+    func collapsesHeader() -> some View { modifier(CollapsesHeader()) }
+
+    /// Text at a comfortable line length, at the leading edge of a wider page.
+    func readableWidth() -> some View {
+        frame(maxWidth: 780, alignment: .leading).frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct CollapsesHeader: ViewModifier {
+    @Environment(\.headerCollapsed) private var collapsed
+
+    func body(content: Content) -> some View {
+        content.onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y + $0.contentInsets.top } action: { _, offset in
+            guard let collapsed else { return }
+            if !collapsed.wrappedValue, offset > 48 { collapsed.wrappedValue = true }
+            if collapsed.wrappedValue, offset < 4 { collapsed.wrappedValue = false }
+        }
     }
 }
 
@@ -301,6 +403,8 @@ private struct MergeRequestDetailView: View {
     @State private var confirmingApprove = false
     @State private var merging = false
     @State private var confirmingClose = false
+    @State private var collapsed = false
+    @Environment(\.openURL) private var openURL
 
     private var agentReview: AgentReviewInfo? { model.agentReview(for: detail.key) }
     /// Your own MR: Agent Fix, a comment box and Merge instead of reviewing.
@@ -310,27 +414,12 @@ private struct MergeRequestDetailView: View {
         VStack(alignment: .leading, spacing: 0) {
             header
                 .padding(.horizontal, 20)
-                .padding(.top, 16)
-                .padding(.bottom, 12)
+                .padding(.top, collapsed ? 10 : 16)
+                .padding(.bottom, collapsed ? 8 : 12)
                 .motion(value: error)
                 .motion(value: model.approvalNotices[detail.key])
-            Picker("", selection: $tab) {
-                Text(Copy.descriptionTab).tag(DetailTab.description)
-                Text(Copy.changesTab(detail.files.count)).tag(DetailTab.changes)
-                Text(Copy.commentsTab(detail.comments.count)).tag(DetailTab.comments)
-                if yours {
-                    Text(fixes.fix(for: detail.key)?.isReady == true ? "\(Copy.fixTab) •" : Copy.fixTab)
-                        .tag(DetailTab.fix)
-                } else {
-                    Text(agentReview?.isReady == true ? "\(Copy.agentReviewTab) •" : Copy.agentReviewTab)
-                        .tag(DetailTab.agent)
-                }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .padding(.horizontal, 20)
-            .padding(.bottom, 10)
-            Divider()
+                .motion(value: collapsed)
+            DetailTabBar(selection: $tab, tabs: tabs)
             ZStack {
                 switch tab {
                 case .description: DescriptionTab(detail: detail)
@@ -345,7 +434,9 @@ private struct MergeRequestDetailView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .motion(Motion.page, value: tab)
+            .environment(\.headerCollapsed, $collapsed)
         }
+        .onChange(of: tab) { collapsed = false }
         // Links in text written by others open only when they are http(s).
         .environment(\.openURL, OpenURLAction { url in
             DisplayText.safeURL(url.absoluteString) == nil ? .discarded : .systemAction
@@ -379,62 +470,46 @@ private struct MergeRequestDetailView: View {
         }
     }
 
+    private var tabs: [DetailTabBar.Item] {
+        var items: [DetailTabBar.Item] = [
+            .init(tab: .description, title: Copy.descriptionTab),
+            .init(tab: .changes, title: Copy.changesTab, count: detail.files.count),
+            .init(tab: .comments, title: Copy.commentsTab, count: detail.comments.count),
+        ]
+        if yours {
+            items.append(.init(tab: .fix, title: Copy.fixTab, waiting: fixes.fix(for: detail.key)?.isReady == true))
+        } else {
+            items.append(.init(tab: .agent, title: Copy.agentReviewTab, waiting: agentReview?.isReady == true))
+        }
+        return items
+    }
+
+    /// The title, the actions and the facts about the MR; once the content is scrolled, only the
+    /// title on one line and the actions, so more of the MR fits.
     private var header: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            // The title gets the full width; the actions sit on their own row beneath it, so a long
-            // title is never squeezed into a narrow column beside them.
-            Text(DisplayText.clean(detail.title, max: 300))
-                .font(.title2.weight(.semibold))
-                .textSelection(.enabled)
-            HStack(spacing: 8) {
-                if yours {
-                    let availability = mergeAvailability(detail)
-                    Button { merging = true } label: {
-                        Label(availability == .whenPipelineSucceeds ? Copy.mergeWhenPipelineSucceeds : Copy.merge,
-                              systemImage: "arrow.triangle.merge")
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(loading || fixes.busyKeys.contains(detail.key))
-                    .help(blockedReason(availability) ?? "")
-                    Button {
-                        tab = .fix
-                        Task { await fixes.queueFix(detail.key) }
-                    } label: {
-                        Label(Copy.fixFindingsNow, systemImage: "wand.and.stars")
-                    }
-                    .disabled(fixes.busyKeys.contains(detail.key) || fixes.fix(for: detail.key).map { $0.isActive || $0.isReady } == true)
-                    Button(role: .destructive) { confirmingClose = true } label: {
-                        Label(Copy.closeMR, systemImage: "xmark.circle")
-                    }
-                    .disabled(loading || fixes.busyKeys.contains(detail.key))
-                } else if model.isApprovedByMe(detail) {
-                    Badge(text: Copy.approvedByYou, tint: .green)
-                } else if model.canApprove(detail) {
-                    Button { confirmingApprove = true } label: {
-                        Label(Copy.approve, systemImage: "checkmark.seal")
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(model.approvingKeys.contains(detail.key) || loading)
+        VStack(alignment: .leading, spacing: 10) {
+            if collapsed {
+                HStack(spacing: 12) {
+                    title.font(.headline).lineLimit(1).truncationMode(.tail)
+                    Spacer(minLength: 12)
+                    actions
                 }
-                let busy = model.agentBusyKeys.contains(detail.key)
-                if !yours && model.offersReview(for: detail.key) {
-                    Button {
-                        tab = .agent
-                        Task { await model.queueAgentReview(detail.key) }
-                    } label: {
-                        Label(agentReview == nil ? Copy.reviewWithAgent : Copy.reviewAgain, systemImage: "sparkles")
+            } else {
+                title.font(.title2.weight(.semibold))
+                // The actions sit beside the facts while they fit, and beneath them otherwise, so a
+                // long title is never squeezed into a narrow column beside them.
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 12) {
+                        facts
+                        Spacer(minLength: 12)
+                        actions
                     }
-                    .disabled(busy)
+                    VStack(alignment: .leading, spacing: 8) {
+                        facts
+                        actions
+                    }
                 }
-                Button(action: onReload) { Image(systemName: "arrow.clockwise") }
-                    .help(Copy.reload)
-                    .accessibilityLabel(Copy.reload)
-                    .disabled(loading)
-                if let url = DisplayText.safeURL(detail.url) {
-                    Link(destination: url) { Label(Copy.openInGitLab, systemImage: "arrow.up.right.square") }
-                }
-                Spacer(minLength: 0)
-                if loading { ProgressView().controlSize(.small) }
+                chips
             }
             if let error { NoticeBox(text: error, tint: .red) }
             if let notice = model.approvalNotices[detail.key] {
@@ -443,48 +518,135 @@ private struct MergeRequestDetailView: View {
             if yours, tab != .fix, let banner = fixes.banner {
                 NoticeBox(text: banner, tint: .secondary, onClose: fixes.dismissBanner)
             }
-            HStack(spacing: 6) {
-                if detail.draft { Badge(text: Copy.draft, tint: .gray) }
-                Text(DisplayText.shortKey(detail.key))
-                    .textSelection(.enabled)
-                    .help(DisplayText.clean(detail.key, max: 120))
+        }
+    }
+
+    private var title: some View {
+        Text(DisplayText.clean(detail.title, max: 300)).textSelection(.enabled)
+    }
+
+    /// Key, author and when it was last updated.
+    private var facts: some View {
+        HStack(spacing: 6) {
+            if detail.draft { Badge(text: Copy.draft, tint: .gray) }
+            Text(DisplayText.shortKey(detail.key))
+                .textSelection(.enabled)
+                .help(DisplayText.clean(detail.key, max: 120))
+            Text("·").foregroundStyle(.tertiary)
+            Text(Copy.byAuthor(DisplayText.clean(detail.author.name, max: 60)))
+            if let date = detail.updatedDate {
                 Text("·").foregroundStyle(.tertiary)
-                Text(Copy.byAuthor(DisplayText.clean(detail.author.name, max: 60)))
-                if let date = detail.updatedDate {
-                    Text("·").foregroundStyle(.tertiary)
-                    Text(Copy.updated(date.formatted(.relative(presentation: .named))))
-                        .help(date.formatted(date: .abbreviated, time: .shortened))
+                Text(Copy.updated(date.formatted(.relative(presentation: .named))))
+                    .help(date.formatted(date: .abbreviated, time: .shortened))
+            }
+        }
+        .font(.callout)
+        .foregroundStyle(.secondary)
+        .lineLimit(1)
+        .fixedSize()
+    }
+
+    private var actions: some View {
+        HStack(spacing: 8) {
+            if yours {
+                let availability = mergeAvailability(detail)
+                Button { merging = true } label: {
+                    Label(availability == .whenPipelineSucceeds ? Copy.mergeWhenPipelineSucceeds : Copy.merge,
+                          systemImage: "arrow.triangle.merge")
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(loading || fixes.busyKeys.contains(detail.key))
+                .help(blockedReason(availability) ?? "")
+                Button {
+                    tab = .fix
+                    Task { await fixes.queueFix(detail.key) }
+                } label: {
+                    Label(Copy.fixFindingsNow, systemImage: "wand.and.stars")
+                }
+                .disabled(fixes.busyKeys.contains(detail.key) || fixes.fix(for: detail.key).map { $0.isActive || $0.isReady } == true)
+                Button(role: .destructive) { confirmingClose = true } label: {
+                    Label(Copy.closeMR, systemImage: "xmark.circle")
+                }
+                .disabled(loading || fixes.busyKeys.contains(detail.key))
+            } else if model.isApprovedByMe(detail) {
+                Label(Copy.approvedByYou, systemImage: "checkmark.seal.fill")
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(.green)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(.green.opacity(0.12), in: Capsule())
+            } else if model.canApprove(detail) {
+                Button { confirmingApprove = true } label: {
+                    Label(Copy.approve, systemImage: "checkmark.seal")
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(model.approvingKeys.contains(detail.key) || loading)
+            }
+            if !yours && model.offersReview(for: detail.key) {
+                Button {
+                    tab = .agent
+                    Task { await model.queueAgentReview(detail.key) }
+                } label: {
+                    Label(agentReview == nil ? Copy.reviewWithAgent : Copy.reviewAgain, systemImage: "sparkles")
+                }
+                .disabled(model.agentBusyKeys.contains(detail.key))
+            }
+            if let url = DisplayText.safeURL(detail.url) {
+                Button { openURL(url) } label: {
+                    Label(Copy.openInGitLab, systemImage: "arrow.up.right.square")
                 }
             }
-            .font(.callout)
+            // The spinner takes the reload button's place while the MR loads.
+            Button(action: onReload) {
+                ZStack {
+                    Image(systemName: "arrow.clockwise").opacity(loading ? 0 : 1)
+                    if loading { ProgressView().controlSize(.mini) }
+                }
+                .frame(width: 16)
+            }
+            .help(Copy.reload)
+            .accessibilityLabel(Copy.reload)
+            .disabled(loading)
+        }
+        .fixedSize()
+    }
+
+    /// Branches, pipeline, squash, size, labels and Reviewers, wrapping when the row is full.
+    private var chips: some View {
+        FlowRow(spacing: 8) {
+            Label(
+                "\(DisplayText.clean(detail.sourceBranch, max: 80)) → \(DisplayText.clean(detail.targetBranch, max: 80))",
+                systemImage: "arrow.triangle.branch"
+            )
+            .font(.caption.monospaced())
             .foregroundStyle(.secondary)
-            FlowRow {
-                Label(
-                    "\(DisplayText.clean(detail.sourceBranch, max: 80)) → \(DisplayText.clean(detail.targetBranch, max: 80))",
-                    systemImage: "arrow.triangle.branch"
-                )
-                .font(.caption.monospaced())
-                .foregroundStyle(.secondary)
-                if let status = detail.pipelineStatus {
-                    Badge(text: Copy.pipeline(status), tint: pipelineTint(status))
-                }
-                if let squash = detail.squashOnMerge {
-                    Badge(text: squash ? Copy.squashOnMerge : Copy.noSquash, tint: squash ? .purple : .gray)
-                }
-                if let additions = detail.additions, let deletions = detail.deletions {
-                    Text("+\(additions)").font(.caption.monospacedDigit()).foregroundStyle(.green)
-                    Text("−\(deletions)").font(.caption.monospacedDigit()).foregroundStyle(.red)
-                }
-                ForEach(detail.labels, id: \.self) { Badge(text: DisplayText.clean($0, max: 40), tint: .tint) }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(.quaternary.opacity(0.6), in: Capsule())
+            if let status = detail.pipelineStatus {
+                Badge(text: Copy.pipeline(status), tint: pipelineTint(status), symbol: pipelineSymbol(status))
             }
+            if let squash = detail.squashOnMerge {
+                Badge(text: squash ? Copy.squashOnMerge : Copy.noSquash, tint: squash ? .purple : .gray)
+            }
+            if let additions = detail.additions, let deletions = detail.deletions {
+                HStack(spacing: 4) {
+                    Text("+\(additions)").foregroundStyle(.green)
+                    Text("−\(deletions)").foregroundStyle(.red)
+                }
+                .font(.caption.monospacedDigit().weight(.medium))
+            }
+            ForEach(detail.labels, id: \.self) { Badge(text: DisplayText.clean($0, max: 40), tint: .tint) }
             if !detail.reviewers.isEmpty {
-                FlowRow {
-                    Text(Copy.reviewersHeading).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                    ForEach(detail.reviewers, id: \.username) { reviewer in
-                        Badge(
-                            text: "\(DisplayText.clean(reviewer.name, max: 60)): \(Copy.reviewerState(reviewer.state))",
-                            tint: ReviewTint.reviewer(reviewer.state))
-                    }
+                Text(Copy.reviewersHeading)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 6)
+                ForEach(detail.reviewers, id: \.username) { reviewer in
+                    Badge(
+                        text: "\(DisplayText.clean(reviewer.name, max: 60)): \(Copy.reviewerState(reviewer.state))",
+                        tint: ReviewTint.reviewer(reviewer.state),
+                        symbol: reviewer.state == "APPROVED" ? "checkmark" : nil)
                 }
             }
         }
@@ -493,6 +655,16 @@ private struct MergeRequestDetailView: View {
     private func blockedReason(_ availability: MergeAvailability) -> String? {
         if case .blocked(let reason) = availability { return reason }
         return nil
+    }
+
+    private func pipelineSymbol(_ status: String) -> String {
+        switch status {
+        case "SUCCESS": "checkmark.circle.fill"
+        case "FAILED": "xmark.circle.fill"
+        case "CANCELED": "slash.circle"
+        case "RUNNING", "PENDING", "PREPARING", "WAITING_FOR_RESOURCE": "clock"
+        default: "circle.dashed"
+        }
     }
 
     private func pipelineTint(_ status: String) -> Color {
@@ -591,9 +763,10 @@ private struct DescriptionTab: View {
                     MarkdownText(source: detail.description, projectURL: detail.projectURL)
                 }
             }
+            .readableWidth()
             .padding(20)
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .collapsesHeader()
     }
 }
 
@@ -618,6 +791,7 @@ private struct ChangesTab: View {
                 }
             }
         }
+        .collapsesHeader()
         // Parsed once per version of the MR, not on every redraw.
         .task(id: detail.updatedAt) {
             parsed = Dictionary(
@@ -751,9 +925,10 @@ private struct CommentsTab<Composer: View>: View {
                     }
                 }
             }
+            .readableWidth()
             .padding(20)
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .collapsesHeader()
     }
 }
 
@@ -882,10 +1057,11 @@ private struct AgentReviewTab: View {
                     Text(Copy.noAgentReview).foregroundStyle(.secondary)
                 }
             }
+            .readableWidth()
             .padding(20)
-            .frame(maxWidth: .infinity, alignment: .leading)
             .motion(value: model.agentBanner)
         }
+        .collapsesHeader()
         .confirmationDialog(Copy.postConfirmTitle, isPresented: $confirmingPost) {
             Button(Copy.postInline) { Task { await model.postAgentReview(key, inline: true) } }
             Button(Copy.postAsComment) { Task { await model.postAgentReview(key, inline: false) } }
@@ -948,11 +1124,12 @@ struct MarkdownText: View {
     var projectURL: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             ForEach(Array(parseMarkdownBlocks(source).enumerated()), id: \.offset) { _, block in
                 view(for: block)
             }
         }
+        .lineSpacing(3)
         .textSelection(.enabled)
     }
 
@@ -961,25 +1138,22 @@ struct MarkdownText: View {
     @ViewBuilder private func view(for block: MarkdownBlock) -> some View {
         switch block {
         case .heading(let level, let text):
-            inline(text).font(level <= 1 ? .title2.bold() : level == 2 ? .title3.bold() : .headline)
-                .padding(.top, 4)
+            inline(text).font(level <= 1 ? .title3.bold() : level == 2 ? .headline : .subheadline.weight(.semibold))
+                .padding(.top, level <= 2 ? 10 : 6)
         case .listItem(let text, let marker, let indent):
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(marker).foregroundStyle(.secondary).monospacedDigit()
+                    .frame(minWidth: 10, alignment: .trailing)
                 inline(text)
             }
-            .padding(.leading, CGFloat(indent) * 14)
+            .padding(.leading, CGFloat(indent) * 16)
         case .quote(let text):
             inline(text)
                 .foregroundStyle(.secondary)
                 .padding(.leading, 10)
                 .overlay(alignment: .leading) { Rectangle().fill(.quaternary).frame(width: 3) }
         case .code(let text):
-            ScrollView(.horizontal) {
-                Text(text).font(.system(size: 11.5, design: .monospaced)).padding(10)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
+            CodeBlock(text: text)
         case .table(let table):
             MarkdownTableView(table: table, projectURL: projectURL)
         case .rule:
@@ -992,10 +1166,50 @@ struct MarkdownText: View {
     static func inline(_ text: String, projectURL: String?) -> Text {
         let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
         let source = inlineMarkdownSource(text, projectURL: projectURL)
-        if let attributed = try? AttributedString(markdown: source, options: options) {
-            return Text(attributed)
+        guard var attributed = try? AttributedString(markdown: source, options: options) else { return Text(text) }
+        // Inline code a size down on a tinted ground, so a line full of paths still reads as prose.
+        for run in attributed.runs where run.inlinePresentationIntent?.contains(.code) == true {
+            attributed[run.range].font = .system(.callout, design: .monospaced)
+            attributed[run.range].backgroundColor = Color.secondary.opacity(0.12)
         }
-        return Text(text)
+        return Text(attributed)
+    }
+}
+
+/// Fenced code: monospaced on a tinted card that scrolls sideways, with a copy button.
+private struct CodeBlock: View {
+    let text: String
+    @State private var copied = false
+
+    var body: some View {
+        ScrollView(.horizontal) {
+            Text(text)
+                .font(.system(size: 12, design: .monospaced))
+                .lineSpacing(2)
+                .padding(12)
+                .padding(.trailing, 28)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.separator.opacity(0.5)))
+        .overlay(alignment: .topTrailing) {
+            Button {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(text, forType: .string)
+                copied = true
+            } label: {
+                Image(systemName: copied ? "checkmark" : "doc.on.doc")
+            }
+            .buttonStyle(.borderless)
+            .help(Copy.copyCode)
+            .accessibilityLabel(Copy.copyCode)
+            .padding(6)
+        }
+        .task(id: copied) {
+            guard copied else { return }
+            try? await Task.sleep(for: .seconds(1.5))
+            copied = false
+        }
     }
 }
 

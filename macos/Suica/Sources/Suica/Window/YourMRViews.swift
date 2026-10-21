@@ -84,6 +84,7 @@ struct FixTab: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .motion(value: fixes.banner)
         }
+        .collapsesHeader()
         .task(id: fix.map { "\($0.id)-\($0.status)" }) { load(fix) }
         .confirmationDialog(confirmTitle(fix), isPresented: $confirming) {
             Button(fix?.diff?.isEmpty == false ? Copy.fixConfirm : Copy.fixConfirmRepliesOnly) {
