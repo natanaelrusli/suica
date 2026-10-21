@@ -37,26 +37,23 @@ struct YourMRRow: View {
 struct FixTab: View {
     let detail: MergeRequestDetail
     let fixes: FixesModel
-    @State private var replies: [String: String] = [:]
-    @State private var skipped: Set<String> = []
-    @State private var commitMessage = ""
-    @State private var editingFix: Int?
+    /// Your edits to the fix on screen; replaced whenever the fix or its status changes.
+    @State private var draft: FixDraft?
     @State private var confirming = false
     @State private var retrying = false
     @State private var note = ""
-    @State private var files: [GitDiffFile] = []
 
     init(detail: MergeRequestDetail, fixes: FixesModel) {
         self.detail = detail
         self.fixes = fixes
         // Seeded here so the first frame already shows the fix; `load` keeps it current.
-        if let fix = fixes.fix(for: detail.key) {
-            _editingFix = State(initialValue: fix.id)
-            _replies = State(initialValue: Dictionary(uniqueKeysWithValues: fix.threads.map { ($0.id, $0.reply) }))
-            _skipped = State(initialValue: Set(fix.threads.filter { !$0.post }.map(\.id)))
-            _commitMessage = State(initialValue: fix.commitMessage)
-            _files = State(initialValue: fix.diff.map(splitGitDiff) ?? [])
-        }
+        _draft = State(initialValue: fixes.fix(for: detail.key).map(FixDraft.init))
+    }
+
+    /// The draft, only when it was made from this fix in this status.
+    private func current(_ fix: FixInfo) -> FixDraft? {
+        guard let draft, !draft.isStale(for: fix) else { return nil }
+        return draft
     }
 
     var body: some View {
@@ -78,7 +75,7 @@ struct FixTab: View {
                     if fix.status == "pushed" && fix.detail.isEmpty {
                         Text(Copy.fixPushedNote).foregroundStyle(.secondary)
                     }
-                    if fix.isReady { readyBody(fix) }
+                    if fix.isReady, let draft = current(fix) { readyBody(fix, draft: draft) }
                 } else {
                     Text(Copy.fixNone).foregroundStyle(.secondary)
                 }
@@ -87,11 +84,11 @@ struct FixTab: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .motion(value: fixes.banner)
         }
-        .task(id: fix?.id) { load(fix) }
+        .task(id: fix.map { "\($0.id)-\($0.status)" }) { load(fix) }
         .confirmationDialog(confirmTitle(fix), isPresented: $confirming) {
             Button(fix?.diff?.isEmpty == false ? Copy.fixConfirm : Copy.fixConfirmRepliesOnly) {
-                guard let fix else { return }
-                Task { await fixes.confirm(fix, edits: edits(for: fix)) }
+                guard let fix, let draft = current(fix) else { return }
+                Task { await fixes.confirm(fix, edits: draft.edits(for: fix)) }
             }
             Button(Copy.cancel, role: .cancel) {}
         } message: {
@@ -147,17 +144,17 @@ struct FixTab: View {
             if fix.isReady {
                 Button(fix.diff?.isEmpty == false ? Copy.fixConfirm : Copy.fixConfirmRepliesOnly) { confirming = true }
                     .buttonStyle(.borderedProminent)
-                    .disabled(busy)
+                    .disabled(busy || current(fix) == nil)
             }
         }
     }
 
-    @ViewBuilder private func readyBody(_ fix: FixInfo) -> some View {
+    @ViewBuilder private func readyBody(_ fix: FixInfo, draft: FixDraft) -> some View {
         ForEach(fix.threads) { thread in threadCard(thread) }
         VStack(alignment: .leading, spacing: 6) {
             Text(Copy.fixCommitMessage).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
             if fix.diff?.isEmpty == false {
-                TextEditor(text: $commitMessage)
+                TextEditor(text: Binding(get: { draft.commitMessage }, set: { self.draft?.commitMessage = $0 }))
                     .font(.system(.body, design: .monospaced))
                     .frame(minHeight: 60)
                     .editorBox()
@@ -165,7 +162,7 @@ struct FixTab: View {
                 Text(Copy.fixNoCodeChange).foregroundStyle(.secondary)
             }
         }
-        ForEach(Array(files.enumerated()), id: \.offset) { _, file in
+        ForEach(Array(draft.files.enumerated()), id: \.offset) { _, file in
             VStack(alignment: .leading, spacing: 0) {
                 Text(DisplayText.clean(file.path, max: 300))
                     .font(.callout.monospaced())
@@ -213,8 +210,8 @@ struct FixTab: View {
                 .font(.body)
                 .frame(minHeight: 54)
                 .editorBox()
-                .disabled(skipped.contains(thread.id))
-                .opacity(skipped.contains(thread.id) ? 0.5 : 1)
+                .disabled(draft?.skipped.contains(thread.id) == true)
+                .opacity(draft?.skipped.contains(thread.id) == true ? 0.5 : 1)
                 .accessibilityLabel(Copy.fixReplyPlaceholder)
             Toggle(Copy.fixDontPost, isOn: skipBinding(for: thread))
                 .toggleStyle(.checkbox)
@@ -227,39 +224,24 @@ struct FixTab: View {
     }
 
     private func binding(for thread: FixThreadInfo) -> Binding<String> {
-        Binding(get: { replies[thread.id] ?? thread.reply }, set: { replies[thread.id] = $0 })
+        Binding(get: { draft?.replies[thread.id] ?? thread.reply }, set: { draft?.replies[thread.id] = $0 })
     }
 
     private func skipBinding(for thread: FixThreadInfo) -> Binding<Bool> {
         Binding(
-            get: { skipped.contains(thread.id) },
-            set: { if $0 { skipped.insert(thread.id) } else { skipped.remove(thread.id) } })
+            get: { draft?.skipped.contains(thread.id) == true },
+            set: { if $0 { draft?.skipped.insert(thread.id) } else { draft?.skipped.remove(thread.id) } })
     }
 
-    /// Starts the edits from the fix the agent wrote, once per fix.
+    /// Starts the edits again from the fix as the agent wrote it whenever the fix or its status changed.
     private func load(_ fix: FixInfo?) {
-        guard let fix, editingFix != fix.id else { return }
-        editingFix = fix.id
-        replies = Dictionary(uniqueKeysWithValues: fix.threads.map { ($0.id, $0.reply) })
-        skipped = Set(fix.threads.filter { !$0.post }.map(\.id))
-        commitMessage = fix.commitMessage
-        files = fix.diff.map(splitGitDiff) ?? []
-    }
-
-    private func edits(for fix: FixInfo) -> ConfirmEdits {
-        ConfirmEdits(
-            commitMessage: commitMessage,
-            threads: fix.threads.map { thread in
-                let reply = replies[thread.id] ?? thread.reply
-                return ConfirmEdits.Thread(
-                    id: thread.id, reply: reply,
-                    post: !skipped.contains(thread.id) && !reply.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            })
+        guard let fix else { return }
+        if draft?.isStale(for: fix) ?? true { draft = FixDraft(fix) }
     }
 
     private func confirmTitle(_ fix: FixInfo?) -> String {
-        guard let fix else { return "" }
-        let posts = edits(for: fix).threads.filter(\.post).count
+        guard let fix, let draft = current(fix) else { return "" }
+        let posts = draft.edits(for: fix).threads.filter(\.post).count
         return Copy.fixConfirmTitle(branch: detail.sourceBranch, replies: posts, changes: fix.diff?.isEmpty == false)
     }
 }
@@ -319,6 +301,8 @@ struct MergeSheet: View {
     let fixes: FixesModel
     let onDone: () -> Void
     @State private var choice: MergeChoice
+    /// The commit on screen when the sheet opened; a newer push is never merged from here.
+    @State private var openedSha: String?
     @Environment(\.dismiss) private var dismiss
 
     init(detail: MergeRequestDetail, fixes: FixesModel, onDone: @escaping () -> Void) {
@@ -326,6 +310,7 @@ struct MergeSheet: View {
         self.fixes = fixes
         self.onDone = onDone
         _choice = State(initialValue: MergeChoice(for: detail, availability: mergeAvailability(detail)))
+        _openedSha = State(initialValue: detail.headSha)
     }
 
     var body: some View {
@@ -345,8 +330,11 @@ struct MergeSheet: View {
                 .font(.system(.body, design: .monospaced))
                 .frame(minHeight: 80)
                 .editorBox()
-            if let sha = detail.headSha {
+            if let sha = openedSha {
                 Text(Copy.mergeSha(sha)).font(.caption).foregroundStyle(.secondary)
+            }
+            if mergeSha(opened: openedSha, current: detail.headSha) == nil {
+                NoticeBox(text: Copy.mergeNewCommits, tint: .orange)
             }
             if case .blocked(let reason) = availability {
                 NoticeBox(text: reason, tint: .orange)
@@ -355,7 +343,7 @@ struct MergeSheet: View {
                 Spacer()
                 Button(Copy.cancel, role: .cancel) { dismiss() }
                 Button(availability == .whenPipelineSucceeds ? Copy.mergeWhenPipelineSucceeds : Copy.mergeNow) {
-                    guard let sha = detail.headSha else { return }
+                    guard let sha = mergeSha(opened: openedSha, current: detail.headSha) else { return }
                     var picked = choice
                     picked.whenPipelineSucceeds = availability == .whenPipelineSucceeds
                     Task {
@@ -365,7 +353,9 @@ struct MergeSheet: View {
                     }
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(isBlocked(availability) || fixes.busyKeys.contains(detail.key))
+                .disabled(
+                    isBlocked(availability) || fixes.busyKeys.contains(detail.key)
+                        || mergeSha(opened: openedSha, current: detail.headSha) == nil)
             }
         }
         .padding(20)

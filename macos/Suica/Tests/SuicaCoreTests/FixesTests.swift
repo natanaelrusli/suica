@@ -181,7 +181,7 @@ actor FakeFixesClient: FixesClient {
     #expect(model.isYours("g/p!8") && !model.isYours("g/p!9"))
 }
 
-@Test func aGitDiffSplitsIntoFilesWithoutItsHeaderLines() {
+@Test func aGitDiffSplitsIntoFilesAndKeepsTheChangesThatAreNotLines() {
     let diff = """
         diff --git a/src/a.ts b/src/a.ts
         index 111..222 100644
@@ -192,17 +192,76 @@ actor FakeFixesClient: FixesClient {
         +new
         diff --git a/img.png b/img.png
         new file mode 100644
+        index 0000000..333
         Binary files /dev/null and b/img.png differ
         diff --git a/old.ts b/new.ts
         similarity index 100%
         rename from old.ts
         rename to new.ts
+        diff --git a/run.sh b/run.sh
+        old mode 100644
+        new mode 100755
+        diff --git a/x b/y.ts b/x b/y.ts
+        --- a/x b/y.ts
+        +++ b/x b/y.ts
+        @@ -1 +1 @@
+        -a
+        +b
 
         """
     let files = splitGitDiff(diff)
-    #expect(files.map(\.path) == ["src/a.ts", "img.png", "new.ts"])
+    #expect(files.map(\.path) == ["src/a.ts", "img.png", "new.ts", "run.sh", "x b/y.ts"])
     #expect(files[0].lines.map(\.kind) == [.hunk, .removed, .added])
     #expect(files[0].lines[1].text == "-- not a header: a removed line starting with two dashes")
-    #expect(files[1].lines.map(\.text) == ["Binary files /dev/null and b/img.png differ"])
-    #expect(files[2].lines.isEmpty)
+    #expect(files[1].lines.map(\.text) == ["new file mode 100644", "Binary files /dev/null and b/img.png differ"])
+    #expect(files[2].lines.map(\.text) == ["rename from old.ts", "rename to new.ts"])
+    #expect(files[3].lines.map(\.text) == ["old mode 100644", "new mode 100755"])
+    #expect(files[3].lines.allSatisfy { $0.kind == .note })
+}
+
+@Test func aFixDraftStartsAgainWhenTheFixTurnsReady() throws {
+    let list = try decodeDocument(FixListDocument.self, from: contract("fixes.v1.json"))
+    let ready = try #require(list.fixes.last)
+    var object = try #require(try JSONSerialization.jsonObject(with: JSONEncoder().encode(ready)) as? [String: Any])
+    object["status"] = "running"
+    object["diff"] = NSNull()
+    object["commitMessage"] = ""
+    object["threads"] = (object["threads"] as! [[String: Any]]).map { thread in
+        var thread = thread
+        thread["action"] = NSNull(); thread["reply"] = ""; thread["post"] = false
+        return thread
+    }
+    let running = try JSONDecoder().decode(FixInfo.self, from: JSONSerialization.data(withJSONObject: object))
+
+    let early = FixDraft(running)
+    #expect(early.isStale(for: running) == false)
+    // The same fix, now ready: what was seeded while it ran must not be what you confirm.
+    #expect(early.isStale(for: ready))
+    let draft = FixDraft(ready)
+    #expect(draft.commitMessage == "Rename the total")
+    #expect(draft.files.count == 1)
+    #expect(draft.skipped == [ready.threads[2].id])
+    #expect(draft.replies[ready.threads[0].id] == "Fixed in {{sha}}: renamed.")
+
+    var edited = draft
+    edited.replies[ready.threads[1].id] = "  "
+    let edits = edited.edits(for: ready)
+    #expect(edits.commitMessage == "Rename the total")
+    #expect(edits.threads.map(\.post) == [true, false, false])
+}
+
+@Test func theMergeSheetMergesOnlyTheCommitItOpenedOn() {
+    #expect(mergeSha(opened: "abc1234", current: "abc1234") == "abc1234")
+    #expect(mergeSha(opened: "abc1234", current: "def5678") == nil)
+    #expect(mergeSha(opened: nil, current: "abc1234") == nil)
+}
+
+@Test func theCliKeepsTheSshAgentSoAConfirmCanPush() {
+    let env = CLIAgentClient.environment(
+        searchPath: "/usr/bin", home: "/Users/me",
+        inherited: ["SSH_AUTH_SOCK": "/tmp/agent.sock", "GNUPGHOME": "/Users/me/.gnupg", "SECRET": "x"])
+    #expect(env == [
+        "PATH": "/usr/bin", "HOME": "/Users/me", "SUICA_ENV": "production",
+        "SSH_AUTH_SOCK": "/tmp/agent.sock", "GNUPGHOME": "/Users/me/.gnupg",
+    ])
 }

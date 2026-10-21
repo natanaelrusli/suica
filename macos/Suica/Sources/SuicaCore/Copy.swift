@@ -500,6 +500,7 @@ public enum Copy {
     public static let mergeRemoveBranch = "Delete source branch"
     public static let mergeMessage = "Commit message"
     public static func mergeSha(_ sha: String) -> String { "At commit \(sha.prefix(8)). A newer push is never merged." }
+    public static let mergeNewCommits = "New commits arrived since you opened this. Close it and look at them first."
     public static let mergeBlockedPipeline = "The pipeline failed."
     public static let mergeBlockedApproval = "It still needs approval."
     public static let mergeBlockedConflict = "It has merge conflicts."

@@ -304,6 +304,49 @@ public final class FixesModel {
     }
 }
 
+// MARK: - Draft
+
+/**
+ * What you are about to confirm: the replies, the threads not to post and the commit message,
+ * started from the fix as the agent wrote it. It belongs to one fix in one status: a draft seeded
+ * while the fix ran is stale once it is ready, so the tab never confirms a change it did not show.
+ */
+public struct FixDraft: Equatable, Sendable {
+    public let fixId: Int
+    public let status: String
+    public var replies: [String: String]
+    public var skipped: Set<String>
+    public var commitMessage: String
+    public let files: [GitDiffFile]
+
+    public init(_ fix: FixInfo) {
+        fixId = fix.id
+        status = fix.status
+        replies = Dictionary(uniqueKeysWithValues: fix.threads.map { ($0.id, $0.reply) })
+        skipped = Set(fix.threads.filter { !$0.post }.map(\.id))
+        commitMessage = fix.commitMessage
+        files = fix.diff.map(splitGitDiff) ?? []
+    }
+
+    public func isStale(for fix: FixInfo) -> Bool { fix.id != fixId || fix.status != status }
+
+    public func edits(for fix: FixInfo) -> ConfirmEdits {
+        ConfirmEdits(
+            commitMessage: commitMessage,
+            threads: fix.threads.map { thread in
+                let reply = replies[thread.id] ?? thread.reply
+                let blank = reply.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                return ConfirmEdits.Thread(id: thread.id, reply: reply, post: !skipped.contains(thread.id) && !blank)
+            })
+    }
+}
+
+/// The commit to merge: the one the Merge sheet opened on, only while the MR is still at it.
+public func mergeSha(opened: String?, current: String?) -> String? {
+    guard let opened, opened == current else { return nil }
+    return opened
+}
+
 // MARK: - Git diff
 
 /// One file of a `git diff`: its new path and its lines without git's header.
@@ -312,8 +355,14 @@ public struct GitDiffFile: Equatable, Sendable {
     public let lines: [DiffLine]
 }
 
-/// Splits `git diff` output by file. The header lines (`index`, `---`, `+++`, modes, renames) are
-/// left out; a "Binary files … differ" line stays as a note.
+/// Header lines that say something the hunks do not: modes, renames, binary files.
+private let keptHeaders = [
+    "new file mode ", "deleted file mode ", "old mode ", "new mode ", "rename from ", "rename to ",
+    "Binary files ", "GIT binary patch",
+]
+
+/// Splits `git diff` output by file. Git's own bookkeeping (`index`, `---`, `+++`, similarity) is
+/// left out; mode changes, renames and binary files stay as notes, since they are changes too.
 public func splitGitDiff(_ diff: String) -> [GitDiffFile] {
     var files: [GitDiffFile] = []
     var path: String?
@@ -326,13 +375,19 @@ public func splitGitDiff(_ diff: String) -> [GitDiffFile] {
     for row in diff.split(separator: "\n", omittingEmptySubsequences: false) {
         if row.hasPrefix("diff --git ") {
             flush()
+            // A guess for a path holding " b/"; the +++ or rename line below names it exactly.
             path = row.range(of: " b/", options: .backwards).map { String(row[$0.upperBound...]) } ?? String(row)
             body = []
             inHunks = false
         } else if inHunks || row.hasPrefix("@@") {
             inHunks = true
             body.append(row)
-        } else if row.hasPrefix("Binary files ") {
+        } else if row.hasPrefix("+++ b/") {
+            path = String(row.dropFirst(6))
+        } else if row.hasPrefix("rename to ") {
+            path = String(row.dropFirst(10))
+            body.append(row)
+        } else if keptHeaders.contains(where: { row.hasPrefix($0) }) {
             body.append(row)
         }
     }

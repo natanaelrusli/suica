@@ -265,14 +265,25 @@ public struct CLIAgentClient: AgentClient {
         self.runner = runner
     }
 
+    /// Kept from the app's own environment: a confirm pushes over SSH and may sign its commit.
+    private static let passedThrough = ["SSH_AUTH_SOCK", "GPG_AGENT_INFO", "GNUPGHOME"]
+
+    /// The CLI's environment: only what it needs, plus the SSH and GPG agents when the app has them.
+    static func environment(searchPath: String, home: String, inherited: [String: String]) -> [String: String] {
+        var environment = ["PATH": searchPath, "HOME": home, "SUICA_ENV": "production"]
+        for name in passedThrough { environment[name] = inherited[name] }
+        return environment
+    }
+
     private func invocation(
         _ arguments: [String], timeout: TimeInterval, stdin: Data? = nil
     ) -> Invocation {
-        let home = ProcessInfo.processInfo.environment["HOME"] ?? NSHomeDirectory()
+        let inherited = ProcessInfo.processInfo.environment
+        let home = inherited["HOME"] ?? NSHomeDirectory()
         return Invocation(
             executable: config.cliPath,
             arguments: arguments,
-            environment: ["PATH": config.searchPath, "HOME": home, "SUICA_ENV": "production"],
+            environment: Self.environment(searchPath: config.searchPath, home: home, inherited: inherited),
             workingDirectory: home,
             timeout: timeout, stdin: stdin)
     }
