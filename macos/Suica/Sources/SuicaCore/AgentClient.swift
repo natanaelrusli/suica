@@ -442,4 +442,10 @@ extension CLIAgentClient: ReviewsClient {
     }
 }
 
+extension CLIAgentClient: OfficeClient {
+    public func office() async throws(AgentError) -> OfficeDocument {
+        try await document(OfficeDocument.self, ["office", "--json"])
+    }
+}
+
 extension CLIAgentClient: TemplatesClient {}
