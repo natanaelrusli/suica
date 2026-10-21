@@ -30,12 +30,7 @@ struct ReviewsView: View {
             }
         }
         .toolbar {
-            Button { Task { await refreshAll() } } label: {
-                Label(Copy.refresh, systemImage: "arrow.clockwise")
-            }
-            .help("\(Copy.refresh) (⌘R)")
-            .keyboardShortcut("r")
-            .disabled(model.loadingList)
+            ListRefreshButton(model: model) { await refreshAll() }
         }
     }
 
@@ -140,8 +135,7 @@ struct ReviewsView: View {
         if let key = model.selectedKey {
             if let detail = model.details[key] {
                 MergeRequestDetailView(
-                    detail: detail, loading: model.loadingKeys.contains(key),
-                    error: model.detailErrors[key], model: model, fixes: fixes
+                    detail: detail, error: model.detailErrors[key], model: model, fixes: fixes
                 ) {
                     Task { await model.loadDetail(key) }
                 }
@@ -163,6 +157,31 @@ struct ReviewsView: View {
                 Copy.selectMergeRequest, systemImage: "sidebar.left", description: Text(Copy.selectMergeRequestHint))
         }
     }
+}
+
+/// Reads `loadingList` on its own, so the list loading in the background redraws only this button.
+private struct ListRefreshButton: View {
+    let model: ReviewsModel
+    let refresh: () async -> Void
+
+    var body: some View {
+        Button { Task { await refresh() } } label: {
+            Label(Copy.refresh, systemImage: "arrow.clockwise")
+        }
+        .help("\(Copy.refresh) (⌘R)")
+        .keyboardShortcut("r")
+        .disabled(model.loadingList)
+    }
+}
+
+/// Hands `content` whether the MR is loading, reading it on its own: each refresh loads the MR
+/// again, and the page around these controls need not be drawn again for it.
+private struct WhileLoading<Content: View>: View {
+    let model: ReviewsModel
+    let key: String
+    @ViewBuilder let content: (Bool) -> Content
+
+    var body: some View { content(model.loadingKeys.contains(key)) }
 }
 
 private struct ReviewRow: View {
@@ -394,7 +413,6 @@ private enum DetailTab: Hashable {
 
 private struct MergeRequestDetailView: View {
     let detail: MergeRequestDetail
-    let loading: Bool
     let error: String?
     let model: ReviewsModel
     let fixes: FixesModel
@@ -547,6 +565,10 @@ private struct MergeRequestDetailView: View {
     }
 
     private var actions: some View {
+        WhileLoading(model: model, key: detail.key) { loading in actions(loading: loading) }
+    }
+
+    private func actions(loading: Bool) -> some View {
         HStack(spacing: 8) {
             if yours {
                 let availability = mergeAvailability(detail)
@@ -792,11 +814,18 @@ private struct ChangesTab: View {
             }
         }
         .collapsesHeader()
-        // Parsed once per version of the MR, not on every redraw.
+        // Parsed once per version of the MR, not on every redraw, and away from the main thread so a
+        // large diff does not stall the page while it opens.
         .task(id: detail.updatedAt) {
-            parsed = Dictionary(
-                detail.files.compactMap { file in file.diff.map { (file.id, parseDiffLines($0)) } },
-                uniquingKeysWith: { first, _ in first })
+            let files = detail.files
+            let fresh = await Task.detached {
+                Dictionary(
+                    files.compactMap { file in file.diff.map { (file.id, parseDiffLines($0)) } },
+                    uniquingKeysWith: { first, _ in first })
+            }.value
+            // A newer version of the MR may have arrived while this one was parsed.
+            guard !Task.isCancelled else { return }
+            parsed = fresh
         }
     }
 
@@ -845,7 +874,7 @@ private struct ChangesTab: View {
                 .foregroundStyle(.secondary)
                 .padding(12)
         } else if let lines = parsed[file.id] {
-            ForEach(Array(lines.enumerated()), id: \.offset) { _, line in DiffLineRow(line: line) }
+            ForEach(lines.indices, id: \.self) { DiffLineRow(line: lines[$0]) }
         }
     }
 }
@@ -906,7 +935,7 @@ private struct CommentsTab<Composer: View>: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
+            LazyVStack(alignment: .leading, spacing: 12) {
                 composer()
                 Toggle(Copy.showActivity, isOn: $showActivity.animation(Motion.animation(Motion.content, motion)))
                     .toggleStyle(.switch)
@@ -1125,9 +1154,8 @@ struct MarkdownText: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            ForEach(Array(parseMarkdownBlocks(source).enumerated()), id: \.offset) { _, block in
-                view(for: block)
-            }
+            let blocks = MarkdownCache.blocks(source)
+            ForEach(blocks.indices, id: \.self) { view(for: blocks[$0]) }
         }
         .lineSpacing(3)
         .textSelection(.enabled)
@@ -1164,15 +1192,53 @@ struct MarkdownText: View {
     }
 
     static func inline(_ text: String, projectURL: String?) -> Text {
+        Text(MarkdownCache.inline(text, projectURL: projectURL) { attributed(text, projectURL: projectURL) })
+    }
+
+    private static func attributed(_ text: String, projectURL: String?) -> AttributedString {
         let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
         let source = inlineMarkdownSource(text, projectURL: projectURL)
-        guard var attributed = try? AttributedString(markdown: source, options: options) else { return Text(text) }
+        guard var attributed = try? AttributedString(markdown: source, options: options) else { return AttributedString(text) }
         // Inline code a size down on a tinted ground, so a line full of paths still reads as prose.
         for run in attributed.runs where run.inlinePresentationIntent?.contains(.code) == true {
             attributed[run.range].font = .system(.callout, design: .monospaced)
             attributed[run.range].backgroundColor = Color.secondary.opacity(0.12)
         }
-        return Text(attributed)
+        return attributed
+    }
+}
+
+/// Parsed Markdown by its text. The MR page redraws often (each refresh, the header folding, a tab
+/// switch), and parsing a long review or comment thread again each time costs tens of milliseconds,
+/// enough to drop frames.
+@MainActor private enum MarkdownCache {
+    private final class Entry<Value> {
+        let value: Value
+        init(_ value: Value) { self.value = value }
+    }
+
+    private static let blockCache = limited(NSCache<NSString, Entry<[MarkdownBlock]>>())
+    private static let inlineCache = limited(NSCache<NSString, Entry<AttributedString>>())
+
+    private static func limited<Value>(_ cache: NSCache<NSString, Value>) -> NSCache<NSString, Value> {
+        cache.countLimit = 2000
+        return cache
+    }
+
+    static func blocks(_ source: String) -> [MarkdownBlock] {
+        let key = source as NSString
+        if let hit = blockCache.object(forKey: key) { return hit.value }
+        let blocks = parseMarkdownBlocks(source)
+        blockCache.setObject(Entry(blocks), forKey: key)
+        return blocks
+    }
+
+    static func inline(_ text: String, projectURL: String?, make: () -> AttributedString) -> AttributedString {
+        let key = "\(projectURL ?? "")\u{0}\(text)" as NSString
+        if let hit = inlineCache.object(forKey: key) { return hit.value }
+        let attributed = make()
+        inlineCache.setObject(Entry(attributed), forKey: key)
+        return attributed
     }
 }
 

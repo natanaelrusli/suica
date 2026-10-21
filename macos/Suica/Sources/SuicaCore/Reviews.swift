@@ -594,16 +594,18 @@ public final class ReviewsModel {
         do {
             let fresh = try await client.reviews()
             guard mine == latestRefresh else { return }
-            list = fresh
-            errorText = nil
+            // A refresh usually brings nothing new: storing the same value would still redraw the page.
+            if list != fresh { list = fresh }
+            if errorText != nil { errorText = nil }
             let keys = Set(fresh.mergeRequests.map(\.key) + fresh.yourMergeRequests.map(\.key))
             if let selected = selectedKey, !keys.contains(selected) { selectedKey = nil }
             // The first row on screen, so it is one that waits for the Owner when there is one.
             if selectedKey == nil { selectedKey = fresh.sections.first?.items.first?.key }
-            details = details.filter { $0.key == selectedKey }
+            if details.keys.contains(where: { $0 != selectedKey }) { details = details.filter { $0.key == selectedKey } }
         } catch {
             guard mine == latestRefresh else { return }
-            errorText = MenuModel.message(for: error)
+            let message = MenuModel.message(for: error)
+            if errorText != message { errorText = message }
         }
         if let key = selectedKey { await loadDetail(key, keepingNotice: true) }
     }
@@ -625,11 +627,12 @@ public final class ReviewsModel {
         do {
             let fresh = try await client.mergeRequest(key: key)
             guard latestDetail[key] == mine else { return }
-            details[key] = fresh
-            detailErrors[key] = nil
+            if details[key] != fresh { details[key] = fresh }
+            if detailErrors[key] != nil { detailErrors[key] = nil }
         } catch {
             guard latestDetail[key] == mine else { return }
-            detailErrors[key] = MenuModel.message(for: error)
+            let message = MenuModel.message(for: error)
+            if detailErrors[key] != message { detailErrors[key] = message }
         }
     }
 }
