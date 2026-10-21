@@ -33,8 +33,6 @@ private struct Palette {
     let grass: NSColor
     let pavement: NSColor
     let road: NSColor
-    /// The sun by day, the moon by night.
-    let sun: NSColor
     let lampGlow: NSColor
 
     static let light = Palette(
@@ -51,8 +49,7 @@ private struct Palette {
         bubble: .white, bubbleText: NSColor(white: 0.12, alpha: 1),
         background: NSColor(white: 0.96, alpha: 1),
         grass: NSColor(red: 0.5, green: 0.76, blue: 0.36, alpha: 1), pavement: NSColor(white: 0.84, alpha: 1),
-        road: NSColor(white: 0.36, alpha: 1), sun: NSColor(red: 1, green: 0.9, blue: 0.45, alpha: 1),
-        lampGlow: NSColor(white: 0.92, alpha: 1))
+        road: NSColor(white: 0.36, alpha: 1), lampGlow: NSColor(white: 0.92, alpha: 1))
     static let dark = Palette(
         floor: NSColor(red: 0.42, green: 0.33, blue: 0.24, alpha: 1),
         plank: NSColor(red: 0.38, green: 0.29, blue: 0.21, alpha: 1),
@@ -67,12 +64,96 @@ private struct Palette {
         bubble: NSColor(white: 0.32, alpha: 1), bubbleText: .white,
         background: NSColor(white: 0.11, alpha: 1),
         grass: NSColor(red: 0.17, green: 0.27, blue: 0.17, alpha: 1), pavement: NSColor(white: 0.32, alpha: 1),
-        road: NSColor(white: 0.15, alpha: 1), sun: NSColor(red: 0.9, green: 0.92, blue: 0.98, alpha: 1),
-        lampGlow: NSColor(red: 1, green: 0.85, blue: 0.5, alpha: 1))
+        road: NSColor(white: 0.15, alpha: 1), lampGlow: NSColor(red: 1, green: 0.85, blue: 0.5, alpha: 1))
 }
 
 private func material(_ colour: NSColor, roughness: Float = 0.7) -> SimpleMaterial {
     SimpleMaterial(color: colour, roughness: MaterialScalarParameter(floatLiteral: roughness), isMetallic: false)
+}
+
+/// The sun's face, the sun's rays or the moon's face, painted into a square texture for a flat card
+/// that faces the camera. `paint` draws around the centre; the second argument is the card's half
+/// width. Unlit and kept out of tone mapping, so the sun stays bright yellow rather than olive. If
+/// the texture cannot be made the card is left invisible: a plain colour would draw a square.
+@MainActor
+private func skyCard(_ paint: (CGContext, CGFloat) -> Void) -> UnlitMaterial {
+    var card = UnlitMaterial(applyPostProcessToneMap: false)
+    card.blending = .transparent(opacity: .init(floatLiteral: 0))
+    let size = 512
+    guard
+        let space = CGColorSpace(name: CGColorSpace.sRGB),
+        let context = CGContext(
+            data: nil, width: size, height: size, bitsPerComponent: 16, bytesPerRow: 0, space: space,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder16Little.rawValue)
+    else { return card }
+    context.translateBy(x: CGFloat(size) / 2, y: CGFloat(size) / 2)
+    paint(context, CGFloat(size) / 2)
+    guard let image = context.makeImage(),
+        let texture = try? TextureResource(image: image, options: .init(semantic: .color))
+    else { return card }
+    card.color = .init(tint: .white, texture: .init(texture))
+    card.blending = .transparent(opacity: .init(floatLiteral: 1))
+    return card
+}
+
+/// Fills `radius` around the centre with `colour`, its opacity falling off through `stops`
+/// (fraction of the radius, opacity).
+private func radialFill(_ context: CGContext, radius: CGFloat, _ colour: NSColor, _ stops: [(CGFloat, CGFloat)]) {
+    let colours = stops.map { colour.withAlphaComponent($0.1).cgColor } as CFArray
+    guard let gradient = CGGradient(colorsSpace: context.colorSpace, colors: colours, locations: stops.map(\.0))
+    else { return }
+    context.drawRadialGradient(
+        gradient, startCenter: .zero, startRadius: 0, endCenter: .zero, endRadius: radius, options: [])
+}
+
+/// A solid disc, lighter in the middle than at its rim.
+private func disc(_ context: CGContext, radius: CGFloat, centre: NSColor, rim: NSColor) {
+    let colours = [centre.cgColor, rim.cgColor] as CFArray
+    guard let gradient = CGGradient(colorsSpace: context.colorSpace, colors: colours, locations: [0, 1]) else { return }
+    context.saveGState()
+    context.addEllipse(in: CGRect(x: -radius, y: -radius, width: 2 * radius, height: 2 * radius))
+    context.clip()
+    context.drawRadialGradient(
+        gradient, startCenter: .zero, startRadius: 0, endCenter: .zero, endRadius: radius, options: [])
+    context.restoreGState()
+}
+
+/// A bright disc in a warm haze that fades into the sky.
+@MainActor private let sunFace = skyCard { context, half in
+    radialFill(
+        context, radius: half, NSColor(red: 1, green: 0.92, blue: 0.6, alpha: 1),
+        [(0, 0.95), (0.3, 0.85), (0.4, 0.5), (0.6, 0.18), (0.8, 0.05), (1, 0)])
+    disc(
+        context, radius: 0.3 * half, centre: NSColor(red: 1, green: 0.99, blue: 0.9, alpha: 1),
+        rim: NSColor(red: 1, green: 0.86, blue: 0.4, alpha: 1))
+}
+
+/// Long and short rays, alternating, that fade as they reach out; they turn slowly behind the sun.
+@MainActor private let sunRays = skyCard { context, half in
+    let count = 12
+    for index in 0..<count {
+        let angle = CGFloat(index) / CGFloat(count) * 2 * .pi
+        let length = (index.isMultiple(of: 2) ? 0.95 : 0.72) * half
+        let spread: CGFloat = 0.07
+        context.move(to: CGPoint(x: cos(angle - spread) * 0.3 * half, y: sin(angle - spread) * 0.3 * half))
+        context.addLine(to: CGPoint(x: cos(angle) * length, y: sin(angle) * length))
+        context.addLine(to: CGPoint(x: cos(angle + spread) * 0.3 * half, y: sin(angle + spread) * 0.3 * half))
+        context.closePath()
+    }
+    context.clip()
+    radialFill(
+        context, radius: half, NSColor(red: 1, green: 0.88, blue: 0.55, alpha: 1),
+        [(0, 0.55), (0.3, 0.5), (0.6, 0.18), (1, 0)])
+}
+
+/// A pale disc with a cool glow around it.
+@MainActor private let moonFace = skyCard { context, half in
+    radialFill(
+        context, radius: half, NSColor(red: 0.72, green: 0.8, blue: 1, alpha: 1),
+        [(0, 0.6), (0.27, 0.5), (0.4, 0.2), (0.62, 0.06), (1, 0)])
+    disc(
+        context, radius: 0.27 * half, centre: NSColor(red: 0.98, green: 0.98, blue: 1, alpha: 1),
+        rim: NSColor(red: 0.84, green: 0.87, blue: 0.95, alpha: 1))
 }
 
 private func nsColour(_ colour: OfficeColour) -> NSColor {
@@ -122,9 +203,11 @@ private struct TravellerNode {
 final class OfficeSceneController {
     let root = Entity()
     let camera = PerspectiveCamera()
-    /// The sun by day, the moon by night: carried by the camera, so it stays at the top of the view
-    /// however the view is turned.
-    private let sun = ModelEntity(mesh: .generateSphere(radius: 1.65), materials: [])
+    /// The sun by day, the moon by night: a flat card carried by the camera, so it faces the viewer
+    /// and stays in the sky at the top right however the view is turned.
+    private let sun = ModelEntity(mesh: .generatePlane(width: 10, height: 10), materials: [])
+    /// The sun's rays, behind its face; hidden at night.
+    private let rays = ModelEntity(mesh: .generatePlane(width: 10, height: 10), materials: [sunRays])
     private var rooms: [String: RoomNode] = [:]
     private var desks: [String: DeskNode] = [:]
     private var street: OfficeStreet?
@@ -157,7 +240,8 @@ final class OfficeSceneController {
         camera.camera.far = 200
         root.addChild(camera)
         camera.addChild(sun)
-        sun.addChild(ModelEntity(mesh: .generateSphere(radius: 2.55), materials: []))
+        rays.position.z = -0.2
+        sun.addChild(rays)
         let key = DirectionalLight()
         key.light.intensity = 3_800
         // Soft shadows under the desks, figures and furniture give the floor plan its depth.
@@ -198,11 +282,12 @@ final class OfficeSceneController {
         let ground = cos(pitch) * distance
         let eye = SIMD3<Float>(sin(yaw) * ground, height, cos(yaw) * ground)
         camera.look(at: focus, from: focus + eye, relativeTo: nil)
-        // In the strip of sky along the top of the view, behind the whole scene: when the view is
-        // turned so ground fills the top, the ground hides it.
+        // In the top right corner of the sky, behind the whole scene, its glow clear of the view's
+        // edges and its face above the trees: when the view is turned so ground fills the top, the
+        // ground hides it.
         let depth: Float = 60
         let up = depth * tan(camera.camera.fieldOfViewInDegrees * .pi / 360)
-        sun.position = [0.3 * up * aspect, 0.84 * up, -depth]
+        sun.position = [0.6 * up * aspect, 0.7 * up, -depth]
     }
 
     func setAspect(_ value: Float) {
@@ -354,6 +439,11 @@ final class OfficeSceneController {
         clock += delta
         guard animate else { return }
         moveTravellers()
+        // The sun's rays turn slowly and breathe a little.
+        if rays.isEnabled {
+            rays.orientation = simd_quatf(angle: clock * 0.05, axis: [0, 0, 1])
+            rays.scale = .init(repeating: 1 + 0.04 * sin(clock * 0.9))
+        }
         for node in desks.values where node.status == .working {
             node.figure.position.y = sin(clock * 5 + Float(abs(node.target.x))) * 0.025
         }
@@ -781,10 +871,8 @@ final class OfficeSceneController {
             step += 1
         }
 
-        sun.model?.materials = [UnlitMaterial(color: palette.sun)]
-        var halo = UnlitMaterial(color: palette.sun)
-        halo.blending = .transparent(opacity: 0.3)
-        sun.children.first?.components[ModelComponent.self]?.materials = [halo]
+        sun.model?.materials = [dark ? moonFace : sunFace]
+        rays.isEnabled = !dark
 
         travellers = street.travellers.map { traveller in
             let node = makeTraveller(traveller)
