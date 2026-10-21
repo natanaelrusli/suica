@@ -22,6 +22,8 @@ export const ALERT_NAMES = [
   "alert.fix-ready",
   "alert.fix-failed",
   "alert.fix-pushed",
+  "alert.pipeline-failed",
+  "alert.pipeline-fix-ready",
 ] as const;
 export type AlertName = (typeof ALERT_NAMES)[number];
 export type AlertTemplates = Readonly<Record<AlertName, string>>;
@@ -44,6 +46,8 @@ export const ALERT_PLACEHOLDERS: Readonly<Record<AlertName, readonly string[]>> 
   "alert.fix-ready": ["mr.title", "fix.threads"],
   "alert.fix-failed": ["mr.title", "fix.reason"],
   "alert.fix-pushed": ["mr.title"],
+  "alert.pipeline-failed": [...MR],
+  "alert.pipeline-fix-ready": ["mr.title"],
 };
 
 /** Today's texts, title and body on separate lines. */
@@ -67,6 +71,9 @@ export const DEFAULT_ALERTS: AlertTemplates = {
   "alert.fix-failed": "Perbaikan agen gagal\n{{mr.title}}: {{fix.reason}}",
   "alert.fix-pushed":
     "Perbaikan agen di-push\n{{mr.title}}: sebagian balasan gagal diposting. Kirim ulang dari Suica.",
+  "alert.pipeline-failed": "Pipeline gagal: {{mr.title}}\n!{{mr.iid}} · {{mr.project}}",
+  "alert.pipeline-fix-ready":
+    "Perbaikan pipeline siap\n{{mr.title}}: periksa perubahannya di Suica, lalu push.",
 };
 
 export function isAlertName(value: string): value is AlertName {

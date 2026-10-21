@@ -14,6 +14,7 @@ import {
   glabPost,
   glabPostJson,
   glabRest,
+  glabText,
   glabRunner,
 } from "./gitlab.ts";
 import { createLogger } from "./log.ts";
@@ -21,6 +22,7 @@ import type { Logger } from "./log.ts";
 import { loadAlerts } from "./alerts.ts";
 import { createNotifier } from "./notifier.ts";
 import { createFixWorker } from "./fix-runner.ts";
+import { watchPipelines } from "./pipeline-watch.ts";
 import { fetchFixDetail } from "./reviews.ts";
 import { pollOnce } from "./poller.ts";
 import type { PollDeps, PollStatus } from "./poller.ts";
@@ -114,6 +116,7 @@ export function createRuntime(configPath: string, signal?: AbortSignal): Runtime
     exec: defaultExec,
     graphql: run,
     rest: glabRest(config.gitlab),
+    text: glabText(config.gitlab),
     notifier,
     alerts,
     log,
@@ -143,6 +146,8 @@ export function createRuntime(configPath: string, signal?: AbortSignal): Runtime
         snapshot,
         previous.seenNotes,
       ),
+    watchPipelines: (snapshot) =>
+      watchPipelines({ store, config, notifier, alerts, log, now: Date.now }, snapshot),
     failures: createFailureTracker(),
     log,
     config,

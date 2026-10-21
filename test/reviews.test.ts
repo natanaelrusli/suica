@@ -172,7 +172,16 @@ describe("buildReviewList", () => {
             reviewers: [reviewer("me", "UNREVIEWED")],
           }),
         ],
-        authored: [mr(8)],
+        authored: [
+          mr(8, {
+            pipeline: {
+              iid: "41",
+              status: "FAILED",
+              url: "https://gitlab.example/g/p/-/pipelines/2921",
+            },
+          }),
+          mr(10),
+        ],
       }),
       new Map([
         [
@@ -215,6 +224,7 @@ describe("buildReviewList", () => {
               thread("gid://gitlab/Discussion/a1", "n1", { action: "changed" }),
               thread("gid://gitlab/Discussion/a2", "n2", { action: "reply" }),
             ],
+            pipeline: null,
             note: "",
             baseSha: "0123456789abcdef0123456789abcdef01234567",
             commitMessage: "Rename",

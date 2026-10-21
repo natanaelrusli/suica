@@ -4,7 +4,7 @@ import { DEFAULT_ALERTS } from "./alerts.ts";
 import { execFailure } from "./exec.ts";
 import { NOT_YOURS, fixDir, fixPaths, gitAt } from "./fix-runner.ts";
 import type { FixDeps } from "./fix-runner.ts";
-import type { FixRow, FixThread } from "./fix-store.ts";
+import type { FixPipeline, FixRow, FixThread } from "./fix-store.ts";
 import { clean, renderAlert } from "./format.ts";
 import type { PostRunner } from "./gitlab.ts";
 import type { ActivityLine } from "./sql-row.ts";
@@ -294,8 +294,9 @@ const cleared = (thread: FixThread): FixThread => ({
 });
 
 /**
- * Drops a ready, failed or push-failed fix and queues a new one by hand for the same threads, with
- * the Owner's note; it checks out the branch afresh. Returns the new fix's id.
+ * Drops a ready, failed or push-failed fix and queues a new one by hand for the same threads and
+ * pipeline, with the Owner's note; it checks out the branch afresh and reads the pipeline's jobs
+ * again. Returns the new fix's id.
  */
 export type RetryOutcome = { status: "queued"; id: number } | { status: "busy" | "nothing" };
 
@@ -330,6 +331,9 @@ export function retryFix(
     deps.now(),
     row.mrTitle ?? undefined,
     note.trim(),
+    row.pipeline === null
+      ? undefined
+      : { iid: row.pipeline.iid, url: row.pipeline.url, sha: null, jobs: [], summary: "" },
   );
   return next === undefined ? { status: "busy" } : { status: "queued", id: next };
 }
@@ -401,6 +405,8 @@ export interface FixJson {
   readonly mrTitle: string | null;
   readonly status: FixRow["status"];
   readonly threads: readonly FixThread[];
+  /** The failed pipeline it fixes; null for a fix of threads only. */
+  readonly pipeline: FixPipeline | null;
   readonly note: string;
   readonly baseSha: string | null;
   readonly commitMessage: string;
@@ -428,6 +434,7 @@ export function toFixJson(row: FixRow): FixJson {
     mrTitle: row.mrTitle,
     status: row.status,
     threads: row.threads,
+    pipeline: row.pipeline,
     note: row.note,
     baseSha: row.baseSha,
     commitMessage: row.commitMessage,

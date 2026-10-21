@@ -132,7 +132,7 @@ private func stats(days: [DayStats], ok: Int, failed: Int) -> StatsDocument {
 private func yours(_ key: String, approvedByAll: Bool = false, fix: String? = nil) -> YourMergeRequest {
     YourMergeRequest(
         key: key, title: key, url: "https://x/\(key)", draft: false, createdAt: nil, reviewers: [],
-        approvedByAll: approvedByAll, fix: fix.map { FixSummary(id: 1, status: $0, threads: 1, changed: 1, detail: "") })
+        approvedByAll: approvedByAll, fix: fix.map { FixSummary(id: 1, status: $0, threads: 1, changed: 1, detail: "") }, pipeline: nil)
 }
 
 @Test func yourTallyCountsApprovedAndReadyFixes() {

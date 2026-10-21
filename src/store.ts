@@ -269,7 +269,13 @@ export interface Store {
   close(): void;
 }
 
-const SCHEMA_VERSION = 15;
+const SCHEMA_VERSION = 16;
+/** The failed pipeline a Pipeline Fix works on, as JSON; and the head pipeline each of the Owner's MRs had at the last poll. */
+const SCHEMA_V16 = `
+CREATE TABLE IF NOT EXISTS pipeline_watch (
+  mr_key TEXT PRIMARY KEY, pipeline_iid TEXT NOT NULL, status TEXT NOT NULL
+);
+`;
 /** The approval judge's verdict on a review, as JSON. */
 const SCHEMA_V15 = "ALTER TABLE agent_review ADD COLUMN approval TEXT";
 /**
@@ -617,6 +623,11 @@ function initSchema(db: DatabaseSync): void {
   if (version < 13) db.exec(SCHEMA_V13);
   if (version < 14) db.exec(SCHEMA_V14);
   if (version < 15 && !hasColumn(db, "agent_review", "approval")) db.exec(SCHEMA_V15);
+  if (version < 16) {
+    if (!hasColumn(db, "fix_run", "pipeline"))
+      db.exec("ALTER TABLE fix_run ADD COLUMN pipeline TEXT");
+    db.exec(SCHEMA_V16);
+  }
   if (version !== SCHEMA_VERSION) db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 }
 

@@ -21,6 +21,11 @@ struct YourMRRow: View {
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(ReviewTint.agent(fix.status == "pushed" ? "posted" : fix.status))
             }
+            if let pipeline = mr.pipeline, let mark = PipelineMark(pipeline) {
+                Label(mark.text, systemImage: mark.symbol)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(mark.tint)
+            }
             let approvals = mr.approvals
             if approvals.total > 0 {
                 Label(Copy.approvals(approvals.approved, of: approvals.total), systemImage: "checkmark.seal")
@@ -30,6 +35,25 @@ struct YourMRRow: View {
         }
         .padding(.vertical, 3)
         .accessibilityElement(children: .combine)
+    }
+}
+
+/// How a row of yours shows its head pipeline: failed, still running, or passed; nothing otherwise.
+private struct PipelineMark {
+    let text: String
+    let symbol: String
+    let tint: Color
+
+    init?(_ pipeline: PipelineInfo) {
+        if pipeline.hasFailed {
+            (text, symbol, tint) = (Copy.pipelineFailed, "xmark.octagon.fill", .red)
+        } else if pipeline.isRunning {
+            (text, symbol, tint) = (Copy.pipelineRunning, "clock.arrow.circlepath", .orange)
+        } else if pipeline.hasPassed {
+            (text, symbol, tint) = (Copy.pipelinePassed, "checkmark.circle.fill", .green)
+        } else {
+            return nil
+        }
     }
 }
 
@@ -64,6 +88,7 @@ struct FixTab: View {
                 if let banner = fixes.banner { NoticeBox(text: banner, tint: .secondary, onClose: fixes.dismissBanner) }
                 if let fix {
                     header(fix, busy: busy)
+                    if let pipeline = fix.pipeline { pipelineCard(pipeline) }
                     if fix.status == "running" { ActivityFeed(lines: fix.activity) }
                     if fix.status == "queued" { Text(Copy.fixQueued).foregroundStyle(.secondary) }
                     if fix.status == "confirming" { Text(Copy.fixConfirming).foregroundStyle(.secondary) }
@@ -180,6 +205,44 @@ struct FixTab: View {
             .background(.background.secondary, in: RoundedRectangle(cornerRadius: 10))
             .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.separator.opacity(0.5)))
         }
+    }
+
+    /// The failed pipeline the fix works on: a link to it, its failed jobs, and the model's sentence.
+    private func pipelineCard(_ pipeline: FixPipelineInfo) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "xmark.octagon.fill").foregroundStyle(.red)
+                Text(Copy.fixPipelineHeading(pipeline.iid)).font(.callout.weight(.semibold))
+                if let sha = pipeline.sha {
+                    Text(sha.prefix(8)).font(.caption.monospaced()).foregroundStyle(.secondary)
+                }
+                Spacer()
+                if let url = URL(string: pipeline.url), url.scheme == "https" || url.scheme == "http" {
+                    Link(Copy.openInGitLab, destination: url).font(.caption)
+                }
+            }
+            if pipeline.jobs.isEmpty {
+                Text(Copy.fixPipelineWaiting).font(.callout).foregroundStyle(.secondary)
+            }
+            ForEach(Array(pipeline.jobs.enumerated()), id: \.offset) { _, job in
+                HStack(spacing: 6) {
+                    Image(systemName: "xmark.circle").foregroundStyle(.secondary)
+                    if let url = URL(string: job.url), url.scheme == "https" || url.scheme == "http" {
+                        Link(DisplayText.clean(Copy.fixPipelineJob(name: job.name, stage: job.stage), max: 200), destination: url)
+                    } else {
+                        Text(DisplayText.clean(Copy.fixPipelineJob(name: job.name, stage: job.stage), max: 200))
+                    }
+                }
+                .font(.callout.monospaced())
+            }
+            if !pipeline.summary.isEmpty {
+                Text(DisplayText.clean(pipeline.summary, max: 600)).font(.callout)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.background.secondary, in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.separator.opacity(0.5)))
     }
 
     private func threadCard(_ thread: FixThreadInfo) -> some View {

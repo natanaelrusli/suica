@@ -133,6 +133,8 @@ export const configSchema = z
       .object({
         // Watch the Owner's MRs and queue fixes by themselves.
         auto: z.boolean().default(true),
+        // With auto: also queue a Pipeline Fix when an MR's head pipeline fails.
+        pipelines: z.boolean().default(true),
         model: modelSchema.optional(),
         effort: z.enum(REVIEW_EFFORTS).default("medium"),
         timeoutMinutes: positiveInt.default(20),

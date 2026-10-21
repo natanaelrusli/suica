@@ -611,6 +611,15 @@ private struct MergeRequestDetailView: View {
                     Label(Copy.fixFindingsNow, systemImage: "wand.and.stars")
                 }
                 .disabled(fixes.busyKeys.contains(detail.key) || fixes.fix(for: detail.key).map { $0.isActive || $0.isReady } == true)
+                if detail.pipelineStatus == "FAILED" {
+                    Button {
+                        tab = .fix
+                        Task { await fixes.queuePipelineFix(detail.key) }
+                    } label: {
+                        Label(Copy.fixPipelineNow, systemImage: "hammer")
+                    }
+                    .disabled(fixes.busyKeys.contains(detail.key) || fixes.fix(for: detail.key).map { $0.isActive || $0.isReady } == true)
+                }
                 Button(role: .destructive) { confirmingClose = true } label: {
                     Label(Copy.closeMR, systemImage: "xmark.circle")
                 }

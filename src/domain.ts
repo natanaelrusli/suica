@@ -19,6 +19,17 @@ export interface Note {
   readonly author: Person;
 }
 
+/** An MR's head pipeline. */
+export interface Pipeline {
+  /** GitLab's per-project pipeline number, as text. */
+  readonly iid: string;
+  /** GitLab's status: SUCCESS, FAILED, RUNNING, PENDING, CANCELED, SKIPPED, MANUAL, … */
+  readonly status: string;
+  readonly url: string;
+}
+
+export const PIPELINE_FAILED = "FAILED";
+
 export interface MergeRequest {
   /** `<project path>!<iid>`, stable and safe to log. */
   readonly key: string;
@@ -37,6 +48,8 @@ export interface MergeRequest {
   readonly reviewers: readonly Reviewer[];
   /** Most recent notes only; empty for MRs fetched without notes. */
   readonly notes: readonly Note[];
+  /** Null when the MR has no pipeline. */
+  readonly pipeline: Pipeline | null;
 }
 
 export interface Snapshot {

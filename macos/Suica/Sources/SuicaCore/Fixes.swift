@@ -13,6 +13,25 @@ public struct FixSummary: Codable, Equatable, Sendable {
     public let detail: String
 }
 
+/// An MR's head pipeline.
+public struct PipelineInfo: Codable, Equatable, Sendable {
+    /// GitLab's per-project pipeline number.
+    public let iid: String
+    /// GitLab's status: SUCCESS, FAILED, RUNNING, PENDING, CANCELED, SKIPPED, MANUAL, …
+    public let status: String
+    public let url: String
+
+    public init(iid: String, status: String, url: String) {
+        self.iid = iid
+        self.status = status
+        self.url = url
+    }
+
+    public var hasFailed: Bool { status == "FAILED" }
+    public var hasPassed: Bool { status == "SUCCESS" }
+    public var isRunning: Bool { runningPipelines.contains(status) }
+}
+
 /// One of your own open MRs in `suica reviews --json`.
 public struct YourMergeRequest: Codable, Equatable, Identifiable, Sendable {
     public let key: String
@@ -25,6 +44,8 @@ public struct YourMergeRequest: Codable, Equatable, Identifiable, Sendable {
     public let approvedByAll: Bool
     /// Nil when Suica never fixed anything on it.
     public let fix: FixSummary?
+    /// Nil when the MR has no pipeline, or the agent is older.
+    public let pipeline: PipelineInfo?
 
     public var id: String { key }
 
@@ -54,6 +75,24 @@ public struct FixThreadInfo: Codable, Equatable, Identifiable, Sendable {
     public let posted: Bool
 }
 
+/// The failed pipeline a Pipeline Fix works on.
+public struct FixPipelineInfo: Codable, Equatable, Sendable {
+    public struct Job: Codable, Equatable, Sendable {
+        public let name: String
+        public let stage: String
+        public let url: String
+    }
+
+    public let iid: String
+    public let url: String
+    /// The commit it ran on; nil until the fix read the pipeline.
+    public let sha: String?
+    /// The failed jobs the fix read; empty until then.
+    public let jobs: [Job]
+    /// The model's sentence on why the jobs failed and what it changed; empty until it answered.
+    public let summary: String
+}
+
 /// One Agent Fix in `suica fix list --json`.
 public struct FixInfo: Codable, Equatable, Identifiable, Sendable {
     public let id: Int
@@ -61,6 +100,8 @@ public struct FixInfo: Codable, Equatable, Identifiable, Sendable {
     public let mrTitle: String?
     public let status: String
     public let threads: [FixThreadInfo]
+    /// The failed pipeline it fixes; nil for a fix of threads only.
+    public let pipeline: FixPipelineInfo?
     public let note: String
     public let baseSha: String?
     public let commitMessage: String
@@ -179,6 +220,8 @@ public protocol FixesClient: Sendable {
     func fixes() async throws(AgentError) -> FixListDocument
     /// queued, added, busy, nothing-to-fix or bad-key.
     func queueFix(key: String) async throws(AgentError) -> ActionResult
+    /// queued, added, busy, no-failed-pipeline, not-yours or bad-key.
+    func queuePipelineFix(key: String) async throws(AgentError) -> ActionResult
     /// pushed, partial, branch-moved, push-failed, bad-request or nothing.
     func confirmFix(id: Int, edits: ConfirmEdits) async throws(AgentError) -> ActionResult
     /// queued or nothing.
@@ -234,6 +277,12 @@ public final class FixesModel {
     public func queueFix(_ key: String) async {
         await act(key, Copy.fixOutcome) { (client: any FixesClient) async throws(AgentError) -> ActionResult in
             try await client.queueFix(key: key)
+        }
+    }
+
+    public func queuePipelineFix(_ key: String) async {
+        await act(key, Copy.fixOutcome) { (client: any FixesClient) async throws(AgentError) -> ActionResult in
+            try await client.queuePipelineFix(key: key)
         }
     }
 

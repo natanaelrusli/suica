@@ -342,6 +342,54 @@ describe("parseConfirmEdits", () => {
   });
 });
 
+describe("a fix of a failed pipeline", () => {
+  const PIPELINE = {
+    iid: "41",
+    url: "https://gitlab.example/g/p/-/pipelines/2921",
+    sha: "fedcba9876543210fedcba9876543210fedcba98",
+    jobs: [{ name: "test:unit", stage: "test", url: "https://gitlab.example/g/p/-/jobs/25138" }],
+    summary: "A test expects 3.",
+  };
+  const readyPipeline = (h: ReturnType<typeof harness>): FixRow => {
+    const id = h.db.fixes.queue("g/p!7", "auto", [], NOW - 1000, "Add thing", "", PIPELINE) ?? 0;
+    h.db.fixes.transition(id, ["queued"], "running", {}, NOW - 900);
+    h.db.fixes.transition(
+      id,
+      ["running"],
+      "ready",
+      { baseSha: BASE, diff: "diff --git a b\n", commitMessage: "Fix the test" },
+      NOW - 800,
+    );
+    mkdirSync(join(fixDir(h.statePath, id), "work", "repo"), { recursive: true });
+    const row = h.db.fixes.get(id);
+    if (row === undefined) throw new Error("no row");
+    return row;
+  };
+
+  it("commits and pushes with no reply to post", async () => {
+    const h = harness();
+    const row = readyPipeline(h);
+    expect(await confirmFix(h.deps, row.id, KEEP(row))).toBe("pushed");
+    expect(h.git.some((args) => args.includes("push"))).toBe(true);
+    expect(h.posts).toEqual([]);
+    expect(h.db.fixes.get(row.id)).toMatchObject({ status: "pushed", pushedSha: PUSHED });
+  });
+
+  it("retries with the same pipeline, read afresh", () => {
+    const h = harness();
+    const row = readyPipeline(h);
+    const retried = retryFix(h.deps, row.id, "the test is right; fix the code");
+    const id = retried.status === "queued" ? retried.id : 0;
+    expect(h.db.fixes.get(id)?.pipeline).toEqual({
+      iid: "41",
+      url: PIPELINE.url,
+      sha: null,
+      jobs: [],
+      summary: "",
+    });
+  });
+});
+
 describe("retry, discard, cancel and recovery", () => {
   it("retries a ready fix as a new manual fix with the note, its answers cleared", () => {
     const h = harness();
@@ -435,6 +483,32 @@ describe("buildFixList", () => {
       "failed",
       { detail: "the model gave no answer block", diff: "x" },
       NOW - 400,
+    );
+    const pipeline = {
+      iid: "41",
+      url: "https://gitlab.example/g/p/-/pipelines/2921",
+      sha: null,
+      jobs: [],
+      summary: "",
+    };
+    const piped =
+      h.db.fixes.queue("g/p!9", "manual", [], NOW - 300, "Bump deps", "", pipeline) ?? 0;
+    h.db.fixes.transition(
+      piped,
+      ["queued"],
+      "skipped",
+      {
+        detail: "A runner lost its network.",
+        pipeline: {
+          ...pipeline,
+          sha: "fedcba9876543210fedcba9876543210fedcba98",
+          jobs: [
+            { name: "test:unit", stage: "test", url: "https://gitlab.example/g/p/-/jobs/25138" },
+          ],
+          summary: "A runner lost its network.",
+        },
+      },
+      NOW - 200,
     );
     const golden: unknown = JSON.parse(readFileSync("contracts/fixes.v1.json", "utf8"));
     expect(JSON.parse(JSON.stringify(buildFixList(h.db.fixes.list(0))))).toEqual(golden);

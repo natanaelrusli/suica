@@ -47,8 +47,36 @@ afterEach(() => {
 function answer(
   threads: { id: string; action: string; reply: string }[],
   commitMessage = "Rename the total",
+  pipeline?: string,
 ): string {
-  return `I renamed it.\n\n\`\`\`json\n${JSON.stringify({ commitMessage, threads })}\n\`\`\`\n`;
+  return `I renamed it.\n\n\`\`\`json\n${JSON.stringify({ commitMessage, threads, pipeline })}\n\`\`\`\n`;
+}
+
+const JOB_LOG =
+  "2026-10-21T13:53:16.493098Z 01O \u001b[31mFAIL\u001b[0m src/a.test.ts > adds\n2026-10-21T13:53:34.517781Z 00O ERROR: Job failed: exit code 1";
+
+function pipelineRaw(): unknown {
+  return {
+    data: {
+      project: {
+        pipeline: {
+          iid: "41",
+          sha: "fedcba9876543210fedcba9876543210fedcba98",
+          jobs: {
+            nodes: [
+              {
+                id: "gid://gitlab/Ci::Build/25138",
+                name: "test:unit",
+                allowFailure: false,
+                stage: { name: "test" },
+                webPath: "/g/p/-/jobs/25138",
+              },
+            ],
+          },
+        },
+      },
+    },
+  };
 }
 
 function detailRaw(): unknown {
@@ -105,6 +133,7 @@ function harness(
   const calls: Call[] = [];
   const notifications: Notification[] = [];
   const seenFiles = new Map<string, string>();
+  const traces: string[] = [];
   const exec: Exec = (file, args, execOptions) => {
     calls.push({ file, args, options: execOptions });
     if (file === "git" && args.includes("clone")) {
@@ -121,7 +150,8 @@ function harness(
     if (file === "git" && args.includes("diff"))
       return Promise.resolve({ stdout: options.diff ?? DIFF, stderr: "" });
     if (file === "git") return Promise.resolve({ stdout: "", stderr: "" });
-    for (const name of ["mr.md", "threads.md", "notes.md"]) {
+    seenFiles.clear();
+    for (const name of ["mr.md", "threads.md", "notes.md", "pipeline.md"]) {
       const path = join(execOptions.cwd ?? "", name);
       if (existsSync(path)) seenFiles.set(name, readFileSync(path, "utf8"));
     }
@@ -146,7 +176,12 @@ function harness(
     store: db,
     config: CONFIG,
     exec,
-    graphql: () => Promise.resolve(detailRaw()),
+    graphql: (query) =>
+      Promise.resolve(query.includes("SuicaPipeline") ? pipelineRaw() : detailRaw()),
+    text: (path) => {
+      traces.push(path);
+      return Promise.resolve(JOB_LOG);
+    },
     rest: (path) =>
       Promise.resolve(
         path.endsWith("/diffs?per_page=100")
@@ -181,7 +216,31 @@ function harness(
     if (row === undefined) throw new Error("not queued");
     return row;
   };
-  return { db, deps, calls, notifications, seenFiles, statePath, queue, controller };
+  const queuePipeline = (): FixRow => {
+    const id =
+      db.fixes.queue("g/p!7", "auto", [], NOW, "Add thing", "", {
+        iid: "41",
+        url: "https://gitlab.example/g/p/-/pipelines/2921",
+        sha: null,
+        jobs: [],
+        summary: "",
+      }) ?? 0;
+    const row = db.fixes.get(id);
+    if (row === undefined) throw new Error("not queued");
+    return row;
+  };
+  return {
+    db,
+    deps,
+    calls,
+    notifications,
+    seenFiles,
+    traces,
+    statePath,
+    queue,
+    queuePipeline,
+    controller,
+  };
 }
 
 describe("parseFixAnswer", () => {
@@ -222,6 +281,14 @@ describe("parseFixAnswer", () => {
 
   it("falls back to a plain commit message when the model left it blank", () => {
     expect(parseFixAnswer(answer([], " "), threads)?.commitMessage).toBe("Address review comments");
+    expect(parseFixAnswer(answer([], " "), [])?.commitMessage).toBe("Fix the failing pipeline");
+  });
+
+  it("reads the sentence on the pipeline, empty when the model gave none", () => {
+    expect(parseFixAnswer(answer([], "Fix", " A test expects 3. "), [])?.pipeline).toBe(
+      "A test expects 3.",
+    );
+    expect(parseFixAnswer(answer([], "Fix"), [])?.pipeline).toBe("");
   });
 });
 
@@ -247,6 +314,26 @@ describe("buildFixPrompt", () => {
     expect(prompt).toContain("untrusted");
     expect(prompt).toContain("{{sha}}");
     expect(buildFixPrompt("g/p!7", "feat/thing", SHA, false)).not.toContain("./notes.md");
+    expect(buildFixPrompt("g/p!7", "feat/thing", SHA, false)).not.toContain("pipeline");
+  });
+
+  it("asks for a pipeline fix alone, or with the threads", () => {
+    const alone = buildFixPrompt("g/p!7", "feat/thing", SHA, false, {
+      threads: false,
+      pipeline: true,
+    });
+    expect(alone).toMatch(/^Fix the failed pipeline of merge request g\/p!7/);
+    expect(alone).toContain("./pipeline.md");
+    expect(alone).not.toContain("threads.md");
+    expect(alone).toContain("untrusted");
+    expect(alone).toContain('"pipeline": "…"');
+    const both = buildFixPrompt("g/p!7", "feat/thing", SHA, false, {
+      threads: true,
+      pipeline: true,
+    });
+    expect(both).toMatch(/^Answer the open review threads and fix the failed pipeline/);
+    expect(both).toContain("./threads.md");
+    expect(both).toContain("./pipeline.md");
   });
 });
 
@@ -294,6 +381,46 @@ describe("runAgentFix", () => {
     expect(existsSync(join(fixDir(h.statePath, row.id), "work", "repo"))).toBe(true);
     expect(h.db.loadTokenUsage(0)[0]?.purpose).toBe("fix");
     expect(h.notifications.map((n) => n.title)).toEqual(["Perbaikan agen siap"]);
+  });
+
+  it("fixes a failed pipeline: reads its failed jobs' logs, keeps no log and says the pipeline fix is ready", async () => {
+    const h = harness({ result: answer([], "Fix the test", "The test expected 3.") });
+    const row = h.queuePipeline();
+    await runAgentFix(h.deps, row);
+    const stored = h.db.fixes.get(row.id);
+    expect(stored).toMatchObject({
+      status: "ready",
+      diff: DIFF,
+      commitMessage: "Fix the test",
+      threads: [],
+      pipeline: {
+        iid: "41",
+        sha: "fedcba9876543210fedcba9876543210fedcba98",
+        jobs: [
+          { name: "test:unit", stage: "test", url: "https://gitlab.example/g/p/-/jobs/25138" },
+        ],
+        summary: "The test expected 3.",
+      },
+    });
+    expect(h.traces).toEqual(["projects/g%2Fp/jobs/25138/trace"]);
+    expect(h.seenFiles.get("pipeline.md")).toContain("FAIL src/a.test.ts > adds");
+    expect(h.seenFiles.get("pipeline.md")).not.toContain("\u001b");
+    expect(h.seenFiles.has("threads.md")).toBe(false);
+    expect(JSON.stringify(stored)).not.toContain("exit code 1");
+    expect(h.notifications.map((n) => n.title)).toEqual(["Perbaikan pipeline siap"]);
+  });
+
+  it("skips a pipeline fix that changes nothing, with the model's reason", async () => {
+    const h = harness({ diff: "", result: answer([], "x", "The runner lost its network.") });
+    const row = h.queuePipeline();
+    await runAgentFix(h.deps, row);
+    expect(h.db.fixes.get(row.id)).toMatchObject({
+      status: "skipped",
+      detail: "The runner lost its network.",
+      pipeline: { summary: "The runner lost its network." },
+    });
+    expect(existsSync(fixDir(h.statePath, row.id))).toBe(false);
+    expect(h.notifications.map((n) => n.title)).toEqual(["Perbaikan agen gagal"]);
   });
 
   it("fails without running git when the git settings changed during the run", async () => {

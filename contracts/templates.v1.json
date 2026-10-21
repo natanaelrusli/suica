@@ -306,6 +306,22 @@
       "text": "Perbaikan agen di-push\n{{mr.title}}: sebagian balasan gagal diposting. Kirim ulang dari Suica.",
       "custom": false,
       "defaultText": "Perbaikan agen di-push\n{{mr.title}}: sebagian balasan gagal diposting. Kirim ulang dari Suica."
+    },
+    {
+      "name": "alert.pipeline-failed",
+      "group": "alert",
+      "placeholders": ["mr.title", "mr.iid", "mr.project", "mr.url"],
+      "text": "Pipeline gagal: {{mr.title}}\n!{{mr.iid}} · {{mr.project}}",
+      "custom": false,
+      "defaultText": "Pipeline gagal: {{mr.title}}\n!{{mr.iid}} · {{mr.project}}"
+    },
+    {
+      "name": "alert.pipeline-fix-ready",
+      "group": "alert",
+      "placeholders": ["mr.title"],
+      "text": "Perbaikan pipeline siap\n{{mr.title}}: periksa perubahannya di Suica, lalu push.",
+      "custom": false,
+      "defaultText": "Perbaikan pipeline siap\n{{mr.title}}: periksa perubahannya di Suica, lalu push."
     }
   ],
   "emoji": {

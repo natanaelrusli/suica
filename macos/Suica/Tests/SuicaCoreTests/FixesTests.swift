@@ -40,6 +40,10 @@ actor FakeFixesClient: FixesClient {
         calls.append("queue \(key)")
         return try result.get()
     }
+    func queuePipelineFix(key: String) async throws(AgentError) -> ActionResult {
+        calls.append("queue pipeline \(key)")
+        return try result.get()
+    }
     func confirmFix(id: Int, edits: ConfirmEdits) async throws(AgentError) -> ActionResult {
         calls.append("confirm \(id)")
         lastEdits = edits
@@ -77,7 +81,10 @@ actor FakeFixesClient: FixesClient {
 
 @Test func theFixListAndYourMergeRequestsDecodeFromTheContracts() throws {
     let list = try decodeDocument(FixListDocument.self, from: contract("fixes.v1.json"))
-    #expect(list.fixes.map(\.status) == ["failed", "ready"])
+    #expect(list.fixes.map(\.status) == ["skipped", "failed", "ready"])
+    let piped = try #require(list.fixes.first?.pipeline)
+    #expect(piped.iid == "41" && piped.jobs.map(\.name) == ["test:unit"] && piped.summary == "A runner lost its network.")
+    #expect(list.fixes.first?.threads.isEmpty == true && list.fixes.last?.pipeline == nil)
     let ready = try #require(list.fixes.last)
     #expect(ready.isReady && ready.diff == "diff --git a b\n")
     #expect(ready.threads.map(\.action) == ["changed", "reply", "reply"])
@@ -88,6 +95,25 @@ actor FakeFixesClient: FixesClient {
     let mine = try #require(reviews.yourMergeRequests.first)
     #expect(mine.key == "g/p!8" && mine.fix?.status == "ready" && mine.fix?.changed == 1)
     #expect(!mine.approvedByAll)
+    #expect(mine.pipeline?.hasFailed == true && mine.pipeline?.url == "https://gitlab.example/g/p/-/pipelines/2921")
+    #expect(reviews.yourMergeRequests.last?.pipeline == nil)
+}
+
+@Test func aPipelineIsFailedPassedOrStillRunning() {
+    let pipeline = { (status: String) in PipelineInfo(iid: "1", status: status, url: "u") }
+    #expect(pipeline("FAILED").hasFailed && !pipeline("FAILED").isRunning)
+    #expect(pipeline("SUCCESS").hasPassed)
+    #expect(pipeline("RUNNING").isRunning && pipeline("PENDING").isRunning)
+    #expect(!pipeline("CANCELED").isRunning && !pipeline("CANCELED").hasFailed && !pipeline("CANCELED").hasPassed)
+}
+
+@MainActor @Test func aPipelineFixIsQueuedAndSaysWhatHappened() async {
+    let client = FakeFixesClient()
+    await client.setResult(.success(ActionResult(code: "no-failed-pipeline")))
+    let model = FixesModel(client: client)
+    await model.queuePipelineFix("g/p!7")
+    #expect(await client.calls == ["queue pipeline g/p!7", "list"])
+    #expect(model.banner == Copy.fixOutcome("no-failed-pipeline"))
 }
 
 @Test func aReviewListFromAnOlderAgentHasNoMergeRequestsOfYours() throws {
