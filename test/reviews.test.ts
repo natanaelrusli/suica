@@ -41,6 +41,7 @@ function detailResponse(): unknown {
   return {
     data: {
       project: {
+        squashReadOnly: false,
         mergeRequest: {
           title: "Add thing",
           description: "## What\nAdds the thing.",
@@ -59,6 +60,10 @@ function detailResponse(): unknown {
           },
           approvedBy: { nodes: [bob] },
           squashOnMerge: true,
+          detailedMergeStatus: "MERGEABLE",
+          forceRemoveSourceBranch: true,
+          defaultMergeCommitMessage: "Merge branch 'feat/thing' into 'main'",
+          defaultSquashCommitMessage: "Add thing",
           diffHeadSha: "0123456789abcdef0123456789abcdef01234567",
           userPermissions: { canApprove: true },
           discussions: {

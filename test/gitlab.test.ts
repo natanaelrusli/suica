@@ -6,6 +6,7 @@ import {
   descriptionSha,
   fetchPerson,
   glabPost,
+  glabPut,
   glabRest,
   glabRunner,
   parseSnapshot,
@@ -280,6 +281,27 @@ describe("glabRunner", () => {
     await expect(conflict).rejects.toMatchObject({ kind: "gitlab-error", httpStatus: 409 });
     const unknown = glabPost(config, failing({ code: 1, stderr: "something odd" }))("x", {});
     await expect(unknown).rejects.toMatchObject({ httpStatus: undefined });
+  });
+
+  it("sends a PUT with form fields", async () => {
+    const calls: string[][] = [];
+    await glabPut(config, (file, args) => {
+      calls.push([file, ...args]);
+      return Promise.resolve({ stdout: "{}", stderr: "" });
+    })("projects/g%2Fp/merge_requests/7/merge", { sha: "abc" });
+    expect(calls).toEqual([
+      [
+        "glab",
+        "api",
+        "projects/g%2Fp/merge_requests/7/merge",
+        "--hostname",
+        "gitlab.example",
+        "-X",
+        "PUT",
+        "-f",
+        "sha=abc",
+      ],
+    ]);
   });
 
   it("treats non-JSON output as a GitLab error", async () => {

@@ -7,8 +7,9 @@ import { defaultConfigPath, defaultStatePath, loadConfig } from "./config.ts";
 import { applyConfigEdits, parseSaveRequest, showConfig } from "./config-edit.ts";
 import type { SaveResultJson } from "./config-edit.ts";
 import { defaultExec } from "./exec.ts";
-import { fetchSnapshot, glabPost, glabPostJson, glabRest, glabRunner } from "./gitlab.ts";
+import { fetchSnapshot, glabPost, glabPostJson, glabPut, glabRest, glabRunner } from "./gitlab.ts";
 import { detectModelClis } from "./model-cli.ts";
+import { commentOnMergeRequest, mergeMergeRequest } from "./mr-actions.ts";
 import {
   approveMergeRequest,
   buildReviewActivity,
@@ -36,7 +37,7 @@ import { OUTBOX_STATUSES } from "./teams/types.ts";
 import { buildUsage } from "./usage.ts";
 
 const USAGE =
-  "usage: suica <once|status|state|stats|usage|pause|resume|pending [--all]|send <id> [--json]|skip <id> [--json]|retry <id> [--json]|selftest|reviews --json|mr <key> --json|mr approve <key> <sha> --json|review queue <key> --json|review post <id> [--inline|--comment] --json|review discard <id> --json|review cancel <id> --json|config show --json|config set --json|templates show --json|templates set --json|agent install|agent uninstall|agent restart --json>\n";
+  "usage: suica <once|status|state|stats|usage|pause|resume|pending [--all]|send <id> [--json]|skip <id> [--json]|retry <id> [--json]|selftest|reviews --json|mr <key> --json|mr approve <key> <sha> --json|mr comment <key> --json (body on stdin)|mr merge <key> <sha> [--squash] [--remove-source-branch] [--when-pipeline-succeeds] --json (message on stdin)|review queue <key> --json|review post <id> [--inline|--comment] --json|review discard <id> --json|review cancel <id> --json|config show --json|config set --json|templates show --json|templates set --json|agent install|agent uninstall|agent restart --json>\n";
 const TEAMS_DISABLED = "teams is disabled: set teams.enabled to true in the config\n";
 const SHOWN_WITH_ALL = 50;
 
@@ -307,6 +308,38 @@ async function approveCommand(key: string, sha: string): Promise<number> {
   return outcome === "approved" ? 0 : 1;
 }
 
+/** `suica mr comment <key> --json`: the Markdown body comes on stdin; prints `{"status": …}`. */
+async function commentCommand(key: string): Promise<number> {
+  const { gitlab } = loadConfig(defaultConfigPath());
+  const body = await readLimitedStdin(MAX_REQUEST_BYTES);
+  const outcome =
+    body === undefined ? "failed" : await commentOnMergeRequest(glabPost(gitlab), key, body);
+  createLogger().info("mr comment posted", { mr_key: key, outcome });
+  process.stdout.write(`${actionJson(outcome)}\n`);
+  return outcome === "posted" ? 0 : 1;
+}
+
+/**
+ * `suica mr merge <key> <sha> --json`: merges at the commit the Owner saw, with the commit message
+ * on stdin; prints `{"status": …}`.
+ */
+async function mergeCommand(key: string, sha: string, argv: readonly string[]): Promise<number> {
+  const { gitlab } = loadConfig(defaultConfigPath());
+  const message = await readLimitedStdin(MAX_REQUEST_BYTES);
+  const outcome =
+    message === undefined
+      ? "failed"
+      : await mergeMergeRequest(glabPut(gitlab), key, sha, {
+          squash: argv.includes("--squash"),
+          removeSourceBranch: argv.includes("--remove-source-branch"),
+          message,
+          whenPipelineSucceeds: argv.includes("--when-pipeline-succeeds"),
+        });
+  createLogger().info("mr merge", { mr_key: key, outcome });
+  process.stdout.write(`${actionJson(outcome)}\n`);
+  return outcome === "merged" || outcome === "scheduled" ? 0 : 1;
+}
+
 async function installAgentCommand(): Promise<number> {
   const paths = {
     node: process.execPath,
@@ -433,6 +466,22 @@ async function main(argv: readonly string[]): Promise<number> {
       return 2;
     }
     return approveCommand(key, sha);
+  }
+  if (command === "mr" && argv[1] === "comment" && argv.includes("--json")) {
+    const key = argv[2];
+    if (key === undefined) {
+      process.stderr.write(USAGE);
+      return 2;
+    }
+    return commentCommand(key);
+  }
+  if (command === "mr" && argv[1] === "merge" && argv.includes("--json")) {
+    const [key, sha] = [argv[2], argv[3]];
+    if (key === undefined || sha === undefined) {
+      process.stderr.write(USAGE);
+      return 2;
+    }
+    return mergeCommand(key, sha, argv);
   }
   if (command === "mr" && argv.includes("--json")) {
     const key = argv[1];

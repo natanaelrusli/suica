@@ -264,6 +264,14 @@ export interface MrDetailJson {
   readonly approvedBy: readonly Person[];
   /** True when merging squashes the commits, with the project's squash setting applied. */
   readonly squashOnMerge: boolean;
+  /** True when the project decides squashing (always or never), so the Owner cannot choose. */
+  readonly squashReadOnly: boolean;
+  /** True when merging deletes the source branch, as the MR is set now. */
+  readonly removeSourceBranch: boolean;
+  /** GitLab's merge readiness (MERGEABLE, NOT_APPROVED, CI_STILL_RUNNING, …); null when not reported. */
+  readonly detailedMergeStatus: string | null;
+  readonly defaultMergeCommitMessage: string | null;
+  readonly defaultSquashCommitMessage: string | null;
   /** The commit the diff was taken at; an approval is tied to it. Null when GitLab has none. */
   readonly headSha: string | null;
   /** True when GitLab lets the Owner approve this MR now. */
@@ -295,6 +303,7 @@ const MAX_TOTAL_DIFF_CHARS = 1_500_000;
 export const MR_DETAIL_QUERY = `
 query SuicaMergeRequest($path: ID!, $iid: String!) {
   project(fullPath: $path) {
+    squashReadOnly
     mergeRequest(iid: $iid) {
       title
       description
@@ -311,6 +320,10 @@ query SuicaMergeRequest($path: ID!, $iid: String!) {
       reviewers { nodes { username name mergeRequestInteraction { reviewState } } }
       approvedBy { nodes { username name } }
       squashOnMerge
+      detailedMergeStatus
+      forceRemoveSourceBranch
+      defaultMergeCommitMessage
+      defaultSquashCommitMessage
       diffHeadSha
       userPermissions { canApprove }
       discussions(first: ${DISCUSSIONS_PAGE}) {
@@ -359,6 +372,7 @@ const detailSchema = z.object({
     .object({
       project: z
         .object({
+          squashReadOnly: z.boolean().optional(),
           mergeRequest: z
             .object({
               title: z.string(),
@@ -386,6 +400,10 @@ const detailSchema = z.object({
               }),
               approvedBy: z.object({ nodes: z.array(personSchema) }),
               squashOnMerge: z.boolean(),
+              detailedMergeStatus: z.string().nullable().optional(),
+              forceRemoveSourceBranch: z.boolean().nullable().optional(),
+              defaultMergeCommitMessage: z.string().nullable().optional(),
+              defaultSquashCommitMessage: z.string().nullable().optional(),
               diffHeadSha: z.string().nullable(),
               userPermissions: z.object({ canApprove: z.boolean() }),
               discussions: z.object({
@@ -483,6 +501,11 @@ export function parseMrDetail(
     })),
     approvedBy: mr.approvedBy.nodes,
     squashOnMerge: mr.squashOnMerge,
+    squashReadOnly: data?.project?.squashReadOnly ?? false,
+    removeSourceBranch: mr.forceRemoveSourceBranch ?? false,
+    detailedMergeStatus: mr.detailedMergeStatus ?? null,
+    defaultMergeCommitMessage: mr.defaultMergeCommitMessage ?? null,
+    defaultSquashCommitMessage: mr.defaultSquashCommitMessage ?? null,
     headSha: mr.diffHeadSha,
     canApprove: mr.userPermissions.canApprove,
     discussions: mr.discussions.nodes.map((discussion) => ({

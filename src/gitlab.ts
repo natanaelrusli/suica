@@ -244,13 +244,24 @@ export type PostRunner = (
   fields: Readonly<Record<string, string>>,
 ) => Promise<unknown>;
 
-export function glabPost(config: Config["gitlab"], exec: Exec = defaultExec): PostRunner {
+function formRunner(config: Config["gitlab"], exec: Exec, method: "POST" | "PUT"): PostRunner {
   return (path, fields) =>
     runGlab(config, exec, path, [
       "-X",
-      "POST",
+      method,
       ...Object.entries(fields).flatMap(([name, value]) => ["-f", `${name}=${value}`]),
     ]);
+}
+
+export function glabPost(config: Config["gitlab"], exec: Exec = defaultExec): PostRunner {
+  return formRunner(config, exec, "POST");
+}
+
+/** A REST PUT with string form fields, such as a merge. */
+export type PutRunner = PostRunner;
+
+export function glabPut(config: Config["gitlab"], exec: Exec = defaultExec): PutRunner {
+  return formRunner(config, exec, "PUT");
 }
 
 /** A REST POST with a JSON body, for nested fields such as a diff thread's `position`. */

@@ -17,6 +17,11 @@
   "reviewers": [{ "username": "me", "name": "Nata", "state": "UNREVIEWED" }],
   "approvedBy": [{ "username": "bob", "name": "Bob" }],
   "squashOnMerge": true,
+  "squashReadOnly": false,
+  "removeSourceBranch": true,
+  "detailedMergeStatus": "MERGEABLE",
+  "defaultMergeCommitMessage": "Merge branch 'feat/thing' into 'main'",
+  "defaultSquashCommitMessage": "Add thing",
   "headSha": "0123456789abcdef0123456789abcdef01234567",
   "canApprove": true,
   "discussions": [
