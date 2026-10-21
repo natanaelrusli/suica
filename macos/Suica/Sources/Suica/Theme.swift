@@ -159,3 +159,40 @@ extension View {
         }
     }
 }
+
+/// A page that runs up under the title bar, which floats over it with no band or line. `content`
+/// gets the title bar's height to keep its own controls clear of it.
+///
+/// The page sits in a ScrollView that never scrolls (its content is exactly the page's size): over
+/// anything else, macOS 26 draws the title bar as an opaque band with a line under it. Scroll views
+/// inside the page keep their own edge effects and bounce; this one's are off.
+struct UnderTitleBar<Content: View>: View {
+    @ViewBuilder let content: (_ titleBar: CGFloat) -> Content
+
+    var body: some View {
+        GeometryReader { proxy in
+            let titleBar = proxy.safeAreaInsets.top
+            ScrollView {
+                content(titleBar)
+                    .frame(width: proxy.size.width, height: proxy.size.height + titleBar)
+                    .scrollBounceBehavior(.automatic)
+                    .modifier(TopScrollEdge(hidden: false))
+            }
+            .scrollBounceBehavior(.basedOnSize)
+            .modifier(TopScrollEdge(hidden: true))
+            .ignoresSafeArea(.container, edges: .top)
+        }
+    }
+}
+
+private struct TopScrollEdge: ViewModifier {
+    let hidden: Bool
+
+    func body(content: Content) -> some View {
+        if #available(macOS 26, *) {
+            content.scrollEdgeEffectHidden(hidden, for: .top)
+        } else {
+            content
+        }
+    }
+}

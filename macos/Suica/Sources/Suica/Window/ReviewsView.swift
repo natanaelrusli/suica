@@ -9,12 +9,16 @@ struct ReviewsView: View {
     @State private var tab: ReviewTab = .group(.waiting)
 
     var body: some View {
-        HStack(spacing: 0) {
-            list
-                .frame(width: 300)
-            Divider()
-            detail
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // The list runs up under the title bar and scrolls beneath it; the MR starts below it.
+        UnderTitleBar { titleBar in
+            HStack(spacing: 0) {
+                list(titleBar: titleBar)
+                    .frame(width: 300)
+                Divider()
+                detail
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding(.top, titleBar)
+            }
         }
         .searchable(text: $query, placement: .toolbar, prompt: Copy.searchReviews)
         .task {
@@ -46,25 +50,22 @@ struct ReviewsView: View {
         Binding(get: { model.selectedKey }, set: { key in Task { await model.select(key) } })
     }
 
-    private var list: some View {
-        VStack(spacing: 0) {
+    private func list(titleBar: CGFloat) -> some View {
+        List(selection: selection) {
+            if let text = model.errorText {
+                NoticeBox(text: text, tint: .red, onClose: model.dismissError).listRowSeparator(.hidden)
+            }
             if let list = model.list {
-                tabBar(in: list)
-                Divider()
+                rows(in: list)
+            } else if model.errorText == nil {
+                ProgressView(Copy.loading).frame(maxWidth: .infinity)
             }
-            List(selection: selection) {
-                if let text = model.errorText {
-                    NoticeBox(text: text, tint: .red, onClose: model.dismissError).listRowSeparator(.hidden)
-                }
-                if let list = model.list {
-                    rows(in: list)
-                } else if model.errorText == nil {
-                    ProgressView(Copy.loading).frame(maxWidth: .infinity)
-                }
-            }
-            .motion(value: model.list)
-            .motion(value: model.errorText)
         }
+        .motion(value: model.list)
+        .motion(value: model.errorText)
+        .modifier(ListTopBar(titleBar: titleBar) {
+            if let list = model.list { tabBar(in: list) }
+        })
         .onChange(of: tab) { _, tab in
             guard let list = model.list else { return }
             let keys = list.keys(in: tab, matching: query)
@@ -155,6 +156,30 @@ struct ReviewsView: View {
         } else {
             ContentUnavailableView(
                 Copy.selectMergeRequest, systemImage: "sidebar.left", description: Text(Copy.selectMergeRequestHint))
+        }
+    }
+}
+
+/// The tab switch over the top of the list, below the title bar. On macOS 26 the rows scroll under
+/// both, which blur them as they pass; before it, a strip with a line under it.
+private struct ListTopBar<Bar: View>: ViewModifier {
+    let titleBar: CGFloat
+    @ViewBuilder let bar: Bar
+
+    func body(content: Content) -> some View {
+        if #available(macOS 26, *) {
+            content
+                .safeAreaBar(edge: .top, spacing: 0) { bar.padding(.top, titleBar) }
+                .scrollEdgeEffectStyle(.soft, for: .top)
+        } else {
+            content.safeAreaInset(edge: .top, spacing: 0) {
+                VStack(spacing: 0) {
+                    bar
+                    Divider()
+                }
+                .padding(.top, titleBar)
+                .background(.bar)
+            }
         }
     }
 }
