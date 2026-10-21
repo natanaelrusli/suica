@@ -41,6 +41,11 @@ const codexEffort = (effort: ReviewEffort): string => (effort === "max" ? "xhigh
 
 /** Read-only tools only: the MR is untrusted, so no shell, no web, no edits. */
 const CLAUDE_TOOLS = ["Read", "Grep", "Glob", "Skill"] as const;
+/** An Agent Fix edits files in its checkout; still no shell, so no project code runs and nothing reaches the network. */
+const CLAUDE_FIX_TOOLS = ["Read", "Glob", "Grep", "Edit", "Write"] as const;
+
+/** review: read-only; fix: may edit files inside the working folder. */
+export type InvocationMode = "review" | "fix";
 
 /**
  * Claude Code: the skill and the user's plugins load as usual; tools are limited to reading,
@@ -55,7 +60,9 @@ export function buildInvocation(
   model?: string,
   /** Medium is enough for a review; higher levels cost much more time and tokens. */
   effort: ReviewEffort = "medium",
+  mode: InvocationMode = "review",
 ): Invocation {
+  const tools = mode === "fix" ? CLAUDE_FIX_TOOLS : CLAUDE_TOOLS;
   if (cli === "claude") {
     return {
       args: [
@@ -68,9 +75,9 @@ export function buildInvocation(
         "--effort",
         effort,
         "--tools",
-        ...CLAUDE_TOOLS,
+        ...tools,
         "--allowedTools",
-        ...CLAUDE_TOOLS,
+        ...tools,
         "--permission-mode",
         "dontAsk",
         "--strict-mcp-config",
@@ -82,7 +89,7 @@ export function buildInvocation(
     args: [
       "exec",
       "--sandbox",
-      "read-only",
+      mode === "fix" ? "workspace-write" : "read-only",
       "--skip-git-repo-check",
       "--ephemeral",
       "--json",

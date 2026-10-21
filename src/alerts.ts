@@ -19,6 +19,9 @@ export const ALERT_NAMES = [
   "alert.review-post-failed",
   "alert.review-failed",
   "alert.review-skipped",
+  "alert.fix-ready",
+  "alert.fix-failed",
+  "alert.fix-pushed",
 ] as const;
 export type AlertName = (typeof ALERT_NAMES)[number];
 export type AlertTemplates = Readonly<Record<AlertName, string>>;
@@ -38,6 +41,9 @@ export const ALERT_PLACEHOLDERS: Readonly<Record<AlertName, readonly string[]>> 
   "alert.review-post-failed": ["mr.title"],
   "alert.review-failed": ["mr.title", "review.reason"],
   "alert.review-skipped": ["mr.title", "review.reason"],
+  "alert.fix-ready": ["mr.title", "fix.threads"],
+  "alert.fix-failed": ["mr.title", "fix.reason"],
+  "alert.fix-pushed": ["mr.title"],
 };
 
 /** Today's texts, title and body on separate lines. */
@@ -56,6 +62,11 @@ export const DEFAULT_ALERTS: AlertTemplates = {
     "Review agen gagal diposting\n{{mr.title}}: periksa GitLab, lalu posting dari Suica.",
   "alert.review-failed": "Review agen gagal\n{{mr.title}}: {{review.reason}}",
   "alert.review-skipped": "Review agen dilewati\n{{mr.title}}: {{review.reason}}",
+  "alert.fix-ready":
+    "Perbaikan agen siap\n{{mr.title}}: {{fix.threads}} thread dijawab. Periksa di Suica, lalu push.",
+  "alert.fix-failed": "Perbaikan agen gagal\n{{mr.title}}: {{fix.reason}}",
+  "alert.fix-pushed":
+    "Perbaikan agen di-push\n{{mr.title}}: sebagian balasan gagal diposting. Kirim ulang dari Suica.",
 };
 
 export function isAlertName(value: string): value is AlertName {

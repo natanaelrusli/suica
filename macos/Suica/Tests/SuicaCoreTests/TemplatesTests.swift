@@ -52,7 +52,7 @@ actor FakeTemplatesClient: TemplatesClient {
                 "nudge", "reminder", "rereview", "notice.approved", "notice.changes", "notice.comments",
                 "notice.findings", "notice.refindings", "notice.reapproved",
             ])
-    #expect(document.templates.filter(\.isAlert).count == 11)
+    #expect(document.templates.filter(\.isAlert).count == 14)
     // Every template the agent lists has its own title and description in the window, and every
     // placeholder its help.
     for template in document.templates {

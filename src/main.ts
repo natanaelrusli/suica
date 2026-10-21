@@ -2,6 +2,7 @@ import { defaultConfigPath } from "./config.ts";
 import { tickEvery } from "./agent-review.ts";
 import { abortableSleep, runDaemon } from "./daemon.ts";
 import { readIdleSeconds } from "./idle.ts";
+import { cleanFixDirs } from "./fix-runner.ts";
 import { createLogger } from "./log.ts";
 import { createRuntime } from "./runtime.ts";
 
@@ -29,18 +30,27 @@ async function main(): Promise<void> {
     review_auto: config.review.auto,
     review_post: config.review.post,
     review_concurrency: config.review.concurrency,
+    fix_auto: config.fix.auto,
   });
   const interrupted = runtime.store.failInterruptedAgentReviews(Date.now());
   if (interrupted > 0) runtime.log.warn("agent reviews interrupted", { count: interrupted });
   const recovered = runtime.store.recoverStalePostings(Date.now());
   if (recovered > 0) runtime.log.warn("agent review posts interrupted", { count: recovered });
+  // This process is the only one that runs fixes: a fix still marked running was cut off.
+  for (const fix of runtime.store.fixes.interruptedRunning()) {
+    runtime.store.fixes.requeue(fix.id, Date.now());
+  }
+  const cleaned = cleanFixDirs(runtime.store, runtime.statePath);
+  if (cleaned > 0) runtime.log.info("agent fix checkouts removed", { count: cleaned });
   tickEvery(runtime.reviews, REVIEW_TICK_MS, controller.signal);
+  tickEvery(runtime.fixes, REVIEW_TICK_MS, controller.signal);
   try {
     await runDaemon({
       // A queued review starts right after the poll too, and runs beside the loop.
       poll: async () => {
         const status = await runtime.poll();
         runtime.reviews.tick();
+        runtime.fixes.tick();
         return status;
       },
       readIdleSeconds: () => readIdleSeconds(),
@@ -51,6 +61,7 @@ async function main(): Promise<void> {
     });
   } finally {
     await runtime.reviews.idle();
+    await runtime.fixes.idle();
     runtime.store.close();
   }
   runtime.log.info("daemon stopped", {

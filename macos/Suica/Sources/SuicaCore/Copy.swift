@@ -110,6 +110,9 @@ public enum Copy {
         case "alert.review-post-failed": "Agent Review not posted"
         case "alert.review-failed": "Agent Review failed"
         case "alert.review-skipped": "Agent Review skipped"
+        case "alert.fix-ready": "Agent Fix ready"
+        case "alert.fix-failed": "Agent Fix failed"
+        case "alert.fix-pushed": "Agent Fix pushed, replies missing"
         default: name
         }
     }
@@ -138,6 +141,9 @@ public enum Copy {
         case "alert.review-post-failed": "To you, when posting an Agent Review automatically failed."
         case "alert.review-failed": "To you, when an Agent Review run failed."
         case "alert.review-skipped": "To you, when an Agent Review run was skipped."
+        case "alert.fix-ready": "To you, when an Agent Fix for your MR waits for you to confirm and push."
+        case "alert.fix-failed": "To you, when an Agent Fix run failed."
+        case "alert.fix-pushed": "To you, when an Agent Fix was pushed but some replies could not be posted."
         default: ""
         }
     }
@@ -177,6 +183,8 @@ public enum Copy {
         case "alert.titles": "The first three titles, then how many more"
         case "reviewers.names": "The Reviewers waiting for a Re-review Nudge"
         case "review.reason": "Why the run failed or was skipped"
+        case "fix.threads": "How many threads the fix answers"
+        case "fix.reason": "Why the fix failed"
         default: name
         }
     }
@@ -666,6 +674,7 @@ public enum Copy {
     public static func purpose(_ raw: String) -> String {
         switch raw {
         case "review": "Agent reviews"
+        case "fix": "Agent fixes"
         case "reply": "Replies"
         case "other": "Other"
         default: DisplayText.clean(raw, max: 40)

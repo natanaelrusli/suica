@@ -67,7 +67,7 @@ const HISTORY_KINDS: readonly string[] = [
 ];
 
 /** What a language model run was for. Stored as text, so a later purpose needs no migration. */
-export type TokenPurpose = "review" | "reply" | "other";
+export type TokenPurpose = "review" | "fix" | "reply" | "other";
 
 /** One language model run, as the model reported it. */
 export interface TokenUsageEntry {

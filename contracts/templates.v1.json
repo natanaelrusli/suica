@@ -282,6 +282,30 @@
       "text": "Review agen dilewati\n{{mr.title}}: {{review.reason}}",
       "custom": false,
       "defaultText": "Review agen dilewati\n{{mr.title}}: {{review.reason}}"
+    },
+    {
+      "name": "alert.fix-ready",
+      "group": "alert",
+      "placeholders": ["mr.title", "fix.threads"],
+      "text": "Perbaikan agen siap\n{{mr.title}}: {{fix.threads}} thread dijawab. Periksa di Suica, lalu push.",
+      "custom": false,
+      "defaultText": "Perbaikan agen siap\n{{mr.title}}: {{fix.threads}} thread dijawab. Periksa di Suica, lalu push."
+    },
+    {
+      "name": "alert.fix-failed",
+      "group": "alert",
+      "placeholders": ["mr.title", "fix.reason"],
+      "text": "Perbaikan agen gagal\n{{mr.title}}: {{fix.reason}}",
+      "custom": false,
+      "defaultText": "Perbaikan agen gagal\n{{mr.title}}: {{fix.reason}}"
+    },
+    {
+      "name": "alert.fix-pushed",
+      "group": "alert",
+      "placeholders": ["mr.title"],
+      "text": "Perbaikan agen di-push\n{{mr.title}}: sebagian balasan gagal diposting. Kirim ulang dari Suica.",
+      "custom": false,
+      "defaultText": "Perbaikan agen di-push\n{{mr.title}}: sebagian balasan gagal diposting. Kirim ulang dari Suica."
     }
   ],
   "emoji": {

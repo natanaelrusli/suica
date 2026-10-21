@@ -19,6 +19,7 @@ import { createLogger } from "./log.ts";
 import type { Logger } from "./log.ts";
 import { loadAlerts } from "./alerts.ts";
 import { createNotifier } from "./notifier.ts";
+import { createFixWorker } from "./fix-runner.ts";
 import { fetchMrDetail } from "./reviews.ts";
 import { pollOnce } from "./poller.ts";
 import type { PollDeps, PollStatus } from "./poller.ts";
@@ -37,6 +38,10 @@ export interface Runtime {
   readonly teams: TeamsService | undefined;
   /** Runs queued Agent Reviews; only the daemon ticks it. */
   readonly reviews: ReviewWorker;
+  /** Runs queued Agent Fixes, one at a time; only the daemon ticks it. */
+  readonly fixes: ReviewWorker;
+  /** The state database's path; Agent Fix checkouts live beside it. */
+  readonly statePath: string;
   poll(): Promise<PollStatus>;
 }
 
@@ -50,7 +55,8 @@ function defaultTeamsCommand(): string {
 export function createRuntime(configPath: string, signal?: AbortSignal): Runtime {
   const log = createLogger();
   const config = loadConfig(configPath);
-  const store = openStore(config.statePath ?? defaultStatePath());
+  const statePath = config.statePath ?? defaultStatePath();
+  const store = openStore(statePath);
   const run = glabRunner(config.gitlab);
 
   // A bad template stops startup (TemplateError) instead of producing broken messages later.
@@ -91,6 +97,20 @@ export function createRuntime(configPath: string, signal?: AbortSignal): Runtime
     ...(signal === undefined ? {} : { signal }),
   });
 
+  const fixes = createFixWorker({
+    store,
+    config,
+    exec: defaultExec,
+    graphql: run,
+    rest: glabRest(config.gitlab),
+    notifier,
+    alerts,
+    log,
+    now: Date.now,
+    statePath,
+    ...(signal === undefined ? {} : { signal }),
+  });
+
   const deps: PollDeps = {
     fetchSnapshot: () => fetchSnapshot(run),
     lookupPerson: (username) => fetchPerson(glabRest(config.gitlab), username),
@@ -118,5 +138,5 @@ export function createRuntime(configPath: string, signal?: AbortSignal): Runtime
     now: Date.now,
     ...(teams === undefined ? {} : { teams }),
   };
-  return { config, store, log, teams, reviews, poll: () => pollOnce(deps) };
+  return { config, store, log, teams, reviews, fixes, statePath, poll: () => pollOnce(deps) };
 }
