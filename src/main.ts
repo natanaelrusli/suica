@@ -2,6 +2,7 @@ import { defaultConfigPath } from "./config.ts";
 import { tickEvery } from "./agent-review.ts";
 import { abortableSleep, runDaemon } from "./daemon.ts";
 import { readIdleSeconds } from "./idle.ts";
+import { recoverStaleConfirms } from "./fix-confirm.ts";
 import { cleanFixDirs } from "./fix-runner.ts";
 import { createLogger } from "./log.ts";
 import { createRuntime } from "./runtime.ts";
@@ -40,6 +41,8 @@ async function main(): Promise<void> {
   for (const fix of runtime.store.fixes.interruptedRunning()) {
     runtime.store.fixes.requeue(fix.id, Date.now());
   }
+  const stale = recoverStaleConfirms(runtime.store, Date.now());
+  if (stale > 0) runtime.log.warn("agent fix confirms interrupted", { count: stale });
   const cleaned = cleanFixDirs(runtime.store, runtime.statePath);
   if (cleaned > 0) runtime.log.info("agent fix checkouts removed", { count: cleaned });
   tickEvery(runtime.reviews, REVIEW_TICK_MS, controller.signal);
