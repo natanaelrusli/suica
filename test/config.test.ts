@@ -49,6 +49,8 @@ describe("parseConfig", () => {
         postAs: "comment",
         approve: true,
         approveWhen: "minor",
+        approveBy: "agent",
+        approveRules: [],
         skill: "madhani:madhani-code-review",
         effort: "medium",
         maxChangedLines: 800,
@@ -96,6 +98,19 @@ describe("parseConfig", () => {
       "clean",
     );
     expect(() => parseConfig(`${MINIMAL}review:\n  approveWhen: major\n`)).toThrow();
+  });
+
+  it("review.approveBy is agent by default, and approveRules a short list of lines", () => {
+    expect(parseConfig(MINIMAL).review.approveBy).toBe("agent");
+    expect(parseConfig(`${MINIMAL}review:\n  approveBy: rules\n`).review.approveBy).toBe("rules");
+    expect(() => parseConfig(`${MINIMAL}review:\n  approveBy: owner\n`)).toThrow();
+    expect(
+      parseConfig(`${MINIMAL}review:\n  approveRules:\n    - Accepted risks are fine\n`).review
+        .approveRules,
+    ).toEqual(["Accepted risks are fine"]);
+    expect(() =>
+      parseConfig(`${MINIMAL}review:\n  approveRules:\n    - ${"x".repeat(501)}\n`),
+    ).toThrow();
   });
 
   it("review.rereviewAfterMinutes defaults to 10", () => {

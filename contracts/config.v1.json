@@ -305,6 +305,23 @@
       "effective": "minor"
     },
     {
+      "path": ["review", "approveBy"],
+      "type": "enum",
+      "label": "Ready to approve decided by",
+      "help": "agent: a second model run reads the review and decides by Ready to approve when and your approval rules, and never approves when it fails; rules: the review's severity headings decide",
+      "options": ["agent", "rules"],
+      "value": null,
+      "effective": "agent"
+    },
+    {
+      "path": ["review", "approveRules"],
+      "type": "stringList",
+      "label": "Approval rules",
+      "help": "Your own rules for the agent that decides, one per line; they win over Ready to approve when. For example: A Major the Author documents as an accepted risk does not hold up approval",
+      "value": null,
+      "effective": []
+    },
+    {
       "path": ["review", "skill"],
       "type": "string",
       "label": "Review skill",

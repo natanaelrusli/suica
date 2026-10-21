@@ -22,6 +22,7 @@ function base(status: AgentReviewStatus, headSha: string | null, mrKey = "g/p!1"
     previousSha: null,
     descriptionSha: null,
     approved: false,
+    approval: null,
     body: null,
     detail: "",
     activity: [],

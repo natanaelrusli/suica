@@ -99,6 +99,7 @@ function row(overrides: Partial<AgentReviewRow> = {}): AgentReviewRow {
     previousSha: null,
     descriptionSha: null,
     approved: false,
+    approval: null,
     body: "# Review\n/close\nping @bob",
     detail: "",
     activity: [],
@@ -363,6 +364,9 @@ function harness(
     postFails?: boolean;
     approve?: boolean;
     approveWhen?: ApproveWhen;
+    /** The approval judge's answer; with it review.approveBy is agent, without it rules. */
+    judgeStdout?: string;
+    judgeFails?: boolean;
     home?: string;
     sshUrl?: string;
     /** The merge base GitLab names for a re-review; PREV (an ancestor) by default. */
@@ -372,6 +376,7 @@ function harness(
   } = {},
 ) {
   const calls: Call[] = [];
+  const judgeCalls: (readonly string[])[] = [];
   const notifications: Notification[] = [];
   const restPaths: string[] = [];
   const logs: string[] = [];
@@ -389,6 +394,11 @@ function harness(
       return { stdout: "", stderr: "" };
     }
     if (file === "git") return { stdout: `${SHA}\n`, stderr: "" };
+    if (args.includes("--tools") && args[args.indexOf("--tools") + 1] === "") {
+      judgeCalls.push(args);
+      if (options.judgeFails === true) throw Object.assign(new Error("x"), { code: 1 });
+      return { stdout: options.judgeStdout ?? "", stderr: "" };
+    }
     seenDiff = readFileSync(join(execOptions.cwd ?? "", "mr.diff"), "utf8");
     for (const name of ["previous-review.md", "since-last-review.diff"]) {
       const path = join(execOptions.cwd ?? "", name);
@@ -441,6 +451,11 @@ function harness(
       post: options.autoPost === true ? ("auto" as const) : ("approval" as const),
       approve: options.approve === true,
       approveWhen: options.approveWhen ?? ("minor" as const),
+      approveBy:
+        options.judgeStdout === undefined && options.judgeFails !== true
+          ? ("rules" as const)
+          : ("agent" as const),
+      approveRules: ["A Major the Author accepts as a risk does not hold it up"],
     },
   };
   const deps: ReviewDeps = {
@@ -528,6 +543,7 @@ function harness(
     posts,
     restPaths,
     logs,
+    judgeCalls,
     diff: () => seenDiff,
     file: (name: string) => seenFiles.get(name),
     prompt: () => calls.find((call) => call.file === "/bin/claude")?.args[1] ?? "",
@@ -776,6 +792,96 @@ describe("runAgentReview", () => {
     const d = off.queue();
     await runAgentReview(off.deps, d);
     expect(off.db.getAgentReview(d.id)?.status).toBe("ready");
+  });
+
+  /** A claude answer from the approval judge. */
+  const verdict = (approve: boolean, reason: string): string =>
+    JSON.stringify({
+      is_error: false,
+      result: `Looked at it.\n\n\`\`\`json\n${JSON.stringify({ approve, reason })}\n\`\`\``,
+      modelUsage: { m: { inputTokens: 40, outputTokens: 4 } },
+    });
+
+  it("lets the approval judge approve what the headings would hold up, with no tools at low effort", async () => {
+    const h = harness({
+      approve: true,
+      cliStdout: JSON.stringify({ is_error: false, result: OPEN_REREVIEW, modelUsage: {} }),
+      judgeStdout: verdict(true, "The open Major is an accepted risk."),
+    });
+    const queued = h.queue();
+    await runAgentReview(h.deps, queued);
+
+    expect(h.judgeCalls).toHaveLength(1);
+    const args = h.judgeCalls[0] ?? [];
+    expect(args).not.toContain("--allowedTools");
+    expect(args[args.indexOf("--effort") + 1]).toBe("low");
+    const prompt = args[1] ?? "";
+    expect(prompt).toContain("<review>\n# Re-review");
+    expect(prompt).toContain("- A Major the Author accepts as a risk does not hold it up");
+    expect(prompt).toContain("Only Minor and Nit problems may be left.");
+    expect(h.posts).toEqual([
+      "projects/g%2Fp/merge_requests/7/notes",
+      "projects/g%2Fp/merge_requests/7/approve",
+    ]);
+    expect(h.db.getAgentReview(queued.id)).toMatchObject({
+      status: "posted",
+      approved: true,
+      approval: { approve: true, reason: "The open Major is an accepted risk." },
+    });
+    expect(h.db.loadTokenUsage(0).map((entry) => entry.purpose)).toContain("approve");
+  });
+
+  it("keeps a review the judge holds up waiting, and says why once it is posted", async () => {
+    const minor = JSON.stringify({ is_error: false, result: MINOR_REVIEW, modelUsage: {} });
+    const h = harness({
+      approve: true,
+      cliStdout: minor,
+      judgeStdout: verdict(false, "A Minor touches auth."),
+    });
+    const queued = h.queue();
+    await runAgentReview(h.deps, queued);
+    expect(h.db.getAgentReview(queued.id)).toMatchObject({
+      status: "ready",
+      approval: { approve: false, reason: "A Minor touches auth." },
+    });
+    expect(h.posts).toEqual([]);
+
+    const { post, postJson } = h.deps;
+    if (post === undefined || postJson === undefined) throw new Error("no post runner");
+    expect(await postAgentReview({ ...h.deps, post, postJson }, queued.id)).toBe("posted");
+    expect(h.posts).toEqual(["projects/g%2Fp/merge_requests/7/notes"]);
+    expect(h.db.getAgentReview(queued.id)).toMatchObject({
+      status: "posted",
+      approved: false,
+      detail: "Not approved: A Minor touches auth.",
+    });
+  });
+
+  it("does not approve when the judge fails or gives no verdict", async () => {
+    const minor = JSON.stringify({ is_error: false, result: MINOR_REVIEW, modelUsage: {} });
+    const failed = harness({ approve: true, cliStdout: minor, judgeFails: true });
+    const a = failed.queue();
+    await runAgentReview(failed.deps, a);
+    expect(failed.db.getAgentReview(a.id)).toMatchObject({
+      status: "ready",
+      approval: { approve: false },
+    });
+    expect(failed.db.getAgentReview(a.id)?.approval?.reason).toMatch(
+      /^the agent that decides failed/,
+    );
+
+    const silent = harness({
+      approve: true,
+      cliStdout: minor,
+      judgeStdout: JSON.stringify({ is_error: false, result: "Approve it.", modelUsage: {} }),
+    });
+    const b = silent.queue();
+    await runAgentReview(silent.deps, b);
+    expect(silent.db.getAgentReview(b.id)).toMatchObject({
+      status: "ready",
+      approval: { approve: false, reason: "the agent that decides gave no verdict." },
+    });
+    expect(silent.posts).toEqual([]);
   });
 
   it("leaves a review whose automatic post failed waiting, with a note to check GitLab", async () => {

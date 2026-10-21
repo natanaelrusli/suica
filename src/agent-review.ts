@@ -1,4 +1,12 @@
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
@@ -10,6 +18,8 @@ import {
   rereviewWaiting,
 } from "./agent-rereview.ts";
 import type { RereviewWaitingJson } from "./agent-rereview.ts";
+import { approves, buildJudgePrompt, parseVerdict } from "./approval-judge.ts";
+import type { ApprovalVerdict } from "./approval-judge.ts";
 import type { Config } from "./config.ts";
 import { APPROVED, UNREVIEWED } from "./domain.ts";
 import type { Snapshot } from "./domain.ts";
@@ -21,12 +31,7 @@ import type { AlertName, AlertTemplates } from "./alerts.ts";
 import { clean, renderAlert } from "./format.ts";
 import { descriptionSha } from "./gitlab.ts";
 import type { GraphqlRunner, PostJsonRunner, PostRunner, RestRunner } from "./gitlab.ts";
-import {
-  extractFindings,
-  isReadyToApprove,
-  placeFinding,
-  summaryWithout,
-} from "./inline-review.ts";
+import { extractFindings, placeFinding, summaryWithout } from "./inline-review.ts";
 import type { Finding, ThreadPosition } from "./inline-review.ts";
 import type { Logger } from "./log.ts";
 import { detectModelClis, resolveModelCli } from "./model-cli.ts";
@@ -631,6 +636,10 @@ export async function runAgentReview(baseDeps: ReviewDeps, row: AgentReviewRow):
     if (result.tokens !== null) {
       store.recordTokenUsage({ at: deps.now(), purpose: "review", ...result.tokens });
     }
+    const approval =
+      deps.config.review.approveBy === "agent"
+        ? await judgeApproval(deps, row.id, cliId, path, result.body, workDir)
+        : undefined;
     const model = result.model ?? deps.config.review.model;
     const ready = store.transitionAgentReview(
       row.id,
@@ -641,6 +650,7 @@ export async function runAgentReview(baseDeps: ReviewDeps, row: AgentReviewRow):
         descriptionSha: descriptionHash,
         body: result.body,
         detail: "",
+        ...(approval === undefined ? {} : { approval }),
         ...(model === undefined ? {} : { model }),
         ...(rereview === undefined ? {} : { previousSha: rereview.previousSha }),
       },
@@ -663,7 +673,8 @@ export async function runAgentReview(baseDeps: ReviewDeps, row: AgentReviewRow):
     });
     // A review the agent approves goes out at once: there is nothing left to wait for.
     const approving =
-      deps.config.review.approve && isReadyToApprove(result.body, deps.config.review.approveWhen);
+      deps.config.review.approve &&
+      approves(result.body, approval ?? null, deps.config.review.approveWhen);
     if (
       (deps.config.review.post === "auto" || approving) &&
       deps.post !== undefined &&
@@ -730,6 +741,62 @@ export async function runAgentReview(baseDeps: ReviewDeps, row: AgentReviewRow):
     clearInterval(watch);
     if (workDir !== undefined) rmSync(workDir, { recursive: true, force: true });
   }
+}
+
+/** The judge reads only the review in its prompt, so a few minutes is plenty. */
+const JUDGE_TIMEOUT_MINUTES = 5;
+const NO_VERDICT: ApprovalVerdict = {
+  approve: false,
+  reason: "the agent that decides gave no verdict.",
+};
+
+/**
+ * Asks the model, without tools, whether the review leaves the MR ready to approve
+ * (`review.approveBy: agent`). Fails closed: a failed run or an answer without a verdict is a
+ * verdict of not approving. A shutdown is passed on, so the review runs again after the restart.
+ */
+async function judgeApproval(
+  deps: ReviewDeps,
+  id: number,
+  cli: Exclude<ModelCliId, "gemini">,
+  path: string,
+  body: string,
+  workDir: string,
+): Promise<ApprovalVerdict> {
+  const { store, config, log } = deps;
+  store.appendAgentReviewActivity(id, deps.now(), "Deciding whether it is ready to approve");
+  // A folder of its own: codex's last message file must not be the review's.
+  const judgeDir = join(workDir, "judge");
+  mkdirSync(judgeDir);
+  let verdict: ApprovalVerdict;
+  try {
+    const result = await runCli(
+      deps,
+      cli,
+      path,
+      buildJudgePrompt(body, config.review.approveWhen, config.review.approveRules),
+      judgeDir,
+      () => undefined,
+      {
+        model: config.review.model,
+        effort: "low",
+        timeoutMinutes: JUDGE_TIMEOUT_MINUTES,
+        mode: "judge",
+      },
+    );
+    if (result.tokens !== null) {
+      store.recordTokenUsage({ at: deps.now(), purpose: "approve", ...result.tokens });
+    }
+    verdict = parseVerdict(result.body) ?? NO_VERDICT;
+  } catch (error) {
+    if (deps.signal?.aborted === true) throw error;
+    verdict = {
+      approve: false,
+      reason: `the agent that decides failed (${error instanceof RunFailure ? error.message : "unknown error"}).`,
+    };
+  }
+  log.info("agent review approval judged", { id, approve: verdict.approve });
+  return verdict;
 }
 
 // MARK: - Queue, worker, post, discard
@@ -1021,8 +1088,9 @@ const APPROVAL_DETAIL: Record<Exclude<ApproveOutcome, "approved">, string> = {
 
 /**
  * With `review.approve`, approves the MR as the Owner at the reviewed commit once a review that is
- * ready to approve (by `review.approveWhen`) is posted, then resolves the Owner's own threads. A
- * refused approval is noted on the row, never retried.
+ * ready to approve (by the judge's verdict, else `review.approveWhen`) is posted, then resolves the
+ * Owner's own threads. A refused approval, or the judge's reason for holding it up, is noted on the
+ * row; an approval is never retried.
  */
 async function approveAfterPost(
   deps: Pick<ReviewDeps, "store" | "now" | "log" | "graphql"> & {
@@ -1032,12 +1100,17 @@ async function approveAfterPost(
   row: AgentReviewRow,
   detail: string,
 ): Promise<void> {
-  if (
-    !deps.config.review.approve ||
-    row.headSha === null ||
-    row.body === null ||
-    !isReadyToApprove(row.body, deps.config.review.approveWhen)
-  ) {
+  if (!deps.config.review.approve || row.headSha === null || row.body === null) return;
+  if (!approves(row.body, row.approval, deps.config.review.approveWhen)) {
+    if (row.approval !== null) {
+      deps.store.transitionAgentReview(
+        row.id,
+        ["posted"],
+        "posted",
+        { detail: [detail, `Not approved: ${row.approval.reason}`].filter(Boolean).join(" ") },
+        deps.now(),
+      );
+    }
     return;
   }
   // The note is already on GitLab: whatever the approval does, the row stays posted.

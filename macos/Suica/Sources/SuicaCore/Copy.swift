@@ -813,6 +813,7 @@ public enum Copy {
     public static func purpose(_ raw: String) -> String {
         switch raw {
         case "review": "Agent reviews"
+        case "approve": "Approval checks"
         case "fix": "Agent fixes"
         case "reply": "Replies"
         case "other": "Other"
