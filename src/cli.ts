@@ -33,10 +33,12 @@ import { RANKING_WINDOW, buildStats, localDayKey } from "./stats.ts";
 import { openStore } from "./store.ts";
 import { formatOutbox } from "./teams/format-outbox.ts";
 import { OUTBOX_STATUSES } from "./teams/types.ts";
+import { adaptersFor, collectOffice } from "./office/collect.ts";
+import { realProbe } from "./office/probe.ts";
 import { buildUsage } from "./usage.ts";
 
 const USAGE =
-  "usage: suica <once|status|state|stats|usage|pause|resume|pending [--all]|send <id> [--json]|skip <id> [--json]|retry <id> [--json]|selftest|reviews --json|mr <key> --json|mr approve <key> <sha> --json|review queue <key> --json|review post <id> [--inline|--comment] --json|review discard <id> --json|review cancel <id> --json|config show --json|config set --json|templates show --json|templates set --json|agent install|agent uninstall|agent restart --json>\n";
+  "usage: suica <once|status|state|stats|usage|office --json|pause|resume|pending [--all]|send <id> [--json]|skip <id> [--json]|retry <id> [--json]|selftest|reviews --json|mr <key> --json|mr approve <key> <sha> --json|review queue <key> --json|review post <id> [--inline|--comment] --json|review discard <id> --json|review cancel <id> --json|config show --json|config set --json|templates show --json|templates set --json|agent install|agent uninstall|agent restart --json>\n";
 const TEAMS_DISABLED = "teams is disabled: set teams.enabled to true in the config\n";
 const SHOWN_WITH_ALL = 50;
 
@@ -207,6 +209,14 @@ function usageJson(): number {
   } finally {
     store.close();
   }
+}
+
+/** `suica office --json`: the Coding Agents running on this Mac. Reads local files; no runtime. */
+function officeJson(): number {
+  const config = loadConfig(defaultConfigPath());
+  const document = collectOffice(adaptersFor(config.office), realProbe());
+  process.stdout.write(`${JSON.stringify(document)}\n`);
+  return 0;
 }
 
 /** `suica reviews --json` and `suica mr <key> --json`: no runtime. */
@@ -424,6 +434,7 @@ async function main(argv: readonly string[]): Promise<number> {
     process.stderr.write(USAGE);
     return 2;
   }
+  if (command === "office" && argv.includes("--json")) return officeJson();
   if (command === "reviews" && argv.includes("--json")) return reviewsJson();
   if (command === "review" && argv.includes("--json")) return reviewCommand(argv);
   if (command === "mr" && argv[1] === "approve" && argv.includes("--json")) {
