@@ -208,20 +208,38 @@ function openPreviousItems(markdown: string): string[] {
   return open;
 }
 
-/** Severities that do not hold up an approval. */
-const MINOR_SEVERITIES = new Set(["Minor", "Nit"]);
-const MINOR_WORD = /\b(?:minor|nit)\b/i;
-const SERIOUS_WORD = /\b(?:blocker|critical|major)\b/i;
+/** How strict automatic approval is (`review.approveWhen`), from the most lenient. */
+export const APPROVE_WHEN = ["minor", "nit", "clean"] as const;
+export type ApproveWhen = (typeof APPROVE_WHEN)[number];
+
+/** Per `ApproveWhen`, the severities that do not hold up an approval. */
+const LEFT_ALLOWED: Record<ApproveWhen, ReadonlySet<string>> = {
+  minor: new Set(["Minor", "Nit"]),
+  nit: new Set(["Nit"]),
+  clean: new Set(),
+};
+const SEVERITY_WORD = /\b(?:blocker|critical|major|minor|nit)\b/gi;
+
+/** True when the text names a severity, and every severity it names is allowed. */
+function namesOnly(text: string, allowed: ReadonlySet<string>): boolean {
+  const named = text.match(SEVERITY_WORD) ?? [];
+  return (
+    named.length > 0 &&
+    named.every((word) => allowed.has(word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()))
+  );
+}
 
 /**
- * True when only minor problems are left: every finding is under a Minor or Nit subheading, and
- * every open item of the Previous section names Minor or Nit and nothing more serious. A finding
- * or open item without a severity counts as serious, since the wording is a model's.
+ * True when only what `when` lets through is left. `minor` (the default): every finding is under
+ * a Minor or Nit subheading, and every open item of the Previous section names Minor or Nit and
+ * nothing more serious. `nit`: the same with Nit only. `clean`: no finding and no open item. A
+ * finding or open item without a severity counts as serious, since the wording is a model's.
  */
-export function isReadyToApprove(markdown: string): boolean {
+export function isReadyToApprove(markdown: string, when: ApproveWhen = "minor"): boolean {
+  const allowed = LEFT_ALLOWED[when];
   return (
-    countFindings(markdown).every((each) => MINOR_SEVERITIES.has(each.severity)) &&
-    openPreviousItems(markdown).every((text) => MINOR_WORD.test(text) && !SERIOUS_WORD.test(text))
+    countFindings(markdown).every((each) => allowed.has(each.severity)) &&
+    openPreviousItems(markdown).every((text) => namesOnly(text, allowed))
   );
 }
 

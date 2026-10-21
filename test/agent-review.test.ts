@@ -25,6 +25,7 @@ import { FetchFailure, descriptionSha } from "../src/gitlab.ts";
 import type { GraphqlRunner } from "../src/gitlab.ts";
 import type { Notification } from "../src/format.ts";
 import { createLogger } from "../src/log.ts";
+import type { ApproveWhen } from "../src/inline-review.ts";
 import type { DetectedCli } from "../src/model-cli.ts";
 import type { MergeRequest } from "../src/domain.ts";
 import type { MrDetailJson } from "../src/reviews.ts";
@@ -361,6 +362,7 @@ function harness(
     autoPost?: boolean;
     postFails?: boolean;
     approve?: boolean;
+    approveWhen?: ApproveWhen;
     home?: string;
     sshUrl?: string;
     /** The merge base GitLab names for a re-review; PREV (an ancestor) by default. */
@@ -438,6 +440,7 @@ function harness(
       ...CONFIG.review,
       post: options.autoPost === true ? ("auto" as const) : ("approval" as const),
       approve: options.approve === true,
+      approveWhen: options.approveWhen ?? ("minor" as const),
     },
   };
   const deps: ReviewDeps = {
@@ -740,6 +743,39 @@ describe("runAgentReview", () => {
     expect(h.notifications.map((n) => n.body)).toEqual([
       "Add thing: sudah diposting ke GitLab dan MR di-approve.",
     ]);
+  });
+
+  it("posts and approves a review that is ready to approve at once, even with review.post approval", async () => {
+    const minor = JSON.stringify({ is_error: false, result: MINOR_REVIEW, modelUsage: {} });
+    const h = harness({ approve: true, cliStdout: minor });
+    const queued = h.queue();
+    await runAgentReview(h.deps, queued);
+    expect(h.posts).toEqual([
+      "projects/g%2Fp/merge_requests/7/notes",
+      "projects/g%2Fp/merge_requests/7/approve",
+    ]);
+    expect(h.db.getAgentReview(queued.id)).toMatchObject({ status: "posted", approved: true });
+    expect(h.notifications.map((n) => n.title)).toEqual(["Review agen diposting"]);
+
+    const major = harness({
+      approve: true,
+      cliStdout: JSON.stringify({ is_error: false, result: MAJOR_REVIEW, modelUsage: {} }),
+    });
+    const b = major.queue();
+    await runAgentReview(major.deps, b);
+    expect(major.db.getAgentReview(b.id)?.status).toBe("ready");
+    expect(major.posts).toEqual([]);
+
+    const strict = harness({ approve: true, approveWhen: "clean", cliStdout: minor });
+    const c = strict.queue();
+    await runAgentReview(strict.deps, c);
+    expect(strict.db.getAgentReview(c.id)?.status).toBe("ready");
+    expect(strict.posts).toEqual([]);
+
+    const off = harness({ cliStdout: minor });
+    const d = off.queue();
+    await runAgentReview(off.deps, d);
+    expect(off.db.getAgentReview(d.id)?.status).toBe("ready");
   });
 
   it("leaves a review whose automatic post failed waiting, with a note to check GitLab", async () => {
@@ -1613,6 +1649,16 @@ describe("postAgentReview and discardAgentReview", () => {
         refused.id,
       );
       expect(untouched.resolved).toEqual([]);
+    });
+
+    it("does not approve a Minor finding with review.approveWhen nit", async () => {
+      const { h, id } = await readyWith(MINOR_REVIEW, false);
+      const nit = parseConfig(
+        "gitlab:\n  hostname: gitlab.example\nreview:\n  approve: true\n  approveWhen: nit\n",
+      );
+      const { deps, approvals } = approvingDeps(h, { config: nit });
+      expect(await postAgentReview(deps, id)).toBe("posted");
+      expect(approvals).toEqual([]);
     });
 
     it("approves a first review with only Minor or Nit findings", async () => {

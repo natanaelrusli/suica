@@ -4,7 +4,7 @@ import { UNREVIEWED } from "./domain.ts";
 import type { MergeRequest, Person, Reviewer, Snapshot } from "./domain.ts";
 import { FetchFailure } from "./gitlab.ts";
 import type { GraphqlRunner, PostRunner, RestRunner } from "./gitlab.ts";
-import { isReadyToApprove } from "./inline-review.ts";
+import { type ApproveWhen, isReadyToApprove } from "./inline-review.ts";
 import type { Logger } from "./log.ts";
 import type { FixRow, FixStatus } from "./fix-store.ts";
 import type { ActivityLine, AgentReviewRow, AgentReviewStatus } from "./store.ts";
@@ -107,8 +107,9 @@ export interface ReviewSummaryJson {
    */
   readonly changedSinceReview: ChangedSinceReviewJson | null;
   /**
-   * True when the newest posted Agent Review has only Minor or Nit problems left, the MR has not
-   * changed since, no newer review is open, and neither the Owner nor the agent approved it yet.
+   * True when the newest posted Agent Review is ready to approve by `review.approveWhen` (by
+   * default only Minor or Nit problems left), the MR has not changed since, no newer review is
+   * open, and neither the Owner nor the agent approved it yet.
    */
   readonly readyToApprove: boolean;
   /**
@@ -200,12 +201,13 @@ export function readyToApprove(
   me: Person,
   latest: AgentReviewRow | undefined,
   base: AgentReviewRow | undefined,
+  approveWhen: ApproveWhen = "minor",
 ): boolean {
   if (base?.status !== "posted" || base.body === null || base.approved) return false;
   if (latest !== undefined && OPEN_STATUSES.includes(latest.status)) return false;
   if (base.headSha !== mr.headSha || changedSinceReview(mr, latest, base) !== null) return false;
   const mine = mr.reviewers.find((each) => each.username === me.username);
-  return mine?.state !== "APPROVED" && isReadyToApprove(base.body);
+  return mine?.state !== "APPROVED" && isReadyToApprove(base.body, approveWhen);
 }
 
 export function buildReviewList(
@@ -214,6 +216,7 @@ export function buildReviewList(
   bases: ReadonlyMap<string, AgentReviewRow> = new Map(),
   rereviewWaiting: ReadonlyMap<string, RereviewWaitingJson> = new Map(),
   fixes: ReadonlyMap<string, FixRow> = new Map(),
+  approveWhen: ApproveWhen = "minor",
 ): ReviewListJson {
   return {
     version: 1,
@@ -257,7 +260,7 @@ export function buildReviewList(
         agentReview: latest === undefined ? null : toAgentReviewJson(latest),
         // Once you approved, a change is yours to look at; the list stops offering a re-review.
         changedSinceReview: approvedByMe ? null : changedSinceReview(mr, latest, bases.get(mr.key)),
-        readyToApprove: readyToApprove(mr, snapshot.me, latest, bases.get(mr.key)),
+        readyToApprove: readyToApprove(mr, snapshot.me, latest, bases.get(mr.key), approveWhen),
         rereviewWaiting: rereviewWaiting.get(mr.key) ?? null,
       };
     }),

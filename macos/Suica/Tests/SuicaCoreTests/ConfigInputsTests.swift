@@ -40,6 +40,7 @@ import Testing
     #expect(Copy.configSection(["teams", "workingHours", "start"]) == "Working hours")
     #expect(Copy.configSection(["review", "effort"]) == "Skill and model")
     #expect(Copy.configSection(["review", "concurrency"]) == "Limits")
+    #expect(Copy.configSection(["review", "approveWhen"]) == "Automation")
     #expect(Copy.configSection(["gitlab", "hostname"]) == nil)
     #expect(Copy.configSection(["statePath"]) == nil)
 }

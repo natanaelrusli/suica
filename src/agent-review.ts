@@ -661,8 +661,11 @@ export async function runAgentReview(baseDeps: ReviewDeps, row: AgentReviewRow):
         ? {}
         : { input_tokens: result.tokens.inputTokens, output_tokens: result.tokens.outputTokens }),
     });
+    // A review the agent approves goes out at once: there is nothing left to wait for.
+    const approving =
+      deps.config.review.approve && isReadyToApprove(result.body, deps.config.review.approveWhen);
     if (
-      deps.config.review.post === "auto" &&
+      (deps.config.review.post === "auto" || approving) &&
       deps.post !== undefined &&
       deps.postJson !== undefined
     ) {
@@ -1018,7 +1021,7 @@ const APPROVAL_DETAIL: Record<Exclude<ApproveOutcome, "approved">, string> = {
 
 /**
  * With `review.approve`, approves the MR as the Owner at the reviewed commit once a review that is
- * ready to approve (only Minor or Nit left) is posted, then resolves the Owner's own threads. A
+ * ready to approve (by `review.approveWhen`) is posted, then resolves the Owner's own threads. A
  * refused approval is noted on the row, never retried.
  */
 async function approveAfterPost(
@@ -1033,7 +1036,7 @@ async function approveAfterPost(
     !deps.config.review.approve ||
     row.headSha === null ||
     row.body === null ||
-    !isReadyToApprove(row.body)
+    !isReadyToApprove(row.body, deps.config.review.approveWhen)
   ) {
     return;
   }

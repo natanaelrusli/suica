@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { parse } from "yaml";
 import { z } from "zod";
+import { APPROVE_WHEN } from "./inline-review.ts";
 import { MODEL_CLI_CHOICES } from "./model-cli.ts";
 import { BUILT_IN_AGENTS, parseCustomAgent } from "./office/generic.ts";
 import { REVIEW_EFFORTS } from "./review-runner.ts";
@@ -94,9 +95,13 @@ export const configSchema = z
         post: z.enum(["approval", "auto"]).default("approval"),
         // comment: one MR note; inline: findings on a line of the diff become threads there.
         postAs: z.enum(["comment", "inline"]).default("comment"),
-        // Approve the MR as the Owner once a review that is ready to approve is posted. Off: the
-        // Owner approves with one click in the app.
+        // Approve the MR as the Owner once a review that is ready to approve is posted; such a
+        // review is posted at once, even with post: approval. Off: the Owner approves with one
+        // click in the app.
         approve: z.boolean().default(true),
+        // What may be left for a review to be ready to approve: minor (Minor or Nit findings),
+        // nit (Nit findings only) or clean (no findings).
+        approveWhen: z.enum(APPROVE_WHEN).default("minor"),
         // A skill name only, as typed after the slash: it ends up in a prompt and a file path.
         skill: z
           .string()

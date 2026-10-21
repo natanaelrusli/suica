@@ -365,7 +365,7 @@ public enum Copy {
     }
     public static let agentRereviewLabel = "Re-review"
     public static let rereviewNow = "Re-review"
-    public static let readyToApprove = "Ready to approve: only minor findings left"
+    public static let readyToApprove = "Ready to approve: nothing serious left"
     /// The list's badge for an MR that changed since the agent's posted review.
     public static func changedSinceReview(_ change: ChangedSinceReview) -> String {
         switch (change.code, change.description) {
@@ -631,6 +631,9 @@ public enum Copy {
         case (_, "dry-run"): "Dry run"
         case ("review.post", "approval"): postWait
         case ("review.post", "auto"): postAuto
+        case ("review.approveWhen", "minor"): "Minor or Nit left"
+        case ("review.approveWhen", "nit"): "Only Nit left"
+        case ("review.approveWhen", "clean"): "No findings"
         case (_, "approval"): "Ask me first"
         case (_, "auto") where key == "model.cli": "Auto"
         case (_, "auto"): "Send automatically"
@@ -648,6 +651,9 @@ public enum Copy {
         switch (key, option) {
         case ("review.post", "approval"): "A ready review waits in the app until you post it."
         case ("review.post", "auto"): "A ready review is posted to GitLab as you at once."
+        case ("review.approveWhen", "minor"): "Approved when every finding left is Minor or Nit."
+        case ("review.approveWhen", "nit"): "Approved when every finding left is a Nit."
+        case ("review.approveWhen", "clean"): "Approved only when the review found nothing."
         case (_, "comment"): "The whole review is one comment on the MR."
         case (_, "inline"): "Findings on a line of the diff become threads there; the rest is one comment."
         case (_, "dry-run"): "Written to the log and never sent."
@@ -711,7 +717,7 @@ public enum Copy {
             ("teams", "maxMessagesPerReviewer"):
             return "Timing and limits"
         case ("teams", _): return "People and wording"
-        case ("review", "auto"), ("review", "approve"): return "Automation"
+        case ("review", "auto"), ("review", "approve"), ("review", "approveWhen"): return "Automation"
         case ("review", "post"), ("review", "postAs"): return "Posting"
         case ("review", "skill"), ("review", "model"), ("review", "effort"): return "Skill and model"
         case ("review", _): return "Limits"
@@ -893,7 +899,7 @@ public enum Copy {
     public static let logFolderUnknown = "The logs folder is not known until the agent's status loads."
     public static let editConfig = "Edit config"
     public static let readyToApproveShort = "Ready to approve"
-    public static let readyToApproveCaption = "Only minor findings left"
+    public static let readyToApproveCaption = "Nothing serious left"
     public static let tokensToday = "Tokens today"
     public static let waitingForReviewHeading = "Waiting for your review"
     public static let agentReviewShort = "Agent review"
