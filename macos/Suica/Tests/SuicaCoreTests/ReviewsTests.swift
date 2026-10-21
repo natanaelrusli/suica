@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import Testing
 
 @testable import SuicaCore
@@ -599,4 +600,24 @@ private func tabbedList(me: Bool = true) throws -> ReviewListDocument {
     let list = try tabbedList(me: false)
     #expect(list.tabs == [.yours, .group(.all)])
     #expect(list.keys(in: .group(.all)) == ["g/p!1", "g/p!2", "g/p!3"])
+}
+
+@MainActor @Test func aRefreshThatChangesNothingDoesNotRedrawTheListOrTheMR() async throws {
+    let client = FakeReviewsClient(lists: [.success(list("g/p!1", "g/p!2"))])
+    await client.setDetail("g/p!1", .success(try detail("g/p!1")))
+    let model = ReviewsModel(client: client)
+    await model.refresh()
+    let redrawn = Mutex(false)
+    withObservationTracking {
+        _ = model.list
+        _ = model.details
+        _ = model.detailErrors
+        _ = model.errorText
+        _ = model.selectedKey
+    } onChange: {
+        redrawn.withLock { $0 = true }
+    }
+    await model.refresh()
+    #expect(!redrawn.withLock { $0 })
+    #expect(await client.detailCalls == ["g/p!1", "g/p!1"])
 }
