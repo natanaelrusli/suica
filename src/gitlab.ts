@@ -33,7 +33,11 @@ export type GraphqlRunner = (
 const PAGE_SIZE = 100;
 const NOTES_WINDOW = 50;
 
-export const SNAPSHOT_QUERY = `
+const NOTES_FIELD = `  notes(last: ${NOTES_WINDOW}) { nodes { id system author { username name } } }\n`;
+
+/** Notes are the costly part for GitLab; only the poller reads them. */
+function snapshotQuery(notes: boolean): string {
+  return `
 query MrReviewAssistantSnapshot {
   currentUser {
     username
@@ -59,9 +63,11 @@ fragment MrFields on MergeRequest {
   project { fullPath }
   author { username name }
   reviewers { nodes { username name mergeRequestInteraction { reviewState } } }
-  notes(last: ${NOTES_WINDOW}) { nodes { id system author { username name } } }
-}
+${notes ? NOTES_FIELD : ""}}
 `;
+}
+
+export const SNAPSHOT_QUERY = snapshotQuery(true);
 
 const GHOST: Person = { username: "ghost", name: "(unknown user)" };
 
@@ -309,6 +315,10 @@ export async function fetchCurrentUsername(rest: RestRunner): Promise<string> {
   return user.data.username;
 }
 
-export async function fetchSnapshot(run: GraphqlRunner): Promise<Snapshot> {
-  return parseSnapshot(await run(SNAPSHOT_QUERY));
+/** `notes: false` leaves every MR's notes empty, for readers that do not look at them. */
+export async function fetchSnapshot(
+  run: GraphqlRunner,
+  { notes = true }: { readonly notes?: boolean } = {},
+): Promise<Snapshot> {
+  return parseSnapshot(await run(notes ? SNAPSHOT_QUERY : snapshotQuery(false)));
 }
