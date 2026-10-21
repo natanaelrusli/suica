@@ -24,12 +24,13 @@ enum Motion {
     }
 
     /// A section coming in: fades in while rising a little. The outgoing one fades out quickly,
-    /// so the two pages barely overlap.
+    /// so the two pages barely overlap. No scale: it resized the page's AppKit views (lists, search
+    /// fields, buttons) on every frame, which doubled the cost of the animation on Reviews.
     static func page(_ level: MotionLevel) -> AnyTransition {
         switch level {
         case .full:
             .asymmetric(
-                insertion: .opacity.combined(with: .offset(y: 10)).combined(with: .scale(scale: 0.99)),
+                insertion: .opacity.combined(with: .offset(y: 10)),
                 removal: .opacity.animation(.easeOut(duration: 0.1)))
         case .reduced: .opacity
         case .off: .identity
