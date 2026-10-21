@@ -250,6 +250,21 @@ describe("isReadyToApprove", () => {
     expect(isReadyToApprove(body(["- `a.ts:1` the guard — not fixed."], ["None."]))).toBe(false);
     expect(isReadyToApprove(body(["- Major `a.ts:1` the guard — fixed."], ["None."]))).toBe(true);
   });
+
+  it("is stricter with nit (Nit findings only) and clean (nothing left)", () => {
+    const nit = body([], ["### Nit", "1. `a.ts:1` spacing"]);
+    const minor = body([], ["### Minor", "1. `a.ts:1` naming"]);
+    const none = body(["- Major `a.ts:1` the guard — fixed."], ["None."]);
+    expect(isReadyToApprove(nit, "nit")).toBe(true);
+    expect(isReadyToApprove(minor, "nit")).toBe(false);
+    expect(isReadyToApprove(nit, "clean")).toBe(false);
+    expect(isReadyToApprove(none, "nit")).toBe(true);
+    expect(isReadyToApprove(none, "clean")).toBe(true);
+    const nitOpen = body(["- Nit `b.ts:2` — not fixed."], ["None."]);
+    expect(isReadyToApprove(nitOpen, "nit")).toBe(true);
+    expect(isReadyToApprove(body(["- Minor `a.ts:1` — not fixed."], ["None."]), "nit")).toBe(false);
+    expect(isReadyToApprove(nitOpen, "clean")).toBe(false);
+  });
 });
 
 describe("diffLines", () => {

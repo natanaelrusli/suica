@@ -473,7 +473,7 @@ private func withAgent(_ status: String?) -> ReviewListDocument {
         {"key": "g/p!2", "title": "t", "url": "https://x", "draft": false, "author": {"username": "a", "name": "A"}, "reviewers": []}
         """.utf8)
     #expect(try JSONDecoder().decode(ReviewSummary.self, from: older).readyToApprove == false)
-    #expect(Copy.readyToApprove == "Ready to approve: only minor findings left")
+    #expect(Copy.readyToApprove == "Ready to approve: nothing serious left")
 }
 
 @Test func aRereviewIsLabelled() {

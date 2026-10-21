@@ -275,6 +275,13 @@ describe("readyToApprove", () => {
     expect(readyToApprove(current(), ME_, discarded, discarded)).toBe(false);
   });
 
+  it("follows review.approveWhen: a Minor finding is not ready under nit or clean", () => {
+    expect(readyToApprove(current(), ME_, posted(), posted(), "nit")).toBe(false);
+    expect(readyToApprove(current(), ME_, posted(), posted(), "clean")).toBe(false);
+    const clean = posted({ body: "## Findings\nNone." });
+    expect(readyToApprove(current(), ME_, clean, clean, "clean")).toBe(true);
+  });
+
   it("still holds when a later run failed without reviewing anything new", () => {
     expect(
       readyToApprove(current(), ME_, posted({ id: 5, status: "failed", body: null }), posted()),

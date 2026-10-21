@@ -1,3 +1,4 @@
+import { APPROVE_WHEN } from "./inline-review.ts";
 import { MODEL_CLI_CHOICES } from "./model-cli.ts";
 import { REVIEW_EFFORTS } from "./review-runner.ts";
 
@@ -227,13 +228,13 @@ export const CONFIG_FIELDS: readonly ConfigField[] = [
     path: ["review", "auto"],
     type: "bool",
     label: "Review automatically",
-    help: "Review every MR waiting for you that the agent has not reviewed yet, oldest first, and again after a new Review Request; reviews wait in the app until you post them",
+    help: "Review every MR waiting for you that the agent has not reviewed yet, oldest first, and again after a new Review Request; reviews wait in the app until you post them, apart from one the agent approves (review.approve)",
   },
   {
     path: ["review", "post"],
     type: "enum",
     label: "Posting",
-    help: "approval: a ready review waits until you post it; auto: it is posted to GitLab as you as soon as it is ready",
+    help: "approval: a ready review waits until you post it, unless the agent approves it (review.approve); auto: it is posted to GitLab as you as soon as it is ready",
     options: ["approval", "auto"],
   },
   {
@@ -247,7 +248,14 @@ export const CONFIG_FIELDS: readonly ConfigField[] = [
     path: ["review", "approve"],
     type: "bool",
     label: "Approve automatically when ready",
-    help: "Approve the MR as you at the reviewed commit, and resolve your threads, once a posted Agent Review leaves only Minor or Nit findings. Off: approve with one click in the app",
+    help: "Approve the MR as you at the reviewed commit, and resolve your threads, once an Agent Review is ready to approve (review.approveWhen). Such a review is posted at once, even with Posting set to approval. Off: approve with one click in the app",
+  },
+  {
+    path: ["review", "approveWhen"],
+    type: "enum",
+    label: "Ready to approve when",
+    help: "What a review may leave and still be ready to approve: minor (only Minor or Nit findings), nit (only Nit findings) or clean (no findings). Open items of a re-review's Previous review section count the same way",
+    options: APPROVE_WHEN,
   },
   {
     path: ["review", "skill"],

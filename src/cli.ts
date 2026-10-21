@@ -254,6 +254,7 @@ async function reviewsJson(): Promise<number> {
       store.rereviewBases(),
       rereviewWaitingReasons(store, config, snapshot, Date.now()),
       store.fixes.latestByMr(),
+      config.review.approveWhen,
     );
     process.stdout.write(`${JSON.stringify(document)}\n`);
     return 0;

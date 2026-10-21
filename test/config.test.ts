@@ -48,6 +48,7 @@ describe("parseConfig", () => {
         post: "approval",
         postAs: "comment",
         approve: true,
+        approveWhen: "minor",
         skill: "madhani:madhani-code-review",
         effort: "medium",
         maxChangedLines: 800,
@@ -87,6 +88,14 @@ describe("parseConfig", () => {
   it("review.approve is on by default, and can be turned off", () => {
     expect(parseConfig(MINIMAL).review.approve).toBe(true);
     expect(parseConfig(`${MINIMAL}review:\n  approve: false\n`).review.approve).toBe(false);
+  });
+
+  it("review.approveWhen is minor by default, and takes nit or clean only", () => {
+    expect(parseConfig(MINIMAL).review.approveWhen).toBe("minor");
+    expect(parseConfig(`${MINIMAL}review:\n  approveWhen: clean\n`).review.approveWhen).toBe(
+      "clean",
+    );
+    expect(() => parseConfig(`${MINIMAL}review:\n  approveWhen: major\n`)).toThrow();
   });
 
   it("review.rereviewAfterMinutes defaults to 10", () => {
