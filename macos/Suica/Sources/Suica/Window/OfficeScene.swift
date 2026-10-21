@@ -156,6 +156,17 @@ private func disc(_ context: CGContext, radius: CGFloat, centre: NSColor, rim: N
         rim: NSColor(red: 0.84, green: 0.87, blue: 0.95, alpha: 1))
 }
 
+/// The haze round a lit street lamp. It writes no depth, so its clear rim hides nothing behind it.
+@MainActor private let lampHalo: UnlitMaterial = {
+    var card = skyCard { context, half in
+        radialFill(
+            context, radius: half, NSColor(red: 1, green: 0.82, blue: 0.5, alpha: 1),
+            [(0, 0.9), (0.1, 0.75), (0.25, 0.32), (0.5, 0.1), (0.75, 0.03), (1, 0)])
+    }
+    card.writesDepth = false
+    return card
+}()
+
 private func nsColour(_ colour: OfficeColour) -> NSColor {
     NSColor(red: colour.red, green: colour.green, blue: colour.blue, alpha: 1)
 }
@@ -209,6 +220,11 @@ final class OfficeSceneController {
     private let sun = ModelEntity(mesh: .generatePlane(width: 10, height: 10), materials: [])
     /// The sun's rays, behind its face; hidden at night.
     private let rays = ModelEntity(mesh: .generatePlane(width: 10, height: 10), materials: [sunRays])
+    /// The sun by day, a dimmer moon by night, so the street lamps' light shows on the ground.
+    private let key = DirectionalLight()
+    private let fill = DirectionalLight()
+    /// The haze round each lit street lamp, turned to face the camera like the sun.
+    private var halos: [Entity] = []
     private var rooms: [String: RoomNode] = [:]
     private var desks: [String: DeskNode] = [:]
     private var street: OfficeStreet?
@@ -243,12 +259,10 @@ final class OfficeSceneController {
         root.addChild(sun)
         rays.position.z = -0.2
         sun.addChild(rays)
-        let key = DirectionalLight()
         key.light.intensity = 3_800
         // Soft shadows under the desks, figures and furniture give the floor plan its depth.
         key.shadow = DirectionalLightComponent.Shadow(maximumDistance: 60, depthBias: 3)
         key.look(at: .zero, from: [-4, 8, 6], relativeTo: nil)
-        let fill = DirectionalLight()
         fill.light.intensity = 1_500
         fill.look(at: .zero, from: [6, 5, 3], relativeTo: nil)
         root.addChild(key)
@@ -289,6 +303,12 @@ final class OfficeSceneController {
         let eye = Self.eye(yaw: yaw, pitch: pitch, distance: max(3, fitDistance * zoom))
         camera.look(at: focus, from: focus + eye, relativeTo: nil)
         placeSun()
+        faceHalos()
+    }
+
+    private func faceHalos() {
+        let facing = camera.orientation(relativeTo: nil)
+        for halo in halos { halo.setOrientation(facing, relativeTo: nil) }
     }
 
     /// In the top right of the sky of the default view, behind the whole scene, its glow clear of
@@ -390,6 +410,7 @@ final class OfficeSceneController {
             root.addChild(entity)
             self.street = street
             streetEntity = entity
+            faceHalos()
             moveTravellers()
         }
 
@@ -874,16 +895,36 @@ final class OfficeSceneController {
         x = -length / 2 + 2
         step = 0
         let metal = NSColor(white: 0.3, alpha: 1)
+        // At night the lamps are lit: a real light over the road and the pavement, so the ground,
+        // the trees and the travellers passing under it take its warm colour, and a haze round it.
+        var lens = UnlitMaterial(applyPostProcessToneMap: !dark)
+        lens.color = .init(tint: palette.lampGlow)
+        halos = []
         while x < length / 2 - 1 {
             if step.truncatingRemainder(dividingBy: 2) == 0 {
                 tree(at: [x, 0, edge], size: 1)
             } else {
                 entity.addChild(box([0.08, 2.6, 0.08], metal, at: [x, 1.3, edge]))
                 entity.addChild(box([0.08, 0.06, 0.6], metal, at: [x, 2.6, edge - 0.27]))
-                let lamp = ModelEntity(
-                    mesh: .generateBox(size: [0.24, 0.1, 0.3]), materials: [UnlitMaterial(color: palette.lampGlow)])
-                lamp.position = [x, 2.55, edge - 0.55]
-                entity.addChild(lamp)
+                entity.addChild(box([0.26, 0.08, 0.32], metal, at: [x, 2.58, edge - 0.55]))
+                let bulb = SIMD3<Float>(x, 2.53, edge - 0.55)
+                let glass = ModelEntity(mesh: .generateBox(size: [0.22, 0.02, 0.28]), materials: [lens])
+                glass.position = bulb
+                entity.addChild(glass)
+                if dark {
+                    let light = SpotLight()
+                    light.light = SpotLightComponent(
+                        color: palette.lampGlow, intensity: 600_000, innerAngleInDegrees: 45,
+                        outerAngleInDegrees: 110, attenuationRadius: 12)
+                    light.shadow = SpotLightComponent.Shadow()
+                    // Down and a little out over the road.
+                    light.look(at: bulb + [0, -2.5, -0.6], from: bulb + [0, -0.05, 0], relativeTo: entity)
+                    entity.addChild(light)
+                    let halo = ModelEntity(mesh: .generatePlane(width: 1.6, height: 1.6), materials: [lampHalo])
+                    halo.position = bulb + [0, -0.05, 0]
+                    entity.addChild(halo)
+                    halos.append(halo)
+                }
             }
             x += 4
             step += 1
@@ -891,6 +932,10 @@ final class OfficeSceneController {
 
         sun.model?.materials = [dark ? moonFace : sunFace]
         rays.isEnabled = !dark
+        key.light.intensity = dark ? 2_200 : 3_800
+        key.light.color = dark ? NSColor(red: 0.72, green: 0.8, blue: 1, alpha: 1) : .white
+        fill.light.intensity = dark ? 900 : 1_500
+        fill.light.color = key.light.color
 
         travellers = street.travellers.map { traveller in
             let node = makeTraveller(traveller)

@@ -5,7 +5,7 @@ Status: written from the Owner's request on 2026-10-21 ("Make the building have 
 ## Layout
 
 - The street runs along the building's front (south, toward the default camera), laid out from the Office's size by `OfficeStreet` (in `SuicaCore`): a 1.4 m pavement 0.4 m from the front wall, a 4 m road (two car lanes, a 0.6 m bike lane each side, a dashed centre line), and a far pavement. It runs 12 m past each side of the building (_my call_).
-- A lawn under it all, with a row of trees behind the building and trees and street lamps (alternating every 4 m) along the far edge of the far pavement. Nothing tall stands between the building and the road, so no Desk is hidden from the default camera (_my call_).
+- A lawn under it all, with a row of trees behind the building and trees and street lamps (alternating every 4 m) along the far edge of the far pavement. Nothing tall stands between the building and the road, so no Desk is hidden from the default camera (_my call_). At night the lamps light the street (`2026-10-21-office-street-lamps-design.md`).
 - A short path leads from the middle of the front wall to the pavement.
 
 ## Travellers
