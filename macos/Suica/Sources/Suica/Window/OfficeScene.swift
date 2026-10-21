@@ -122,8 +122,8 @@ private struct TravellerNode {
 final class OfficeSceneController {
     let root = Entity()
     let camera = PerspectiveCamera()
-    /// The sun by day, the moon by night: carried by the camera, so it stays at the top of the view
-    /// however the view is turned.
+    /// The sun by day, the moon by night: fixed in the sky where the default view shows it at the
+    /// top, so it stays put while the view is turned, like the rest of the scene.
     private let sun = ModelEntity(mesh: .generateSphere(radius: 1.65), materials: [])
     private var rooms: [String: RoomNode] = [:]
     private var desks: [String: DeskNode] = [:]
@@ -156,7 +156,7 @@ final class OfficeSceneController {
         camera.camera.near = 0.1
         camera.camera.far = 200
         root.addChild(camera)
-        camera.addChild(sun)
+        root.addChild(sun)
         sun.addChild(ModelEntity(mesh: .generateSphere(radius: 2.55), materials: []))
         let key = DirectionalLight()
         key.light.intensity = 3_800
@@ -182,7 +182,9 @@ final class OfficeSceneController {
 
     // MARK: Camera
 
-    private var fitDistance: Float {
+    private var fitDistance: Float { fitDistance(yaw: yaw, pitch: pitch) }
+
+    private func fitDistance(yaw: Float, pitch: Float) -> Float {
         let vertical = camera.camera.fieldOfViewInDegrees * .pi / 180
         let horizontal = 2 * atan(tan(vertical / 2) * aspect)
         // What the floor covers on screen, turned by the camera's yaw and tilted by its pitch.
@@ -192,17 +194,31 @@ final class OfficeSceneController {
         return max(across / tan(horizontal / 2), up / tan(vertical / 2))
     }
 
-    private func applyCamera() {
-        let distance = max(3, fitDistance * zoom)
-        let height = sin(pitch) * distance
+    /// Where the camera stands, looking at `focus`, for a yaw, a pitch and a distance.
+    private static func eye(yaw: Float, pitch: Float, distance: Float) -> SIMD3<Float> {
         let ground = cos(pitch) * distance
-        let eye = SIMD3<Float>(sin(yaw) * ground, height, cos(yaw) * ground)
+        return [sin(yaw) * ground, sin(pitch) * distance, cos(yaw) * ground]
+    }
+
+    private func applyCamera() {
+        let eye = Self.eye(yaw: yaw, pitch: pitch, distance: max(3, fitDistance * zoom))
         camera.look(at: focus, from: focus + eye, relativeTo: nil)
-        // In the strip of sky along the top of the view, behind the whole scene: when the view is
-        // turned so ground fills the top, the ground hides it.
+        placeSun()
+    }
+
+    /// In the strip of sky along the top of the default view, behind the whole scene, and fixed
+    /// there: orbiting, panning and zooming move the view past it. When the view is turned so
+    /// ground fills the top, the ground hides it.
+    private func placeSun() {
+        let from = Self.eye(
+            yaw: Self.defaultYaw, pitch: Self.defaultPitch,
+            distance: max(3, fitDistance(yaw: Self.defaultYaw, pitch: Self.defaultPitch)))
+        let forward = normalize(-from)
+        let right = normalize(cross(forward, [0, 1, 0]))
+        let up = cross(right, forward)
         let depth: Float = 60
-        let up = depth * tan(camera.camera.fieldOfViewInDegrees * .pi / 360)
-        sun.position = [0.3 * up * aspect, 0.84 * up, -depth]
+        let half = depth * tan(camera.camera.fieldOfViewInDegrees * .pi / 360)
+        sun.position = from + forward * depth + right * (0.3 * half * aspect) + up * (0.84 * half)
     }
 
     func setAspect(_ value: Float) {
