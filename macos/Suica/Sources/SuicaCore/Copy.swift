@@ -5,7 +5,6 @@ public enum Copy {
     public static let appName = "Suica"
     public static let running = "Polling"
     public static let paused = "Paused"
-    public static func tracked(_ count: Int) -> String { "\(count) of your MRs are tracked" }
     public static let attentionHeading = "Needs your attention"
     public static let attentionEmpty = "Nothing is waiting for you."
     public static func moreHidden(_ count: Int) -> String {
@@ -268,9 +267,6 @@ public enum Copy {
     public static let chartCount = "Count"
     public static let chartSeries = "Series"
     public static let loading = "Loading…"
-    public static let agentStoppedShort = "Stopped"
-    public static let agentRunningShort = "Running"
-    public static let agentMissingShort = "Not installed"
     public static let teamsOffShort = "Off"
     // Review requests
     public static let noReviewRequests = "No open merge requests are waiting for your review."
@@ -901,24 +897,41 @@ public enum Copy {
     public static let editConfig = "Edit config"
     public static let readyToApproveShort = "Ready to approve"
     public static let readyToApproveCaption = "Nothing serious left"
-    public static let tokensToday = "Tokens today"
+    public static let waitingForReviewShort = "Waiting for you"
+    public static let attentionCaption = "Teams messages to confirm"
+    public static let pollsOk = "Polls ok"
+    public static func tokensFor(_ span: String) -> String { "Tokens, \(span)" }
+    public static func lastPollAgo(_ relative: String) -> String { "Last poll \(relative)" }
+    public static func pollEvery(_ seconds: Int) -> String { "every \(seconds) s" }
+    public static func health(_ health: AgentHealth) -> String {
+        switch health {
+        case .ok: "Agent running"
+        case .pollFailed: "Last poll failed"
+        case .paused: "Polling paused"
+        case .stopped: "Agent stopped"
+        case .missing: "Agent not installed"
+        }
+    }
     public static let waitingForReviewHeading = "Waiting for your review"
     public static let agentReviewShort = "Agent review"
     public static let readyToPostHeading = "Ready to post"
     public static let reviewSettings = "Settings"
     public static let weekHeading = "Last 7 days"
-    public static let tokensHeading = "Tokens"
     public static let systemHeading = "System"
     public static func allItems(_ count: Int) -> String { "All \(count) →" }
+    public static func reviewTally(_ tally: ReviewTally) -> String {
+        var parts: [String] = []
+        if tally.waiting > 0 { parts.append("\(tally.waiting) waiting") }
+        if tally.reviewed > 0 { parts.append("\(tally.reviewed) reviewed") }
+        if tally.drafts > 0 { parts.append("\(tally.drafts) \(tally.drafts == 1 ? "draft" : "drafts")") }
+        return parts.isEmpty ? "No open review requests" : parts.joined(separator: " · ")
+    }
+    public static func yourTally(_ tally: YourTally) -> String {
+        let fixes = tally.fixesReady == 0 ? "" : " · \(tally.fixesReady) \(tally.fixesReady == 1 ? "fix" : "fixes") ready"
+        return "\(tally.approved) of \(tally.open) approved\(fixes)"
+    }
     public static func linkTo(_ title: String) -> String { "\(title) →" }
     public static func moreInMessages(_ count: Int) -> String { "\(count) more in Messages" }
-    public static func weekSummary(requests: Int, nudges: Int, pollSuccess: Double?) -> String {
-        let polls = pollSuccess.map { " · \(Int(($0 * 100).rounded()))% of polls ok" } ?? ""
-        return "\(requests) review requests · \(nudges) nudges sent\(polls)"
-    }
-    public static func tokenTotals(day: String, week: String, month: String) -> String {
-        "24 h \(day) · 7 d \(week) · 30 d \(month)"
-    }
     public static let pauseShort = "Pause"
     public static let resumeShort = "Resume"
     public static let reviewsShort = "Reviews"
