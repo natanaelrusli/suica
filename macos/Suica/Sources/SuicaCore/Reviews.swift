@@ -246,6 +246,34 @@ public struct ReviewSection: Equatable, Sendable {
     public let items: [ReviewSummary]
 }
 
+/// A tab of the review requests page: your own MRs, or one group of the MRs you review.
+public enum ReviewTab: Hashable, Sendable {
+    case yours
+    case group(ReviewGroup)
+}
+
+extension ReviewListDocument {
+    /// The page's tabs in order. Without `me` the MRs you review cannot be told apart, so they share one.
+    public var tabs: [ReviewTab] {
+        me == nil ? [.yours, .group(.all)] : [.yours, .group(.waiting), .group(.reviewed), .group(.drafts)]
+    }
+
+    /// The keys shown in `tab`, in the order of its rows, narrowed by the search text when there is one.
+    public func keys(in tab: ReviewTab, matching query: String = "") -> [String] {
+        switch tab {
+        case .yours:
+            yourMergeRequests(matching: query).map(\.key)
+        case .group(let group):
+            sections(matching: query).first { $0.group == group }?.items.map(\.key) ?? []
+        }
+    }
+
+    /// The tab that holds the MR, whatever is searched.
+    public func tab(containing key: String) -> ReviewTab? {
+        tabs.first { keys(in: $0).contains(key) }
+    }
+}
+
 extension ReviewSummary {
     /// Reviewers who approved, out of all reviewers.
     public var approvals: (approved: Int, total: Int) {

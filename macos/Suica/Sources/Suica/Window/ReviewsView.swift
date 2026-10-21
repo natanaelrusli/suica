@@ -6,6 +6,7 @@ struct ReviewsView: View {
     let model: ReviewsModel
     let fixes: FixesModel
     @State private var query = ""
+    @State private var tab: ReviewTab = .group(.waiting)
 
     var body: some View {
         HStack(spacing: 0) {
@@ -16,7 +17,10 @@ struct ReviewsView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .searchable(text: $query, placement: .toolbar, prompt: Copy.searchReviews)
-        .task { await refreshAll() }
+        .task {
+            await refreshAll()
+            syncTabToSelection()
+        }
         // Reads the list and the selected MR again while the page is open, more often while a
         // review or a fix is queued, running or being posted (see `refreshSeconds`).
         .task(id: refreshSeconds) {
@@ -48,87 +52,88 @@ struct ReviewsView: View {
     }
 
     private var list: some View {
-        List(selection: selection) {
-            if let text = model.errorText {
-                NoticeBox(text: text, tint: .red, onClose: model.dismissError).listRowSeparator(.hidden)
-            }
+        VStack(spacing: 0) {
             if let list = model.list {
-                let searching = !query.trimmingCharacters(in: .whitespaces).isEmpty
-                let sections = list.sections(matching: query)
-                let mine = yours(in: list)
-                if !mine.isEmpty {
-                    Section {
-                        ForEach(mine) { mr in YourMRRow(mr: mr).tag(mr.key) }
-                    } header: {
-                        Text(Copy.yourMergeRequests)
-                    }
+                tabBar(in: list)
+                Divider()
+            }
+            List(selection: selection) {
+                if let text = model.errorText {
+                    NoticeBox(text: text, tint: .red, onClose: model.dismissError).listRowSeparator(.hidden)
                 }
-                if list.mergeRequests.isEmpty {
-                    Label(Copy.noReviewRequests, systemImage: "checkmark.circle")
-                        .foregroundStyle(.secondary)
-                        .listRowSeparator(.hidden)
-                } else if searching {
-                    if sections.isEmpty {
-                        Text(Copy.noReviewsMatch(query.trimmingCharacters(in: .whitespaces)))
-                            .foregroundStyle(.secondary)
-                            .listRowSeparator(.hidden)
-                    }
-                } else if list.me != nil, sections.first?.group != .waiting {
-                    Label(Copy.nothingWaiting, systemImage: "checkmark.circle")
-                        .foregroundStyle(.secondary)
-                        .listRowSeparator(.hidden)
+                if let list = model.list {
+                    rows(in: list)
+                } else if model.errorText == nil {
+                    ProgressView(Copy.loading).frame(maxWidth: .infinity)
                 }
-                ForEach(sections, id: \.group) { section in
-                    if section.group == .all {
-                        rows(section, in: list)
-                    } else {
-                        Section {
-                            rows(section, in: list)
-                        } header: {
-                            sectionHeader(section)
-                        }
-                    }
-                }
-            } else if model.errorText == nil {
-                ProgressView(Copy.loading).frame(maxWidth: .infinity)
+            }
+            .motion(value: model.list)
+            .motion(value: model.errorText)
+        }
+        .onChange(of: tab) { _, tab in
+            guard let list = model.list else { return }
+            let keys = list.keys(in: tab, matching: query)
+            guard model.selectedKey.map(keys.contains) != true else { return }
+            Task { await model.select(keys.first) }
+        }
+        .onChange(of: model.selectedKey) { syncTabToSelection() }
+        .onAppear { syncTabToSelection() }
+    }
+
+    /// The tab on screen: `tab`, unless this list has none of that name (no `me`, so one group).
+    private func shownTab(in list: ReviewListDocument) -> ReviewTab {
+        list.tabs.contains(tab) ? tab : .group(.all)
+    }
+
+    /// Follows the selection into its tab, when it is chosen elsewhere (the Overview, a refresh).
+    private func syncTabToSelection() {
+        guard let key = model.selectedKey, let list = model.list,
+            let owner = list.tab(containing: key), owner != shownTab(in: list)
+        else { return }
+        tab = owner
+    }
+
+    /// One tab per category with its count (the matches while searching), so a category never
+    /// shares a list with another.
+    private func tabBar(in list: ReviewListDocument) -> some View {
+        let shown = shownTab(in: list)
+        return Picker("", selection: Binding(get: { shown }, set: { tab = $0 })) {
+            ForEach(list.tabs, id: \.self) { tab in
+                Text("\(Copy.reviewTab(tab)) \(list.keys(in: tab, matching: query).count)")
+                    .help(Copy.reviewTabHelp(tab))
+                    .tag(tab)
             }
         }
-        .motion(value: model.list)
-        .motion(value: model.errorText)
+        .pickerStyle(.segmented)
+        .controlSize(.small)
+        .labelsHidden()
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
     }
 
-    /// Your MRs whose title or key holds the search text; all of them without one.
-    private func yours(in list: ReviewListDocument) -> [YourMergeRequest] {
-        let text = query.trimmingCharacters(in: .whitespaces)
-        guard !text.isEmpty else { return list.yourMergeRequests }
-        return list.yourMergeRequests.filter {
-            $0.title.localizedCaseInsensitiveContains(text) || $0.key.localizedCaseInsensitiveContains(text)
+    @ViewBuilder private func rows(in list: ReviewListDocument) -> some View {
+        let shown = shownTab(in: list)
+        let keys = list.keys(in: shown, matching: query)
+        if keys.isEmpty {
+            let text = query.trimmingCharacters(in: .whitespaces)
+            Text(text.isEmpty ? Copy.nothingInReviewTab(shown) : Copy.noReviewsMatch(text))
+                .foregroundStyle(.secondary)
+                .listRowSeparator(.hidden)
         }
-    }
-
-    private func rows(_ section: ReviewSection, in list: ReviewListDocument) -> some View {
-        ForEach(section.items) { mr in
-            ReviewRow(
-                mr: mr, group: section.group, myState: list.myState(mr),
-                rereviewing: model.agentBusyKeys.contains(mr.key)
-            ) {
-                Task { await model.queueAgentReview(mr.key) }
+        switch shown {
+        case .yours:
+            ForEach(list.yourMergeRequests(matching: query)) { mr in YourMRRow(mr: mr).tag(mr.key) }
+        case .group(let group):
+            ForEach(list.sections(matching: query).first { $0.group == group }?.items ?? []) { mr in
+                ReviewRow(
+                    mr: mr, group: group, myState: list.myState(mr),
+                    rereviewing: model.agentBusyKeys.contains(mr.key)
+                ) {
+                    Task { await model.queueAgentReview(mr.key) }
+                }
+                .tag(mr.key)
             }
-            .tag(mr.key)
         }
-    }
-
-    private func sectionHeader(_ section: ReviewSection) -> some View {
-        HStack(spacing: 6) {
-            Text(Copy.reviewGroup(section.group))
-            Text("\(section.items.count)")
-                .font(.caption.weight(.semibold).monospacedDigit())
-                .padding(.horizontal, 6)
-                .padding(.vertical, 1)
-                .foregroundStyle(section.group == .waiting ? Color.white : Color.secondary)
-                .background(section.group == .waiting ? AnyShapeStyle(.tint) : AnyShapeStyle(.quaternary), in: Capsule())
-        }
-        .accessibilityElement(children: .combine)
     }
 
     @ViewBuilder private var detail: some View {

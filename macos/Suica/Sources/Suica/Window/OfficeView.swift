@@ -168,10 +168,11 @@ private struct WindowVisibility: NSViewRepresentable {
             guard let newWindow else { return }
             observer = NotificationCenter.default.addObserver(
                 forName: NSWindow.didChangeOcclusionStateNotification, object: newWindow, queue: .main
-            ) { [weak self] note in
-                guard let window = note.object as? NSWindow else { return }
-                let visible = window.occlusionState.contains(.visible)
-                MainActor.assumeIsolated { self?.onChange?(visible) }
+            ) { [weak self, weak newWindow] _ in
+                MainActor.assumeIsolated {
+                    guard let window = newWindow else { return }
+                    self?.onChange?(window.occlusionState.contains(.visible))
+                }
             }
         }
     }
