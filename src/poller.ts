@@ -48,6 +48,8 @@ export interface PollDeps {
   readonly alerts?: AlertTemplates;
   /** Queues Agent Reviews after the commit; `newRequests` just asked for the Owner's review. May throw. */
   readonly queueReviews?: (snapshot: Snapshot, newRequests: readonly string[]) => void;
+  /** Queues Agent Fixes for the Owner's MRs after the commit; `previous` is from before the poll. May throw. */
+  readonly queueFixes?: (snapshot: Snapshot, previous: PreviousState) => Promise<void>;
   /**
    * Looks a username up in GitLab, so the statistics can show the names of people no open MR
    * shows any more; undefined when GitLab knows no such user. May throw.
@@ -138,6 +140,22 @@ function queueReviews(deps: PollDeps, snapshot: Snapshot, events: readonly Activ
     deps.queueReviews(snapshot, keys);
   } catch (error) {
     deps.log.warn("agent review not queued", {
+      reason: error instanceof Error ? error.name : "unknown",
+    });
+  }
+}
+
+/** Runs after the state commit, once the baseline is done; a problem never fails the poll. */
+async function queueFixes(
+  deps: PollDeps,
+  snapshot: Snapshot,
+  previous: PreviousState,
+): Promise<void> {
+  if (deps.queueFixes === undefined || !previous.baselineDone) return;
+  try {
+    await deps.queueFixes(snapshot, previous);
+  } catch (error) {
+    deps.log.warn("agent fix not queued", {
       reason: error instanceof Error ? error.name : "unknown",
     });
   }
@@ -268,6 +286,7 @@ async function runPoll(deps: PollDeps, start: number): Promise<PollOutcome> {
     });
   }
   queueReviews(deps, snapshot, previous.baselineDone ? events : []);
+  await queueFixes(deps, snapshot, previous);
   await runTeams(deps, snapshot, previous);
   await lookUpNames(deps);
   log.debug("poll complete", {

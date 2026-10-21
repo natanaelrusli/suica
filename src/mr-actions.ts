@@ -4,12 +4,7 @@ import { parseMrKey } from "./reviews.ts";
 
 export type CommentOutcome = "posted" | "empty" | "bad-key" | "failed";
 export type MergeOutcome =
-  | "merged"
-  | "scheduled"
-  | "not-mergeable"
-  | "sha-mismatch"
-  | "bad-key"
-  | "failed";
+  "merged" | "scheduled" | "not-mergeable" | "sha-mismatch" | "bad-key" | "failed";
 
 export interface MergeOptions {
   readonly squash: boolean;

@@ -119,6 +119,11 @@ export interface FixStore {
   handledNotes(mrKey: string): Map<string, string>;
   markHandled(mrKey: string, threads: readonly { id: string; noteId: string }[]): void;
   interruptedRunning(): FixRow[];
+  /** When the watcher last read the threads of each of the Owner's MRs. */
+  watchMarks(): Map<string, number>;
+  markWatched(mrKey: string, at: number): void;
+  /** Forgets that the MR was read, so the watcher reads it again. */
+  unwatch(mrKey: string): void;
 }
 
 const OPEN: readonly FixStatus[] = ["queued", "running", "ready", "confirming"];
@@ -358,6 +363,26 @@ export function createFixStore(db: DatabaseSync): FixStore {
 
     interruptedRunning() {
       return many("SELECT * FROM fix_run WHERE status = 'running' ORDER BY id");
+    },
+
+    watchMarks() {
+      return new Map(
+        db
+          .prepare("SELECT mr_key, checked_at FROM fix_watch")
+          .all()
+          .map((row) => [text(row, "mr_key"), integer(row, "checked_at")] as const),
+      );
+    },
+
+    markWatched(mrKey, at) {
+      db.prepare("INSERT OR REPLACE INTO fix_watch (mr_key, checked_at) VALUES (?, ?)").run(
+        mrKey,
+        at,
+      );
+    },
+
+    unwatch(mrKey) {
+      db.prepare("DELETE FROM fix_watch WHERE mr_key = ?").run(mrKey);
     },
   };
 }

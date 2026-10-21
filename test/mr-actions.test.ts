@@ -92,10 +92,18 @@ describe("mergeMergeRequest", () => {
   });
 
   it("maps GitLab's refusals: 405 and 406 not mergeable, 409 a newer push, anything else failed", async () => {
-    expect(await mergeMergeRequest(refusing(405), "g/p!7", "0123abc", OPTIONS)).toBe("not-mergeable");
-    expect(await mergeMergeRequest(refusing(406), "g/p!7", "0123abc", OPTIONS)).toBe("not-mergeable");
-    expect(await mergeMergeRequest(refusing(409), "g/p!7", "0123abc", OPTIONS)).toBe("sha-mismatch");
-    expect(await mergeMergeRequest(refusing(undefined), "g/p!7", "0123abc", OPTIONS)).toBe("failed");
+    expect(await mergeMergeRequest(refusing(405), "g/p!7", "0123abc", OPTIONS)).toBe(
+      "not-mergeable",
+    );
+    expect(await mergeMergeRequest(refusing(406), "g/p!7", "0123abc", OPTIONS)).toBe(
+      "not-mergeable",
+    );
+    expect(await mergeMergeRequest(refusing(409), "g/p!7", "0123abc", OPTIONS)).toBe(
+      "sha-mismatch",
+    );
+    expect(await mergeMergeRequest(refusing(undefined), "g/p!7", "0123abc", OPTIONS)).toBe(
+      "failed",
+    );
   });
 
   it("refuses a bad key or sha without calling GitLab", async () => {

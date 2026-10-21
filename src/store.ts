@@ -265,7 +265,10 @@ export interface Store {
 }
 
 const SCHEMA_VERSION = 14;
-/** Agent Fix runs, and the newest note of each thread a fix handled, so a thread stays quiet until someone writes on it. */
+/**
+ * Agent Fix runs; the newest note of each thread a fix handled, so a thread stays quiet until
+ * someone writes on it; and when the watcher last read each of the Owner's MRs.
+ */
 const SCHEMA_V14 = `
 CREATE TABLE IF NOT EXISTS fix_run (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -280,6 +283,7 @@ CREATE TABLE IF NOT EXISTS fix_thread (
   mr_key TEXT NOT NULL, discussion_id TEXT NOT NULL, note_id TEXT NOT NULL,
   PRIMARY KEY (mr_key, discussion_id)
 );
+CREATE TABLE IF NOT EXISTS fix_watch (mr_key TEXT PRIMARY KEY, checked_at INTEGER NOT NULL);
 `;
 /**
  * When each of the Owner's MRs was first approved, and the display names of the people on open

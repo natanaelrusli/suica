@@ -32,21 +32,31 @@ describe("fix store", () => {
     for (const status of ["running", "ready", "confirming"] as const) {
       const id = fixes.queue(`g/p!${status.length}`, "auto", [thread("d1", "n1")], 1000) ?? 0;
       expect(fixes.transition(id, ["queued"], status, {}, 1100)).toBe(true);
-      expect(fixes.queue(`g/p!${status.length}`, "auto", [thread("d2", "n2")], 1200)).toBeUndefined();
+      expect(
+        fixes.queue(`g/p!${status.length}`, "auto", [thread("d2", "n2")], 1200),
+      ).toBeUndefined();
       expect(fixes.open(`g/p!${status.length}`)?.id).toBe(id);
     }
   });
 
   it("moves a row only from one of the given statuses, and keeps the fields it was given", () => {
     const { fixes } = openStore(":memory:");
-    const id = fixes.queue("g/p!7", "manual", [thread("d1", "n1")], 1000, undefined, "be brief") ?? 0;
+    const id =
+      fixes.queue("g/p!7", "manual", [thread("d1", "n1")], 1000, undefined, "be brief") ?? 0;
     expect(fixes.transition(id, ["running"], "ready", {}, 1100)).toBe(false);
-    expect(fixes.transition(id, ["queued"], "running", { startedAt: 1100, cli: "claude" }, 1100)).toBe(true);
+    expect(
+      fixes.transition(id, ["queued"], "running", { startedAt: 1100, cli: "claude" }, 1100),
+    ).toBe(true);
     const done = fixes.transition(
       id,
       ["running"],
       "ready",
-      { baseSha: "abc", diff: "diff --git", commitMessage: "Rename", threads: [thread("d1", "n1", { action: "changed" })] },
+      {
+        baseSha: "abc",
+        diff: "diff --git",
+        commitMessage: "Rename",
+        threads: [thread("d1", "n1", { action: "changed" })],
+      },
       1200,
     );
     expect(done).toBe(true);
@@ -80,8 +90,16 @@ describe("fix store", () => {
   it("remembers the note each thread was handled at", () => {
     const { fixes } = openStore(":memory:");
     fixes.markHandled("g/p!7", [{ id: "d1", noteId: "n1" }]);
-    fixes.markHandled("g/p!7", [{ id: "d1", noteId: "n4" }, { id: "d2", noteId: "n2" }]);
-    expect(fixes.handledNotes("g/p!7")).toEqual(new Map([["d1", "n4"], ["d2", "n2"]]));
+    fixes.markHandled("g/p!7", [
+      { id: "d1", noteId: "n4" },
+      { id: "d2", noteId: "n2" },
+    ]);
+    expect(fixes.handledNotes("g/p!7")).toEqual(
+      new Map([
+        ["d1", "n4"],
+        ["d2", "n2"],
+      ]),
+    );
     expect(fixes.handledNotes("g/p!8")).toEqual(new Map());
   });
 
@@ -98,13 +116,24 @@ describe("fix store", () => {
     expect(fixes.list(1500).map((row) => row.id)).not.toContain(first);
   });
 
+  it("remembers when the watcher read each MR, and forgets it on request", () => {
+    const { fixes } = openStore(":memory:");
+    fixes.markWatched("g/p!7", 1000);
+    fixes.markWatched("g/p!7", 2000);
+    fixes.markWatched("g/p!8", 1500);
+    fixes.unwatch("g/p!8");
+    expect(fixes.watchMarks()).toEqual(new Map([["g/p!7", 2000]]));
+  });
+
   it("upgrades a schema 13 database", () => {
     const folder = mkdtempSync(join(tmpdir(), "suica-fix-store-"));
     folders.push(folder);
     const path = join(folder, "state.db");
     openStore(path).close();
     const db = new DatabaseSync(path);
-    db.exec("DROP TABLE fix_run; DROP TABLE fix_thread; PRAGMA user_version = 13");
+    db.exec(
+      "DROP TABLE fix_run; DROP TABLE fix_thread; DROP TABLE fix_watch; PRAGMA user_version = 13",
+    );
     db.close();
     const store = openStore(path);
     expect(store.fixes.list(0)).toEqual([]);

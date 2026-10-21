@@ -2,6 +2,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { defaultStatePath, loadConfig } from "./config.ts";
 import type { Config } from "./config.ts";
+import { queueAutomaticFixes } from "./agent-fix.ts";
 import { createReviewWorker, queueAutomaticReviews } from "./agent-review.ts";
 import type { ReviewWorker } from "./agent-review.ts";
 import { defaultExec } from "./exec.ts";
@@ -18,6 +19,7 @@ import { createLogger } from "./log.ts";
 import type { Logger } from "./log.ts";
 import { loadAlerts } from "./alerts.ts";
 import { createNotifier } from "./notifier.ts";
+import { fetchMrDetail } from "./reviews.ts";
 import { pollOnce } from "./poller.ts";
 import type { PollDeps, PollStatus } from "./poller.ts";
 import { openStore } from "./store.ts";
@@ -98,6 +100,18 @@ export function createRuntime(configPath: string, signal?: AbortSignal): Runtime
     queueReviews: (snapshot, newRequests) => {
       queueAutomaticReviews({ store, config, log, now: Date.now }, snapshot, newRequests);
     },
+    queueFixes: (snapshot, previous) =>
+      queueAutomaticFixes(
+        {
+          store,
+          config,
+          log,
+          now: Date.now,
+          detail: (key) => fetchMrDetail(run, glabRest(config.gitlab), key),
+        },
+        snapshot,
+        previous.seenNotes,
+      ),
     failures: createFailureTracker(),
     log,
     config,
