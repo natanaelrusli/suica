@@ -17,6 +17,7 @@ import {
 import type { MergeRequest } from "../src/domain.ts";
 import type { AgentReviewRow } from "../src/store.ts";
 import { mr, person, reviewer, snapshot } from "./builders.ts";
+import { thread } from "./fix-builders.ts";
 
 function golden(name: string): unknown {
   const parsed: unknown = JSON.parse(readFileSync(`contracts/${name}`, "utf8"));
@@ -198,6 +199,34 @@ describe("buildReviewList", () => {
       ]),
       new Map([["g/p!9", POSTED_NINE]]),
       new Map([["g/p!9", { reason: "waiting", dueAt: 1792152800000 }]]),
+      new Map([
+        [
+          "g/p!8",
+          {
+            id: 5,
+            mrKey: "g/p!8",
+            mrTitle: "MR 8",
+            trigger: "auto",
+            status: "ready",
+            threads: [
+              thread("gid://gitlab/Discussion/a1", "n1", { action: "changed" }),
+              thread("gid://gitlab/Discussion/a2", "n2", { action: "reply" }),
+            ],
+            note: "",
+            baseSha: "0123456789abcdef0123456789abcdef01234567",
+            commitMessage: "Rename",
+            diff: "diff --git a b",
+            pushedSha: null,
+            cli: "claude",
+            model: null,
+            detail: "",
+            activity: [],
+            createdAt: 1792152000000,
+            updatedAt: 1792152100000,
+            startedAt: 1792152010000,
+          },
+        ],
+      ]),
     );
     expect(list).toEqual(golden("reviews.v1.json"));
   });

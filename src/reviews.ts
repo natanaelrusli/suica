@@ -6,6 +6,7 @@ import { FetchFailure } from "./gitlab.ts";
 import type { GraphqlRunner, PostRunner, RestRunner } from "./gitlab.ts";
 import { isReadyToApprove } from "./inline-review.ts";
 import type { Logger } from "./log.ts";
+import type { FixRow, FixStatus } from "./fix-store.ts";
 import type { ActivityLine, AgentReviewRow, AgentReviewStatus } from "./store.ts";
 
 /** The newest Agent Review of an MR. */
@@ -125,6 +126,32 @@ export interface ReviewListJson {
   /** The Owner, so the app can find the Owner among each MR's reviewers. */
   readonly me: Person;
   readonly mergeRequests: readonly ReviewSummaryJson[];
+  /** The Owner's own open MRs, in GitLab's order. */
+  readonly yourMergeRequests: readonly YourMrJson[];
+}
+
+/** The newest Agent Fix of one of the Owner's MRs, in short. */
+export interface FixSummaryJson {
+  readonly id: number;
+  readonly status: FixStatus;
+  readonly threads: number;
+  /** Threads the fix changed code for. */
+  readonly changed: number;
+  readonly detail: string;
+}
+
+/** One of the Owner's own open MRs. See contracts/reviews.v1.json. */
+export interface YourMrJson {
+  readonly key: string;
+  readonly title: string;
+  readonly url: string;
+  readonly draft: boolean;
+  readonly createdAt: string | null;
+  readonly reviewers: readonly Reviewer[];
+  /** Every Reviewer approved: the watcher no longer queues fixes for it. */
+  readonly approvedByAll: boolean;
+  /** Null when the agent never fixed anything on it. */
+  readonly fix: FixSummaryJson | null;
 }
 
 function toAgentReviewJson(row: AgentReviewRow): AgentReviewJson {
@@ -186,10 +213,34 @@ export function buildReviewList(
   agentReviews: ReadonlyMap<string, AgentReviewRow> = new Map(),
   bases: ReadonlyMap<string, AgentReviewRow> = new Map(),
   rereviewWaiting: ReadonlyMap<string, RereviewWaitingJson> = new Map(),
+  fixes: ReadonlyMap<string, FixRow> = new Map(),
 ): ReviewListJson {
   return {
     version: 1,
     me: snapshot.me,
+    yourMergeRequests: snapshot.authored.map((mr) => {
+      const fix = fixes.get(mr.key);
+      return {
+        key: mr.key,
+        title: mr.title,
+        url: mr.url,
+        draft: mr.draft,
+        createdAt: mr.createdAt,
+        reviewers: mr.reviewers,
+        approvedByAll:
+          mr.reviewers.length > 0 && mr.reviewers.every((each) => each.state === "APPROVED"),
+        fix:
+          fix === undefined
+            ? null
+            : {
+                id: fix.id,
+                status: fix.status,
+                threads: fix.threads.length,
+                changed: fix.threads.filter((each) => each.action === "changed").length,
+                detail: fix.detail,
+              },
+      };
+    }),
     mergeRequests: snapshot.reviewRequested.map((mr) => {
       const latest = agentReviews.get(mr.key);
       const approvedByMe = mr.reviewers.some(
