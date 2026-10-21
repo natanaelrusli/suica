@@ -416,6 +416,107 @@ public enum Copy {
         default: "Nothing to do: the review changed in the meantime."
         }
     }
+    // Agent Fix, comments and merging (your own MRs)
+    public static let yourMergeRequests = "Your MRs"
+    public static let fixTab = "Agent fix"
+    public static let fixFindingsNow = "Fix findings now"
+    public static let fixNone =
+        "No Agent Fix yet. When a Reviewer opens a thread, Suica answers it here and waits for you before pushing anything."
+    public static let fixQueued = "Waiting to start…"
+    public static let fixConfirming = "Committing, pushing and replying…"
+    public static let fixPushedNote = "Pushed. The Reviewers resolve their threads."
+    public static let fixChangedBadge = "Changed"
+    public static let fixReplyBadge = "Reply only"
+    public static let fixNoAnswer = "The model left this thread out."
+    public static let fixReplyPlaceholder = "Reply to the reviewer"
+    public static let fixDontPost = "Don't post"
+    public static let fixPosted = "Posted"
+    public static let fixCommitMessage = "Commit message"
+    public static let fixNoCodeChange = "No code changed: only replies are posted."
+    public static let fixConfirm = "Confirm and push…"
+    public static let fixConfirmRepliesOnly = "Post replies…"
+    public static let fixRetry = "Retry with a note…"
+    public static let fixRetryTitle = "Retry this fix"
+    public static let fixRetryHint = "Tell the agent what to do differently. It starts again on a fresh checkout."
+    public static let fixRetryAction = "Retry"
+    public static let fixDiscard = "Discard"
+    public static let fixCancel = "Cancel fix"
+    public static let fixPostMissing = "Post missing replies"
+    public static func fixConfirmTitle(branch: String, replies: Int, changes: Bool) -> String {
+        let posts = replies == 1 ? "1 reply" : "\(replies) replies"
+        return changes ? "Commit, push to \(branch) and post \(posts)?" : "Post \(posts) on GitLab as you?"
+    }
+    public static let fixConfirmMessage = "Nothing is force-pushed. If the branch moved since the fix was made, nothing is pushed."
+    public static func fixStatus(_ status: String) -> String {
+        switch status {
+        case "queued": "Queued"
+        case "running": "Running"
+        case "ready": "Ready for you"
+        case "confirming": "Pushing"
+        case "pushed": "Pushed"
+        case "push-failed": "Not pushed"
+        case "discarded": "Discarded"
+        case "failed": "Failed"
+        case "skipped": "Skipped"
+        case "cancelled": "Cancelled"
+        default: status
+        }
+    }
+    public static func fixBadge(_ fix: FixSummary) -> String {
+        fix.status == "ready" ? "Fix ready: \(fix.threads) threads" : "Fix: \(fixStatus(fix.status).lowercased())"
+    }
+    public static func fixOutcome(_ code: String) -> String {
+        switch code {
+        case "queued": "Fix queued. It starts in a few seconds."
+        case "added": "The threads joined the fix that is waiting to start."
+        case "busy": "A fix of this MR is running or waits for you."
+        case "nothing-to-fix": "Nothing to fix: no open thread waits for an answer."
+        case "pushed": "Pushed, and the replies are posted."
+        case "partial": "Pushed, but some replies were not posted. Post the missing ones from the Agent fix tab."
+        case "branch-moved": "Nothing pushed: the branch moved since the fix was made. Retry to redo it on the new commits."
+        case "push-failed": "Nothing pushed. The Agent fix tab says why."
+        case "discarded": "Fix discarded."
+        case "cancelled": "Fix cancelled."
+        case "bad-request", "bad-key": "This fix cannot be confirmed as sent."
+        default: "Nothing to do: the fix changed in the meantime."
+        }
+    }
+    public static let commentPlaceholder = "Comment on this MR as you (Markdown)"
+    public static let commentPreview = "Preview"
+    public static let commentSend = "Comment"
+    public static func commentOutcome(_ code: String) -> String {
+        switch code {
+        case "posted": "Comment posted."
+        case "empty": "The comment is empty."
+        default: "The comment was not posted. Check the MR in GitLab."
+        }
+    }
+    public static let merge = "Merge…"
+    public static let mergeTitle = "Merge this MR"
+    public static let mergeNow = "Merge"
+    public static let mergeWhenPipelineSucceeds = "Merge when pipeline succeeds"
+    public static let mergeSquash = "Squash commits"
+    public static let mergeSquashLocked = "The project decides whether commits are squashed."
+    public static let mergeRemoveBranch = "Delete source branch"
+    public static let mergeMessage = "Commit message"
+    public static func mergeSha(_ sha: String) -> String { "At commit \(sha.prefix(8)). A newer push is never merged." }
+    public static let mergeBlockedPipeline = "The pipeline failed."
+    public static let mergeBlockedApproval = "It still needs approval."
+    public static let mergeBlockedConflict = "It has merge conflicts."
+    public static let mergeBlockedDraft = "It is a draft."
+    public static let mergeBlockedThreads = "Some threads are not resolved yet."
+    public static let mergeBlockedRebase = "It needs a rebase."
+    public static let mergeBlockedDependency = "It waits for another MR."
+    public static let mergeBlockedOther = "GitLab will not merge it now."
+    public static func mergeOutcome(_ code: String) -> String {
+        switch code {
+        case "merged": "Merged."
+        case "scheduled": "GitLab merges it once the pipeline succeeds."
+        case "not-mergeable": "GitLab will not merge it now. Reload to see why."
+        case "sha-mismatch": "Not merged: someone pushed after you opened this MR. Look at the new changes first."
+        default: "Merging failed. Check the MR in GitLab."
+        }
+    }
     // Approving
     public static let approve = "Approve…"
     public static let approveConfirmTitle = "Approve this MR on GitLab as you?"

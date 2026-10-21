@@ -1,9 +1,10 @@
 import SuicaCore
 import SwiftUI
 
-/// Open MRs where you are a Reviewer: the list on the left, the selected MR on the right.
+/// Your own open MRs and those where you are a Reviewer: the list on the left, the selected MR on the right.
 struct ReviewsView: View {
     let model: ReviewsModel
+    let fixes: FixesModel
     @State private var query = ""
 
     var body: some View {
@@ -15,23 +16,31 @@ struct ReviewsView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .searchable(text: $query, placement: .toolbar, prompt: Copy.searchReviews)
-        .task { await model.refresh() }
+        .task { await refreshAll() }
         // Reads the list and the selected MR again while the page is open, more often while a
-        // review is queued, running or being posted (see `refreshSeconds`).
-        .task(id: model.refreshSeconds) {
+        // review or a fix is queued, running or being posted (see `refreshSeconds`).
+        .task(id: refreshSeconds) {
             while true {
-                do { try await Task.sleep(for: .seconds(model.refreshSeconds)) } catch { return }
-                await model.refresh()
+                do { try await Task.sleep(for: .seconds(refreshSeconds)) } catch { return }
+                await refreshAll()
             }
         }
         .toolbar {
-            Button { Task { await model.refresh() } } label: {
+            Button { Task { await refreshAll() } } label: {
                 Label(Copy.refresh, systemImage: "arrow.clockwise")
             }
             .help("\(Copy.refresh) (⌘R)")
             .keyboardShortcut("r")
             .disabled(model.loadingList)
         }
+    }
+
+    private var refreshSeconds: Int { fixes.hasActiveFix ? 3 : model.refreshSeconds }
+
+    private func refreshAll() async {
+        async let list: Void = model.refresh()
+        async let fixList: Void = fixes.refresh()
+        _ = await (list, fixList)
     }
 
     private var selection: Binding<String?> {
@@ -46,6 +55,14 @@ struct ReviewsView: View {
             if let list = model.list {
                 let searching = !query.trimmingCharacters(in: .whitespaces).isEmpty
                 let sections = list.sections(matching: query)
+                let mine = yours(in: list)
+                if !mine.isEmpty {
+                    Section {
+                        ForEach(mine) { mr in YourMRRow(mr: mr).tag(mr.key) }
+                    } header: {
+                        Text(Copy.yourMergeRequests)
+                    }
+                }
                 if list.mergeRequests.isEmpty {
                     Label(Copy.noReviewRequests, systemImage: "checkmark.circle")
                         .foregroundStyle(.secondary)
@@ -80,6 +97,15 @@ struct ReviewsView: View {
         .motion(value: model.errorText)
     }
 
+    /// Your MRs whose title or key holds the search text; all of them without one.
+    private func yours(in list: ReviewListDocument) -> [YourMergeRequest] {
+        let text = query.trimmingCharacters(in: .whitespaces)
+        guard !text.isEmpty else { return list.yourMergeRequests }
+        return list.yourMergeRequests.filter {
+            $0.title.localizedCaseInsensitiveContains(text) || $0.key.localizedCaseInsensitiveContains(text)
+        }
+    }
+
     private func rows(_ section: ReviewSection, in list: ReviewListDocument) -> some View {
         ForEach(section.items) { mr in
             ReviewRow(
@@ -110,7 +136,7 @@ struct ReviewsView: View {
             if let detail = model.details[key] {
                 MergeRequestDetailView(
                     detail: detail, loading: model.loadingKeys.contains(key),
-                    error: model.detailErrors[key], model: model
+                    error: model.detailErrors[key], model: model, fixes: fixes
                 ) {
                     Task { await model.loadDetail(key) }
                 }
@@ -256,7 +282,7 @@ struct Badge: View {
 // MARK: - Detail
 
 private enum DetailTab: Hashable {
-    case description, changes, comments, agent
+    case description, changes, comments, agent, fix
 }
 
 private struct MergeRequestDetailView: View {
@@ -264,11 +290,15 @@ private struct MergeRequestDetailView: View {
     let loading: Bool
     let error: String?
     let model: ReviewsModel
+    let fixes: FixesModel
     let onReload: () -> Void
     @State private var tab: DetailTab = .description
     @State private var confirmingApprove = false
+    @State private var merging = false
 
     private var agentReview: AgentReviewInfo? { model.agentReview(for: detail.key) }
+    /// Your own MR: Agent Fix, a comment box and Merge instead of reviewing.
+    private var yours: Bool { model.isYours(detail.key) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -282,8 +312,13 @@ private struct MergeRequestDetailView: View {
                 Text(Copy.descriptionTab).tag(DetailTab.description)
                 Text(Copy.changesTab(detail.files.count)).tag(DetailTab.changes)
                 Text(Copy.commentsTab(detail.comments.count)).tag(DetailTab.comments)
-                Text(agentReview?.isReady == true ? "\(Copy.agentReviewTab) •" : Copy.agentReviewTab)
-                    .tag(DetailTab.agent)
+                if yours {
+                    Text(fixes.fix(for: detail.key)?.isReady == true ? "\(Copy.fixTab) •" : Copy.fixTab)
+                        .tag(DetailTab.fix)
+                } else {
+                    Text(agentReview?.isReady == true ? "\(Copy.agentReviewTab) •" : Copy.agentReviewTab)
+                        .tag(DetailTab.agent)
+                }
             }
             .pickerStyle(.segmented)
             .labelsHidden()
@@ -294,8 +329,12 @@ private struct MergeRequestDetailView: View {
                 switch tab {
                 case .description: DescriptionTab(detail: detail)
                 case .changes: ChangesTab(detail: detail)
-                case .comments: CommentsTab(detail: detail)
+                case .comments:
+                    CommentsTab(detail: detail) {
+                        if yours { CommentComposer(key: detail.key, fixes: fixes, onPosted: onReload) }
+                    }
                 case .agent: AgentReviewTab(key: detail.key, model: model)
+                case .fix: FixTab(detail: detail, fixes: fixes)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -311,6 +350,13 @@ private struct MergeRequestDetailView: View {
         } message: {
             Text(Copy.approveConfirmMessage(sha: detail.headSha ?? ""))
         }
+        .sheet(isPresented: $merging) {
+            MergeSheet(detail: detail, fixes: fixes) {
+                tab = .description
+                onReload()
+                Task { await model.refresh() }
+            }
+        }
     }
 
     private var header: some View {
@@ -321,7 +367,23 @@ private struct MergeRequestDetailView: View {
                 .font(.title2.weight(.semibold))
                 .textSelection(.enabled)
             HStack(spacing: 8) {
-                if model.isApprovedByMe(detail) {
+                if yours {
+                    let availability = mergeAvailability(detail)
+                    Button { merging = true } label: {
+                        Label(availability == .whenPipelineSucceeds ? Copy.mergeWhenPipelineSucceeds : Copy.merge,
+                              systemImage: "arrow.triangle.merge")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(loading || fixes.busyKeys.contains(detail.key))
+                    .help(blockedReason(availability) ?? "")
+                    Button {
+                        tab = .fix
+                        Task { await fixes.queueFix(detail.key) }
+                    } label: {
+                        Label(Copy.fixFindingsNow, systemImage: "wand.and.stars")
+                    }
+                    .disabled(fixes.busyKeys.contains(detail.key) || fixes.fix(for: detail.key).map { $0.isActive || $0.isReady } == true)
+                } else if model.isApprovedByMe(detail) {
                     Badge(text: Copy.approvedByYou, tint: .green)
                 } else if model.canApprove(detail) {
                     Button { confirmingApprove = true } label: {
@@ -331,7 +393,7 @@ private struct MergeRequestDetailView: View {
                     .disabled(model.approvingKeys.contains(detail.key) || loading)
                 }
                 let busy = model.agentBusyKeys.contains(detail.key)
-                if model.offersReview(for: detail.key) {
+                if !yours && model.offersReview(for: detail.key) {
                     Button {
                         tab = .agent
                         Task { await model.queueAgentReview(detail.key) }
@@ -353,6 +415,9 @@ private struct MergeRequestDetailView: View {
             if let error { NoticeBox(text: error, tint: .red) }
             if let notice = model.approvalNotices[detail.key] {
                 NoticeBox(text: notice, tint: .secondary) { model.dismissApprovalNotice(detail.key) }
+            }
+            if yours, tab != .fix, let banner = fixes.banner {
+                NoticeBox(text: banner, tint: .secondary, onClose: fixes.dismissBanner)
             }
             HStack(spacing: 6) {
                 if detail.draft { Badge(text: Copy.draft, tint: .gray) }
@@ -399,6 +464,11 @@ private struct MergeRequestDetailView: View {
                 }
             }
         }
+    }
+
+    private func blockedReason(_ availability: MergeAvailability) -> String? {
+        if case .blocked(let reason) = availability { return reason }
+        return nil
     }
 
     private func pipelineTint(_ status: String) -> Color {
@@ -582,7 +652,7 @@ private struct ChangesTab: View {
     }
 }
 
-private struct DiffLineRow: View {
+struct DiffLineRow: View {
     let line: DiffLine
 
     var body: some View {
@@ -627,8 +697,10 @@ private struct DiffLineRow: View {
     }
 }
 
-private struct CommentsTab: View {
+private struct CommentsTab<Composer: View>: View {
     let detail: MergeRequestDetail
+    /// Shown above the comments: the comment box on your own MRs.
+    @ViewBuilder let composer: () -> Composer
     @State private var showActivity = false
     @Environment(\.motionLevel) private var motion
 
@@ -637,6 +709,7 @@ private struct CommentsTab: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
+                composer()
                 Toggle(Copy.showActivity, isOn: $showActivity.animation(Motion.animation(Motion.content, motion)))
                     .toggleStyle(.switch)
                     .controlSize(.small)
@@ -800,7 +873,7 @@ private struct AgentReviewTab: View {
 }
 
 /// A running review's steps, oldest first and newest kept in view.
-private struct ActivityFeed: View {
+struct ActivityFeed: View {
     let lines: [ReviewActivityLine]
 
     var body: some View {

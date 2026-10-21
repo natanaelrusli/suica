@@ -194,11 +194,26 @@ public struct ReviewListDocument: Codable, Equatable, Sendable {
     /// The Owner; nil from an agent older than the grouped list.
     public let me: Person?
     public let mergeRequests: [ReviewSummary]
+    /// Your own open MRs; empty from an agent older than Agent Fix.
+    public let yourMergeRequests: [YourMergeRequest]
 
-    public init(version: Int, me: Person? = nil, mergeRequests: [ReviewSummary]) {
+    public init(
+        version: Int, me: Person? = nil, mergeRequests: [ReviewSummary], yourMergeRequests: [YourMergeRequest] = []
+    ) {
         self.version = version
         self.me = me
         self.mergeRequests = mergeRequests
+        self.yourMergeRequests = yourMergeRequests
+    }
+
+    private enum CodingKeys: String, CodingKey { case version, me, mergeRequests, yourMergeRequests }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        version = try container.decode(Int.self, forKey: .version)
+        me = try container.decodeIfPresent(Person.self, forKey: .me)
+        mergeRequests = try container.decode([ReviewSummary].self, forKey: .mergeRequests)
+        yourMergeRequests = try container.decodeIfPresent([YourMergeRequest].self, forKey: .yourMergeRequests) ?? []
     }
 
     /// The Owner's review state on this MR, as GitLab lists it; nil when unknown.
@@ -303,6 +318,14 @@ public struct MergeRequestDetail: Codable, Equatable, Sendable {
     public let headSha: String?
     /// True when GitLab lets you approve this MR now; nil from an agent older than approving.
     public let canApprove: Bool?
+    /// True when the project decides squashing, so you cannot choose; nil from an older agent.
+    public let squashReadOnly: Bool?
+    /// True when merging deletes the source branch, as the MR is set now; nil from an older agent.
+    public let removeSourceBranch: Bool?
+    /// GitLab's merge readiness (MERGEABLE, NOT_APPROVED, CI_STILL_RUNNING, …); nil when unknown.
+    public let detailedMergeStatus: String?
+    public let defaultMergeCommitMessage: String?
+    public let defaultSquashCommitMessage: String?
     public let discussions: [MRDiscussion]
     public let discussionsTruncated: Bool
     public let files: [DiffFile]
@@ -438,6 +461,11 @@ public final class ReviewsModel {
 
     public var selectedDetail: MergeRequestDetail? { selectedKey.flatMap { details[$0] } }
 
+    /// True for one of your own MRs: its page offers Agent Fix, a comment and Merge.
+    public func isYours(_ key: String) -> Bool {
+        list?.yourMergeRequests.contains { $0.key == key } ?? false
+    }
+
     /// The MR page offers Review with agent or Review again; see `ReviewSummary.offersReview`.
     public func offersReview(for key: String) -> Bool {
         list?.mergeRequests.first { $0.key == key }?.offersReview ?? true
@@ -540,7 +568,7 @@ public final class ReviewsModel {
             guard mine == latestRefresh else { return }
             list = fresh
             errorText = nil
-            let keys = Set(fresh.mergeRequests.map(\.key))
+            let keys = Set(fresh.mergeRequests.map(\.key) + fresh.yourMergeRequests.map(\.key))
             if let selected = selectedKey, !keys.contains(selected) { selectedKey = nil }
             // The first row on screen, so it is one that waits for the Owner when there is one.
             if selectedKey == nil { selectedKey = fresh.sections.first?.items.first?.key }

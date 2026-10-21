@@ -284,10 +284,10 @@ public struct CLIAgentClient: AgentClient {
         return try decodeAgentState(line)
     }
 
-    private func action(_ arguments: [String], timeout: TimeInterval) async throws(AgentError)
+    private func action(_ arguments: [String], timeout: TimeInterval, stdin: Data? = nil) async throws(AgentError)
         -> ActionResult
     {
-        let result = try await runner.run(invocation(arguments, timeout: timeout))
+        let result = try await runner.run(invocation(arguments, timeout: timeout, stdin: stdin))
         // The CLI exits 1 when nothing happened, with the reason in the JSON: read that first.
         if let line = lastLine(of: result.stdout),
             let parsed = try? JSONDecoder().decode(StatusLine.self, from: line)
@@ -443,3 +443,57 @@ extension CLIAgentClient: ReviewsClient {
 }
 
 extension CLIAgentClient: TemplatesClient {}
+
+// MARK: - Fixes client
+
+extension CLIAgentClient: FixesClient {
+    // A confirm reads the MR, commits, pushes over SSH and posts one reply per thread.
+    private static let confirmTimeout: TimeInterval = 600
+
+    public func fixes() async throws(AgentError) -> FixListDocument {
+        try await document(FixListDocument.self, ["fix", "list", "--json"])
+    }
+
+    public func queueFix(key: String) async throws(AgentError) -> ActionResult {
+        try await action(["fix", "queue", key, "--json"], timeout: Self.gitlabTimeout)
+    }
+
+    public func confirmFix(id: Int, edits: ConfirmEdits) async throws(AgentError) -> ActionResult {
+        let body: Data
+        do {
+            body = try JSONEncoder().encode(edits)
+        } catch {
+            throw AgentError.badOutput
+        }
+        return try await action(["fix", "confirm", String(id), "--json"], timeout: Self.confirmTimeout, stdin: body)
+    }
+
+    public func retryFix(id: Int, note: String) async throws(AgentError) -> ActionResult {
+        try await action(["fix", "retry", String(id), "--json"], timeout: Self.shortTimeout, stdin: Data(note.utf8))
+    }
+
+    public func discardFix(id: Int) async throws(AgentError) -> ActionResult {
+        try await action(["fix", "discard", String(id), "--json"], timeout: Self.shortTimeout)
+    }
+
+    public func cancelFix(id: Int) async throws(AgentError) -> ActionResult {
+        try await action(["fix", "cancel", String(id), "--json"], timeout: Self.shortTimeout)
+    }
+
+    public func postMissingReplies(id: Int) async throws(AgentError) -> ActionResult {
+        try await action(["fix", "replies", String(id), "--json"], timeout: Self.inlinePostTimeout)
+    }
+
+    public func comment(key: String, body: String) async throws(AgentError) -> ActionResult {
+        try await action(["mr", "comment", key, "--json"], timeout: Self.gitlabTimeout, stdin: Data(body.utf8))
+    }
+
+    public func merge(key: String, sha: String, choice: MergeChoice) async throws(AgentError) -> ActionResult {
+        var arguments = ["mr", "merge", key, sha]
+        if choice.squash { arguments.append("--squash") }
+        if choice.removeSourceBranch { arguments.append("--remove-source-branch") }
+        if choice.whenPipelineSucceeds { arguments.append("--when-pipeline-succeeds") }
+        arguments.append("--json")
+        return try await action(arguments, timeout: Self.gitlabTimeout, stdin: Data(choice.message.utf8))
+    }
+}

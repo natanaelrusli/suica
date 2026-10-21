@@ -189,6 +189,7 @@ struct MainWindow: View {
     let window: WindowModel
     let editor: ConfigEditorModel
     let reviews: ReviewsModel
+    let fixes: FixesModel
     let templates: TemplateEditorModel
     let settings: AppearanceSettings
     @Bindable var navigator: Navigator
@@ -369,7 +370,7 @@ struct MainWindow: View {
     @ViewBuilder private func sectionPage(_ item: SidebarItem) -> some View {
         switch item.section {
         case .overview: OverviewView(window: window, editor: editor, reviews: reviews, navigator: navigator)
-        case .reviews: ReviewsView(model: reviews)
+        case .reviews: ReviewsView(model: reviews, fixes: fixes)
         case .messages: MessagesView(window: window)
         case .statistics:
             if let page = item.statisticsPage {
