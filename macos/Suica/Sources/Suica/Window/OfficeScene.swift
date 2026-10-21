@@ -11,6 +11,7 @@ struct DeskTag: Component {
 /// The floor, wall and desk colours of one appearance.
 private struct Palette {
     let floor: NSColor
+    let hallFloor: NSColor
     let wall: NSColor
     let desk: NSColor
     let label: NSColor
@@ -20,12 +21,14 @@ private struct Palette {
     let background: NSColor
 
     static let light = Palette(
-        floor: NSColor(white: 0.88, alpha: 1), wall: NSColor(white: 0.78, alpha: 1),
+        floor: NSColor(white: 0.88, alpha: 1), hallFloor: NSColor(red: 0.8, green: 0.84, blue: 0.9, alpha: 1),
+        wall: NSColor(white: 0.78, alpha: 1),
         desk: NSColor(red: 0.78, green: 0.66, blue: 0.5, alpha: 1), label: NSColor(white: 0.25, alpha: 1),
         bubble: .white, bubbleText: NSColor(white: 0.12, alpha: 1), figureIdle: NSColor(white: 0.66, alpha: 1),
         background: NSColor(white: 0.96, alpha: 1))
     static let dark = Palette(
-        floor: NSColor(white: 0.2, alpha: 1), wall: NSColor(white: 0.3, alpha: 1),
+        floor: NSColor(white: 0.2, alpha: 1), hallFloor: NSColor(red: 0.16, green: 0.19, blue: 0.25, alpha: 1),
+        wall: NSColor(white: 0.3, alpha: 1),
         desk: NSColor(red: 0.45, green: 0.37, blue: 0.28, alpha: 1), label: NSColor(white: 0.85, alpha: 1),
         bubble: NSColor(white: 0.32, alpha: 1), bubbleText: .white, figureIdle: NSColor(white: 0.45, alpha: 1),
         background: NSColor(white: 0.11, alpha: 1))
@@ -76,6 +79,7 @@ final class OfficeSceneController {
     private var animate = true
     private var dark = false
     private var layoutExtent = SIMD2<Float>(8, 6)
+    private static let doorWidth: Float = 1.4
 
     // The camera: where it looks, how it is turned and how far it stands.
     static let defaultYaw: Float = 0.42
@@ -186,16 +190,12 @@ final class OfficeSceneController {
         layoutExtent = SIMD2(Float(layout.width), Float(layout.depth))
         if !adjusted { applyCamera() }
 
-        // Rooms
+        // Rooms: the project Rooms and the Center Room they open onto.
         var liveRooms = Set<String>()
-        // An office with nobody in it is one bare room.
-        let floors =
-            layout.rooms.isEmpty
-            ? [PlacedRoom.bare(width: layout.width, depth: layout.depth)]
-            : layout.rooms
-        for room in floors {
+        for room in layout.all {
             liveRooms.insert(room.path)
-            let signature = "\(room.name)|\(room.width)|\(room.depth)|\(dark)"
+            let walls = room.walls.map(\.rawValue).sorted().joined(separator: ",")
+            let signature = "\(room.name)|\(room.width)|\(room.depth)|\(walls)|\(room.door?.rawValue ?? "")|\(dark)"
             if rooms[room.path]?.signature != signature {
                 rooms[room.path]?.entity.removeFromParent()
                 let entity = makeRoom(room, palette)
@@ -291,20 +291,66 @@ final class OfficeSceneController {
             containerFrame: .zero, alignment: .center, lineBreakMode: .byTruncatingTail)
     }
 
+    /// A low wall along one side of a room, with a doorway in its middle when `door` is set.
+    private func addWall(
+        to entity: Entity, side: OfficeSide, room: PlacedRoom, palette: Palette
+    ) {
+        let width = Float(room.width)
+        let depth = Float(room.depth)
+        let thickness: Float = 0.06
+        let height: Float = 0.5
+        let walls = room.walls
+        switch side {
+        case .north, .south:
+            let z = (side == .north ? -1 : 1) * (depth / 2 - thickness / 2)
+            guard room.door == side else {
+                entity.addChild(box([width, height, thickness], palette.wall, at: [0, height / 2, z]))
+                return
+            }
+            let piece = (width - Self.doorWidth) / 2
+            for direction: Float in [-1, 1] {
+                entity.addChild(
+                    box(
+                        [piece, height, thickness], palette.wall,
+                        at: [direction * (Self.doorWidth + piece) / 2, height / 2, z]))
+            }
+            // A mat in the doorway, so the way through reads from above.
+            entity.addChild(box([Self.doorWidth, 0.014, 0.5], palette.desk, at: [0, 0.007, z]))
+        case .west, .east:
+            // Between the north and south walls, which run the whole width.
+            let top = walls.contains(.north) ? thickness : 0
+            let bottom = walls.contains(.south) ? thickness : 0
+            let x = (side == .west ? -1 : 1) * (width / 2 - thickness / 2)
+            entity.addChild(
+                box(
+                    [thickness, height, depth - top - bottom], palette.wall,
+                    at: [x, height / 2, (top - bottom) / 2]))
+        }
+    }
+
     private func makeRoom(_ room: PlacedRoom, _ palette: Palette) -> Entity {
         let entity = Entity()
         let width = Float(room.width)
         let depth = Float(room.depth)
-        entity.addChild(box([width, 0.06, depth], palette.floor, at: [0, -0.03, 0]))
-        entity.addChild(box([width, 0.5, 0.06], palette.wall, at: [0, 0.25, -depth / 2 + 0.03]))
-        entity.addChild(box([0.06, 0.5, depth - 0.06], palette.wall, at: [-width / 2 + 0.03, 0.25, 0.03]))
+        entity.addChild(
+            box([width, 0.06, depth], room.isCenter ? palette.hallFloor : palette.floor, at: [0, -0.03, 0]))
+        for side in [OfficeSide.north, .south, .west, .east] where room.walls.contains(side) {
+            addWall(to: entity, side: side, room: room, palette: palette)
+        }
         guard !room.name.isEmpty else { return entity }
         let mesh = textMesh(room.name, size: 0.3)
         let label = ModelEntity(mesh: mesh, materials: [UnlitMaterial(color: palette.label)])
         let bounds = mesh.bounds
-        // Flat on the floor at the front, where no bubble covers it.
-        label.orientation = simd_quatf(angle: -.pi / 2, axis: [1, 0, 0])
-        label.position = [-width / 2 + 0.35 - bounds.min.x, 0.012, depth / 2 - 0.25]
+        let x = -width / 2 + 0.35 - bounds.min.x
+        if room.isCenter {
+            // Flat on the floor: nothing stands in the hall to cover it.
+            label.orientation = simd_quatf(angle: -.pi / 2, axis: [1, 0, 0])
+            label.position = [x, 0.012, 0.3]
+        } else {
+            // Standing on the near wall, which faces the viewer: a name on the floor would be hidden
+            // behind that wall or behind the Desks.
+            label.position = [x, 0.52 - bounds.min.y, depth / 2 - 0.03]
+        }
         entity.addChild(label)
         return entity
     }

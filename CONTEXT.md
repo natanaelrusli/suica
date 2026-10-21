@@ -80,6 +80,10 @@ _Avoid_: Run, process
 A project folder (its git repository root; worktrees join the main repository's Room) that has at least one live Session, drawn as a room in the Office.
 _Avoid_: Project (alone), workspace
 
+**Center Room**:
+The hall in the middle of the Office that every Room opens onto through a doorway; it has no Desks and is there even when no Session is running.
+_Avoid_: Lobby, hallway
+
 **Desk**:
 One Session's place in its Room.
 _Avoid_: Seat, slot

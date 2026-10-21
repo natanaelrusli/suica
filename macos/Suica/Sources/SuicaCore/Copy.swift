@@ -849,6 +849,7 @@ public enum Copy {
     public static let bubbleIdle = "Idle"
     public static let bubbleExited = "Left the office"
     public static let resetCamera = "Reset view"
+    public static let officeCenterRoom = "Center room"
     public static let officeControlsHint = "Drag to turn · two-finger scroll or ⌥-drag to move · pinch or ⌘-scroll to zoom"
     public static let openAgent = "Open"
     public static let officeProject = "Project"

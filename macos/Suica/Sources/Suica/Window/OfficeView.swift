@@ -48,6 +48,13 @@ struct OfficeView: View {
             .motion(value: model.errorText)
             .motion(value: model.selectedId)
         }
+        .toolbar {
+            Button { Task { await model.refresh() } } label: {
+                Label(Copy.refresh, systemImage: "arrow.clockwise")
+            }
+            .help("\(Copy.refresh) (⌘R)")
+            .keyboardShortcut("r")
+        }
         .clipped()
         .background(WindowVisibility { windowVisible = $0 })
         // Polls only while the page is on screen: the scene and the detection stop with it.
