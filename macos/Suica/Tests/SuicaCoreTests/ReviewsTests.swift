@@ -35,6 +35,8 @@ actor FakeReviewsClient: ReviewsClient {
     var detailResults: [String: Result<MergeRequestDetail, AgentError>] = [:]
     var gates: [String: Gate] = [:]
     private(set) var detailCalls: [String] = []
+    private(set) var listCalls = 0
+    var listGate: Gate?
 
     init(lists: [Result<ReviewListDocument, AgentError>]) { self.lists = lists }
 
@@ -43,8 +45,15 @@ actor FakeReviewsClient: ReviewsClient {
         gates[key] = gate
     }
 
+    func setListGate(_ gate: Gate?) { listGate = gate }
+
     func reviews() async throws(AgentError) -> ReviewListDocument {
+        listCalls += 1
         let result = lists.count > 1 ? lists.removeFirst() : (lists.first ?? .failure(.launchFailed))
+        if let gate = listGate {
+            listGate = nil
+            await gate.wait()
+        }
         return try result.get()
     }
 
@@ -185,6 +194,27 @@ actor FakeReviewsClient: ReviewsClient {
     await model.refresh()
     #expect(await client.detailCalls == ["g/p!1", "g/p!2", "g/p!2"])
     #expect(model.details["g/p!1"] == nil)
+    #expect(model.selectedDetail?.key == "g/p!2")
+}
+
+@MainActor @Test func refreshReadsTheSelectedMRWhileTheListLoads() async throws {
+    let client = FakeReviewsClient(lists: [.success(list("g/p!1", "g/p!2"))])
+    await client.setDetail("g/p!1", .success(try detail("g/p!1")))
+    await client.setDetail("g/p!2", .success(try detail("g/p!2")))
+    let model = ReviewsModel(client: client)
+    await model.refresh()
+    await model.select("g/p!2")
+    let gate = Gate()
+    await client.setListGate(gate)
+    let refresh = Task { await model.refresh() }
+    while await client.listCalls < 2 { await Task.yield() }
+    // Bounded, so a refresh that waits for the list fails here instead of hanging.
+    for _ in 0..<1_000 where await client.detailCalls.count < 3 { await Task.yield() }
+    #expect(await client.detailCalls.count == 3)
+    #expect(model.loadingList)
+    await gate.open()
+    await refresh.value
+    #expect(await client.detailCalls == ["g/p!1", "g/p!2", "g/p!2"])
     #expect(model.selectedDetail?.key == "g/p!2")
 }
 

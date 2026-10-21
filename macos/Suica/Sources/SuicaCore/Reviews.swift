@@ -591,6 +591,9 @@ public final class ReviewsModel {
         let mine = latestRefresh
         loadingList = true
         defer { if mine == latestRefresh { loadingList = false } }
+        // The selected MR is read while the list loads, not after it: each is its own GitLab round trip.
+        let early = selectedKey
+        let earlyLoad = early.map { key in Task { await loadDetail(key, keepingNotice: true) } }
         do {
             let fresh = try await client.reviews()
             guard mine == latestRefresh else { return }
@@ -601,13 +604,15 @@ public final class ReviewsModel {
             if let selected = selectedKey, !keys.contains(selected) { selectedKey = nil }
             // The first row on screen, so it is one that waits for the Owner when there is one.
             if selectedKey == nil { selectedKey = fresh.sections.first?.items.first?.key }
-            if details.keys.contains(where: { $0 != selectedKey }) { details = details.filter { $0.key == selectedKey } }
         } catch {
             guard mine == latestRefresh else { return }
             let message = MenuModel.message(for: error)
             if errorText != message { errorText = message }
         }
-        if let key = selectedKey { await loadDetail(key, keepingNotice: true) }
+        if let key = selectedKey, key != early { await loadDetail(key, keepingNotice: true) }
+        await earlyLoad?.value
+        // After the early load, so the detail of an MR that left the list is not stored again.
+        if details.keys.contains(where: { $0 != selectedKey }) { details = details.filter { $0.key == selectedKey } }
     }
 
     public func select(_ key: String?) async {

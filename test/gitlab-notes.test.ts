@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { SNAPSHOT_QUERY, parseSnapshot } from "../src/gitlab.ts";
+import { SNAPSHOT_QUERY, fetchSnapshot, parseSnapshot } from "../src/gitlab.ts";
 
 describe("SNAPSHOT_QUERY", () => {
   it("asks for notes once, in the fragment shared by both lists", () => {
@@ -36,5 +36,41 @@ describe("parseSnapshot notes on review-requested MRs", () => {
     expect(snapshot.reviewRequested[0]?.notes).toEqual([
       { id: "n1", system: false, author: { username: "me", name: "Nata" } },
     ]);
+  });
+});
+
+describe("fetchSnapshot without notes", () => {
+  const empty = {
+    data: {
+      currentUser: {
+        username: "me",
+        name: "Nata",
+        reviewRequestedMergeRequests: { pageInfo: { hasNextPage: false }, nodes: [] },
+        authoredMergeRequests: { pageInfo: { hasNextPage: false }, nodes: [] },
+      },
+    },
+  };
+
+  it("leaves notes out of the query, the costly part for GitLab, and keeps the rest", async () => {
+    const queries: string[] = [];
+    await fetchSnapshot(
+      (query) => {
+        queries.push(query);
+        return Promise.resolve(empty);
+      },
+      { notes: false },
+    );
+    expect(queries[0]).not.toContain("notes(");
+    expect(queries[0]).toContain("diffHeadSha");
+    expect(queries[0]).toContain("description");
+  });
+
+  it("asks for notes by default, as the poller needs them", async () => {
+    const queries: string[] = [];
+    await fetchSnapshot((query) => {
+      queries.push(query);
+      return Promise.resolve(empty);
+    });
+    expect(queries).toEqual([SNAPSHOT_QUERY]);
   });
 });

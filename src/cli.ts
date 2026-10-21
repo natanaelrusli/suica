@@ -244,7 +244,8 @@ function officeJson(): number {
 /** `suica reviews --json` and `suica mr <key> --json`: no runtime. */
 async function reviewsJson(): Promise<number> {
   const config = loadConfig(defaultConfigPath());
-  const snapshot = await fetchSnapshot(glabRunner(config.gitlab));
+  // The list shows no notes, and leaving them out halves GitLab's answer time.
+  const snapshot = await fetchSnapshot(glabRunner(config.gitlab), { notes: false });
   const store = openStore(config.statePath ?? defaultStatePath());
   try {
     store.recoverStalePostings(Date.now());
