@@ -30,6 +30,8 @@ public struct OfficeSession: Codable, Equatable, Sendable, Identifiable {
     /// claude, codex, gemini, or the name of an `office.custom` agent.
     public let agent: String
     public let sessionId: String
+    /// The Session Title: the name its agent gives it, or the first line of its first prompt.
+    public let title: String?
     public let cwd: String
     public var status: OfficeStatus
     public let activity: String
@@ -46,12 +48,13 @@ public struct OfficeSession: Codable, Equatable, Sendable, Identifiable {
     public var id: String { "\(agent)/\(sessionId)" }
 
     public init(
-        agent: String, sessionId: String, cwd: String, status: OfficeStatus, activity: String,
+        agent: String, sessionId: String, title: String? = nil, cwd: String, status: OfficeStatus, activity: String,
         recentActions: [OfficeAction], startedAt: Int?, updatedAt: Int, pid: Int?, room: String,
         roomName: String, hostApp: String?
     ) {
         self.agent = agent
         self.sessionId = sessionId
+        self.title = title
         self.cwd = cwd
         self.status = status
         self.activity = activity
@@ -63,6 +66,15 @@ public struct OfficeSession: Codable, Equatable, Sendable, Identifiable {
         self.roomName = roomName
         self.hostApp = hostApp
     }
+
+    /// The Session Title as the chat panel heads it: the agent's name when there is none.
+    public var heading: String {
+        let clean = title.map { DisplayText.clean($0, max: 120) } ?? ""
+        return clean.isEmpty ? OfficeAgent(kind: agent).name : clean
+    }
+
+    /// The Session Title on the bubble's first line, at most 28 characters; nothing without a title.
+    public var bubbleTitle: String { title.map { DisplayText.clean($0, max: 28) } ?? "" }
 
     /// What the bubble above the figure says, at most 32 characters.
     public var bubble: String {
@@ -90,8 +102,50 @@ public struct OfficeDocument: Codable, Equatable, Sendable {
     }
 }
 
+public enum OfficeChatRole: String, Codable, Equatable, Sendable {
+    case user, assistant
+
+    /// A role a newer CLI invents reads as the agent's, so the message still shows.
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = OfficeChatRole(rawValue: raw) ?? .assistant
+    }
+}
+
+/// One turn of a Session's conversation: the Owner's prompt or the agent's answer.
+public struct OfficeChatMessage: Codable, Equatable, Sendable {
+    /// Epoch milliseconds; 0 when the transcript gives none.
+    public let at: Int
+    public let role: OfficeChatRole
+    public let text: String
+
+    public init(at: Int, role: OfficeChatRole, text: String) {
+        self.at = at
+        self.role = role
+        self.text = text
+    }
+}
+
+/// `suica office chat <agent> <sessionId> --json`: the last messages of one Session.
+public struct OfficeChatDocument: Codable, Equatable, Sendable {
+    public let version: Int
+    public let agent: String
+    public let sessionId: String
+    public let title: String?
+    public let messages: [OfficeChatMessage]
+
+    public init(version: Int, agent: String, sessionId: String, title: String?, messages: [OfficeChatMessage]) {
+        self.version = version
+        self.agent = agent
+        self.sessionId = sessionId
+        self.title = title
+        self.messages = messages
+    }
+}
+
 public protocol OfficeClient: Sendable {
     func office() async throws(AgentError) -> OfficeDocument
+    func chat(agent: String, sessionId: String) async throws(AgentError) -> OfficeChatDocument
 }
 
 // MARK: - Agents
@@ -155,16 +209,16 @@ extension OfficeColour {
 
 /// A generator seeded by text: a figure or a Room looks the same on every poll and every launch
 /// (Swift's `Hasher` is seeded per process). FNV-1a for the seed, SplitMix64 for the stream.
-struct OfficeSeed: RandomNumberGenerator {
+public struct OfficeSeed: RandomNumberGenerator {
     private var state: UInt64
 
-    init(_ text: String) {
+    public init(_ text: String) {
         var hash: UInt64 = 0xcbf2_9ce4_8422_2325
         for byte in text.utf8 { hash = (hash ^ UInt64(byte)) &* 0x100_0000_01b3 }
         state = hash
     }
 
-    mutating func next() -> UInt64 {
+    public mutating func next() -> UInt64 {
         state &+= 0x9e37_79b9_7f4a_7c15
         var value = state
         value = (value ^ (value >> 30)) &* 0xbf58_476d_1ce4_e5b9
@@ -250,6 +304,11 @@ public struct OfficeRoom: Equatable, Sendable, Identifiable {
 public struct OfficePoint: Equatable, Sendable {
     public let x: Double
     public let z: Double
+
+    public init(x: Double, z: Double) {
+        self.x = x
+        self.z = z
+    }
 }
 
 /// A side of a room: north is the far side of the scene, south the near side.
@@ -436,6 +495,72 @@ public struct OfficeLayout: Equatable, Sendable {
     }
 }
 
+// MARK: - Walking
+
+/// Where a figure walks, as straight legs between points on the floor.
+public struct OfficePath: Equatable, Sendable {
+    public let points: [OfficePoint]
+    public let length: Double
+
+    public init(_ points: [OfficePoint]) {
+        // A repeated point is a leg of no length: dropped, so headings stay defined.
+        var kept: [OfficePoint] = []
+        for point in points where kept.last != point { kept.append(point) }
+        self.points = kept
+        length = zip(kept, kept.dropFirst()).reduce(0) { total, leg in
+            total + ((leg.1.x - leg.0.x) * (leg.1.x - leg.0.x) + (leg.1.z - leg.0.z) * (leg.1.z - leg.0.z)).squareRoot()
+        }
+    }
+
+    public var start: OfficePoint? { points.first }
+    public var end: OfficePoint? { points.last }
+
+    /// Where the walker is after `distance` metres, and the way it faces (a unit vector, nil when
+    /// the path has no length). Before the start it is at the start; past the end, at the end.
+    public func position(at distance: Double) -> (point: OfficePoint, heading: OfficePoint?) {
+        guard let first = points.first else { return (OfficePoint(x: 0, z: 0), nil) }
+        var left = max(0, distance)
+        var heading: OfficePoint?
+        for (from, to) in zip(points, points.dropFirst()) {
+            let dx = to.x - from.x
+            let dz = to.z - from.z
+            let leg = (dx * dx + dz * dz).squareRoot()
+            heading = OfficePoint(x: dx / leg, z: dz / leg)
+            if left <= leg {
+                let t = left / leg
+                return (OfficePoint(x: from.x + dx * t, z: from.z + dz * t), heading)
+            }
+            left -= leg
+        }
+        return (points.last ?? first, heading)
+    }
+}
+
+extension OfficeLayout {
+    /// How far in front of its Desk a figure's chair stands.
+    public static let chairOffset = 0.55
+    /// The aisle a figure walks along, in from the door wall.
+    static let aisleInset = 0.45
+    /// The gap beside a Desk a figure walks down to its chair: Desks stand 1.8 m apart and are 1.2 m wide.
+    static let gapBesideDesk = 0.9
+
+    /// Where a figure walks from `room`'s doorway to its Desk's chair: along the aisle by the door
+    /// wall, down the gap beside its Desk, then across to the chair. Walked backwards to leave. A
+    /// room without a door (none in a building) gives the chair alone.
+    public static func walk(in room: PlacedRoom, to desk: PlacedDesk) -> OfficePath {
+        let chair = OfficePoint(x: desk.position.x, z: desk.position.z + chairOffset)
+        guard let side = room.door, side == .north || side == .south else { return OfficePath([chair]) }
+        let out = side == .north ? -1.0 : 1.0
+        let door = OfficePoint(x: room.center.x, z: room.center.z + out * room.depth / 2)
+        let aisle = door.z - out * aisleInset
+        let gap = min(desk.position.x + gapBesideDesk, room.center.x + room.width / 2 - 0.35)
+        return OfficePath([
+            door, OfficePoint(x: door.x, z: aisle), OfficePoint(x: gap, z: aisle), OfficePoint(x: gap, z: chair.z),
+            chair,
+        ])
+    }
+}
+
 // MARK: - Model
 
 /// What changed between two snapshots, by session id.
@@ -460,6 +585,9 @@ public final class OfficeModel {
     /// A snapshot has arrived at least once.
     public private(set) var loaded = false
     public private(set) var selectedId: String?
+    /// The selected Session's conversation, once read; nil until then and after a deselection.
+    public private(set) var chat: OfficeChatDocument?
+    public private(set) var chatError: String?
 
     /// A Session whose process exited stays at its Desk, greyed, this long.
     public static let stay: TimeInterval = 300
@@ -479,9 +607,16 @@ public final class OfficeModel {
 
     public var selected: OfficeSession? { selectedId.flatMap { entries[$0]?.session } }
 
-    public func select(_ id: String?) { selectedId = id }
+    /// Picks a Session; its conversation is read by `loadChat`, and dropped when it is deselected.
+    public func select(_ id: String?) {
+        guard selectedId != id else { return }
+        selectedId = id
+        chat = nil
+        chatError = nil
+    }
 
-    /// Reads the CLI once; a failure keeps the last good office and says why.
+    /// Reads the CLI once; a failure keeps the last good office and says why. While a Session is
+    /// selected, its conversation is read too, so the chat panel follows the agent.
     public func refresh(now: Date = Date()) async {
         do {
             let document = try await client.office()
@@ -489,6 +624,22 @@ public final class OfficeModel {
             errorText = nil
         } catch {
             errorText = MenuModel.message(for: error)
+        }
+        if selectedId != nil { await loadChat() }
+    }
+
+    /// Reads the selected Session's conversation; a failure keeps the last one read and says why.
+    /// An answer for a Session that is no longer selected is dropped.
+    public func loadChat() async {
+        guard let session = selected else { return }
+        do {
+            let document = try await client.chat(agent: session.agent, sessionId: session.sessionId)
+            guard selectedId == session.id else { return }
+            chat = document
+            chatError = nil
+        } catch {
+            guard selectedId == session.id else { return }
+            chatError = MenuModel.message(for: error)
         }
     }
 
@@ -530,7 +681,7 @@ public final class OfficeModel {
         diff.departed.sort { (entries[$0]?.order ?? 0) < (entries[$1]?.order ?? 0) }
         diff.removed.sort { (entries[$0]?.order ?? 0) < (entries[$1]?.order ?? 0) }
         entries = next
-        if let id = selectedId, entries[id] == nil { selectedId = nil }
+        if let id = selectedId, entries[id] == nil { select(nil) }
         lastDiff = diff
         loaded = true
         rebuild()

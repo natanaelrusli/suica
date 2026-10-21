@@ -457,6 +457,10 @@ extension CLIAgentClient: OfficeClient {
     public func office() async throws(AgentError) -> OfficeDocument {
         try await document(OfficeDocument.self, ["office", "--json"])
     }
+
+    public func chat(agent: String, sessionId: String) async throws(AgentError) -> OfficeChatDocument {
+        try await document(OfficeChatDocument.self, ["office", "chat", agent, sessionId, "--json"])
+    }
 }
 
 extension CLIAgentClient: TemplatesClient {}

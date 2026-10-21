@@ -4,15 +4,11 @@ import { describeTool } from "./describe.ts";
 import { processesRunning } from "./proc.ts";
 import { activityFor, classifyByActivity } from "./status.ts";
 import { readTail } from "./tail.ts";
+import { asRecord, geminiTitle } from "./transcript.ts";
 import { LIVE_WINDOW_MS, type Adapter, type RawSession, type RecentAction } from "./types.ts";
 
 const MAX_ACTIONS = 5;
 const TAIL_BYTES = 512 * 1024;
-
-const asRecord = (value: unknown): Record<string, unknown> | undefined =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
 
 /** `~/.gemini/projects.json` maps a folder to its project name; the chats live under that name. */
 function projectFolders(home: string): Map<string, string> {
@@ -103,6 +99,7 @@ export const geminiAdapter: Adapter = (probe) => {
       sessions.push({
         agent: "gemini",
         sessionId: chat.name.slice("session-".length, -".jsonl".length),
+        title: geminiTitle(join(dir, chat.name)),
         cwd: folder,
         status,
         activity: activityFor(status, reading.actions, probe.now),

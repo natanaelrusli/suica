@@ -4,6 +4,7 @@ import { describeTool } from "./describe.ts";
 import { processesRunning, runs } from "./proc.ts";
 import { activityFor, classifyByActivity } from "./status.ts";
 import { readTail } from "./tail.ts";
+import { asRecord, claudeTitle } from "./transcript.ts";
 import {
   EXITED_STAY_MS,
   type Adapter,
@@ -16,11 +17,6 @@ import {
 
 const MAX_ACTIONS = 5;
 const WINDOWS = [256 * 1024, 1024 * 1024, 4 * 1024 * 1024];
-
-const asRecord = (value: unknown): Record<string, unknown> | undefined =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
 
 /** Claude Code's folder for a working folder: every character that is not a letter or digit is `-`. */
 export const projectSlug = (cwd: string): string => cwd.replace(/[^a-zA-Z0-9]/g, "-");
@@ -92,6 +88,8 @@ function mapStatus(raw: unknown): OfficeStatus {
 
 function build(args: {
   readonly sessionId: string;
+  /** The `name` of the session file, when it has one. */
+  readonly name?: unknown;
   readonly cwd: string;
   readonly status: OfficeStatus;
   readonly startedAt: number | null;
@@ -105,6 +103,7 @@ function build(args: {
   return {
     agent: "claude",
     sessionId: args.sessionId,
+    title: claudeTitle(args.transcript, args.name),
     cwd: args.cwd,
     status: args.status,
     activity: activityFor(args.status, actions, args.now),
@@ -132,7 +131,8 @@ function mtimeOf(path: string | undefined): number {
   }
 }
 
-function readSessionFiles(home: string): Map<number, Record<string, unknown>> {
+/** The `~/.claude/sessions/<pid>.json` files by pid, each as parsed. */
+export function readSessionFiles(home: string): Map<number, Record<string, unknown>> {
   const found = new Map<number, Record<string, unknown>>();
   const dir = join(home, ".claude", "sessions");
   let names: string[];
@@ -199,6 +199,7 @@ export const claudeAdapter: Adapter = (probe) => {
     sessions.push(
       build({
         sessionId,
+        name: file["name"],
         cwd,
         status: alive ? mapStatus(file["status"]) : "exited",
         startedAt: typeof file["startedAt"] === "number" ? file["startedAt"] : null,

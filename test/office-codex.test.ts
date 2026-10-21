@@ -68,7 +68,7 @@ describe("codexAdapter", () => {
       activity: "Running npm test",
       startedAt: NOW - 120_000,
     });
-    expect(JSON.stringify(one)).not.toContain("private prompt");
+    expect(JSON.stringify([one?.activity, one?.recentActions])).not.toContain("private prompt");
   });
 
   it("is idle after task_complete", () => {
@@ -121,6 +121,53 @@ describe("codexAdapter", () => {
     );
     const [one] = codexAdapter(fakeProbe({ home }));
     expect(one?.recentActions.map((a) => a.text)).toEqual(["Running git status", "Editing files"]);
+  });
+
+  it("titles a rollout by its first UserMessage item", () => {
+    rollout(
+      "ttt",
+      [
+        meta("ttt", "/work/kinsen", NOW - 120_000),
+        {
+          timestamp: iso(NOW - 110_000),
+          type: "response_item",
+          payload: {
+            type: "message",
+            role: "user",
+            content: [{ type: "input_text", text: "Earlier message item" }],
+          },
+        },
+        event("item_completed", NOW - 100_000, {
+          item: { type: "UserMessage", content: [{ type: "text", text: "  Port the\nlock SDK " }] },
+        }),
+      ],
+      NOW - 4_000,
+    );
+    expect(codexAdapter(fakeProbe({ home }))[0]?.title).toBe("Port the");
+  });
+
+  it("falls back to the first user message item that is not a preamble, else no title", () => {
+    const userItem = (text: string, at: number) => ({
+      timestamp: iso(at),
+      type: "response_item",
+      payload: { type: "message", role: "user", content: [{ type: "input_text", text }] },
+    });
+    rollout(
+      "uuu",
+      [
+        meta("uuu", "/work/kinsen", NOW - 120_000),
+        userItem("# AGENTS.md instructions", NOW - 110_000),
+        userItem("<permissions instructions>", NOW - 109_000),
+        userItem(">>> review preamble", NOW - 108_000),
+        userItem("Make the tests green", NOW - 100_000),
+      ],
+      NOW - 4_000,
+    );
+    rollout("vvv", [meta("vvv", "/work/other", NOW - 120_000)], NOW - 3_000);
+    const titles = Object.fromEntries(
+      codexAdapter(fakeProbe({ home })).map((s) => [s.sessionId, s.title]),
+    );
+    expect(titles).toEqual({ uuu: "Make the tests green", vvv: null });
   });
 
   it("does not count the app-server daemon as a Session", () => {

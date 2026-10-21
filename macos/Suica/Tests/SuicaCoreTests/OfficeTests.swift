@@ -11,10 +11,10 @@ private func contract(_ name: String) throws -> Data {
 
 private func session(
     _ id: String, agent: String = "claude", room: String = "/work/suica", status: OfficeStatus = .working,
-    activity: String = "Thinking", updatedAt: Int = 1_000
+    activity: String = "Thinking", updatedAt: Int = 1_000, title: String? = nil
 ) -> OfficeSession {
     OfficeSession(
-        agent: agent, sessionId: id, cwd: room, status: status, activity: activity, recentActions: [],
+        agent: agent, sessionId: id, title: title, cwd: room, status: status, activity: activity, recentActions: [],
         startedAt: nil, updatedAt: updatedAt, pid: nil, room: room,
         roomName: String(room.split(separator: "/").last ?? ""), hostApp: nil)
 }
@@ -27,11 +27,25 @@ private func at(_ seconds: Double) -> Date { Date(timeIntervalSince1970: seconds
 
 private actor FakeOfficeClient: OfficeClient {
     private var script: [Result<OfficeDocument, AgentError>]
-    init(_ script: [Result<OfficeDocument, AgentError>]) { self.script = script }
+    private var chats: [Result<OfficeChatDocument, AgentError>]
+    private(set) var chatCalls: [String] = []
+    init(_ script: [Result<OfficeDocument, AgentError>], chats: [Result<OfficeChatDocument, AgentError>] = []) {
+        self.script = script
+        self.chats = chats
+    }
     func office() async throws(AgentError) -> OfficeDocument {
         guard !script.isEmpty else { throw AgentError.launchFailed }
         return try script.removeFirst().get()
     }
+    func chat(agent: String, sessionId: String) async throws(AgentError) -> OfficeChatDocument {
+        chatCalls.append("\(agent)/\(sessionId)")
+        guard !chats.isEmpty else { throw AgentError.launchFailed }
+        return try chats.removeFirst().get()
+    }
+}
+
+private func chat(_ messages: [OfficeChatMessage], title: String? = "A title") -> OfficeChatDocument {
+    OfficeChatDocument(version: 1, agent: "claude", sessionId: "a", title: title, messages: messages)
 }
 
 // MARK: - Contract and client
@@ -45,6 +59,32 @@ private actor FakeOfficeClient: OfficeClient {
     #expect(claude.activity == "Editing OfficeView.swift" && claude.recentActions.count == 2)
     #expect(claude.pid == 4001 && claude.hostApp == "/System/Applications/Utilities/Terminal.app")
     #expect(office.sessions[1].startedAt == nil && office.sessions[1].hostApp == nil)
+    #expect(office.sessions.map(\.title) == ["Probe the CLI", nil, "Office chat window"])
+}
+
+@Test func theChatMatchesTheGoldenFile() throws {
+    let chat = try decodeDocument(OfficeChatDocument.self, from: contract("office-chat.v1.json"))
+    #expect(chat.agent == "claude" && chat.sessionId == "c1" && chat.title == "Office chat window")
+    #expect(chat.messages.map(\.role) == [.user, .assistant])
+    #expect(chat.messages.first?.at == 1_792_549_940_000)
+    #expect(chat.messages.last?.text.hasPrefix("I'll add a chat panel") == true)
+}
+
+@Test func aSessionWithoutATitleReadsAsItsAgentAndAnUnknownRoleAsTheAgents() throws {
+    let json = #"{"version":1,"generatedAt":1,"sessions":[{"agent":"codex","sessionId":"s","cwd":"/a","status":"idle","activity":"","recentActions":[],"startedAt":null,"updatedAt":1,"pid":null,"room":"/a","roomName":"a","hostApp":null}]}"#
+    let office = try decodeDocument(OfficeDocument.self, from: Data(json.utf8))
+    #expect(office.sessions.first?.title == nil && office.sessions.first?.heading == "Codex")
+    #expect(office.sessions.first?.bubbleTitle == "")
+    let chatJson = #"{"version":1,"agent":"codex","sessionId":"s","title":null,"messages":[{"at":0,"role":"system","text":"hi"}]}"#
+    let chat = try decodeDocument(OfficeChatDocument.self, from: Data(chatJson.utf8))
+    #expect(chat.messages.first?.role == .assistant)
+}
+
+@Test func theTitleIsCleanedForTheHeadingAndClippedOnTheBubble() {
+    let long = session("a", title: "  Fix the\nlogin   page " + String(repeating: "x", count: 40))
+    #expect(long.heading.hasPrefix("Fix the login page x") && !long.heading.contains("\n"))
+    #expect(long.bubbleTitle.count == 28 && long.bubbleTitle.hasSuffix("…"))
+    #expect(session("a", title: "   ").heading == "Claude Code")
 }
 
 @Test func anUnknownStatusIsIdle() throws {
@@ -136,6 +176,50 @@ private actor FakeOfficeClient: OfficeClient {
     #expect(model.selected?.status == .exited)
     model.apply(document([]), now: at(400))
     #expect(model.selected == nil && model.selectedId == nil)
+}
+
+@MainActor @Test func selectingASessionReadsItsConversationAndDeselectingDropsIt() async {
+    let messages = [OfficeChatMessage(at: 1, role: .user, text: "Hi"), OfficeChatMessage(at: 2, role: .assistant, text: "Hello")]
+    let client = FakeOfficeClient(
+        [.success(document([session("a")])), .success(document([session("a")]))],
+        chats: [.success(chat(messages)), .failure(.timedOut), .success(chat([]))])
+    let model = OfficeModel(client: client)
+    await model.refresh(now: at(0))
+    #expect(model.chat == nil)
+    // Nothing to read until a Session is selected.
+    await model.loadChat()
+    let before = await client.chatCalls
+    #expect(before.isEmpty)
+
+    model.select("claude/a")
+    await model.loadChat()
+    #expect(model.chat?.messages == messages && model.chatError == nil)
+    let first = await client.chatCalls
+    #expect(first == ["claude/a"])
+    // A poll reads the conversation again; a failure keeps the last one and says why.
+    await model.refresh(now: at(2))
+    #expect(model.chat?.messages == messages && model.chatError != nil)
+    let second = await client.chatCalls
+    #expect(second.count == 2)
+
+    model.select(nil)
+    #expect(model.chat == nil && model.chatError == nil)
+    await model.loadChat()
+    let third = await client.chatCalls
+    #expect(third.count == 2)
+}
+
+@MainActor @Test func aConversationThatArrivesAfterADeselectionIsDropped() async {
+    let client = FakeOfficeClient([], chats: [.success(chat([OfficeChatMessage(at: 1, role: .user, text: "Hi")]))])
+    let model = OfficeModel(client: client)
+    model.apply(document([session("a"), session("b")]), now: at(0))
+    model.select("claude/a")
+    async let reading: Void = model.loadChat()
+    // Lets the read start (and wait on the client) before the selection moves on.
+    await Task.yield()
+    model.select("claude/b")
+    await reading
+    #expect(model.chat == nil)
 }
 
 @MainActor @Test func refreshKeepsTheLastGoodOfficeWhenTheCliFails() async {
@@ -245,6 +329,52 @@ private func rooms(_ counts: [Int]) -> [OfficeRoom] {
     let layout = OfficeLayout.make([])
     #expect(layout.rooms.isEmpty && layout.width > 0 && layout.depth > 0)
     #expect(layout.center.isCenter && layout.center.width == layout.width && layout.center.depth == layout.depth)
+}
+
+// MARK: - Walking
+
+@Test func aFigureWalksFromTheDoorAlongTheAisleAndDownTheGapToItsChair() {
+    let layout = OfficeLayout.make(rooms([5, 4, 2]))
+    for room in layout.rooms {
+        let out = room.door == .north ? -1.0 : 1.0
+        for desk in room.desks {
+            let path = OfficeLayout.walk(in: room, to: desk)
+            // It starts in the doorway and ends at the chair, in front of the Desk.
+            #expect(path.start == OfficePoint(x: room.center.x, z: room.center.z + out * room.depth / 2))
+            #expect(path.end == OfficePoint(x: desk.position.x, z: desk.position.z + OfficeLayout.chairOffset))
+            #expect(path.length > 0 && path.points.count >= 3)
+            // Every point stays inside the Room.
+            for point in path.points {
+                #expect(abs(point.x - room.center.x) <= room.width / 2 + 0.001)
+                #expect(abs(point.z - room.center.z) <= room.depth / 2 + 0.001)
+            }
+            // It walks through no other Desk: a Desk with its chair spans 1.2 m across and from 0.45
+            // behind to 0.8 in front; the path is sampled every 5 cm.
+            var distance = 0.0
+            while distance <= path.length {
+                let point = path.position(at: distance).point
+                for other in room.desks where other.sessionId != desk.sessionId {
+                    let inside =
+                        abs(point.x - other.position.x) < 0.6 && point.z > other.position.z - 0.45
+                        && point.z < other.position.z + 0.8
+                    #expect(!inside, "\(desk.sessionId) walks through \(other.sessionId) at \(point)")
+                }
+                distance += 0.05
+            }
+        }
+    }
+}
+
+@Test func aPathKnowsWhereItsWalkerIsAndWhichWayItFaces() {
+    let path = OfficePath([OfficePoint(x: 0, z: 0), OfficePoint(x: 0, z: 0), OfficePoint(x: 2, z: 0), OfficePoint(x: 2, z: -1)])
+    #expect(path.points.count == 3 && path.length == 3)
+    let half = path.position(at: 1)
+    #expect(half.point == OfficePoint(x: 1, z: 0) && half.heading == OfficePoint(x: 1, z: 0))
+    let turned = path.position(at: 2.5)
+    #expect(turned.point == OfficePoint(x: 2, z: -0.5) && turned.heading == OfficePoint(x: 0, z: -1))
+    #expect(path.position(at: -1).point == path.start && path.position(at: 9).point == path.end)
+    #expect(OfficePath([]).position(at: 1).heading == nil)
+    #expect(OfficePath([OfficePoint(x: 1, z: 1)]).length == 0)
 }
 
 // MARK: - Looks and furniture

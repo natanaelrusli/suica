@@ -7,6 +7,8 @@ import SwiftUI
 /// Session. It watches only; nothing here controls an agent.
 struct OfficeView: View {
     let model: OfficeModel
+    /// Where the building style and the environment are kept.
+    @Bindable var settings: AppearanceSettings
     @State private var controller = OfficeSceneController()
     /// False while the window is minimized, hidden or covered: nothing is polled then.
     @State private var windowVisible = true
@@ -19,9 +21,10 @@ struct OfficeView: View {
             ZStack {
                 ZStack(alignment: .top) {
                     // The sky above the street.
-                    (scheme == .dark
-                        ? Color(red: 0.06, green: 0.08, blue: 0.14) : Color(red: 0.8, green: 0.9, blue: 0.98))
-                    OfficeSceneView(model: model, controller: controller)
+                    Self.sky(settings.officeEnvironment, dark: scheme == .dark)
+                    OfficeSceneView(
+                        model: model, controller: controller, style: settings.officeStyle,
+                        environment: settings.officeEnvironment)
                     vignette.frame(height: titleBar + 70)
                 }
                 .clipped()
@@ -30,6 +33,17 @@ struct OfficeView: View {
             }
         }
         .toolbar {
+            Menu {
+                Picker(Copy.officeBuildingPicker, selection: $settings.officeStyle) {
+                    ForEach(OfficeStyle.allCases) { Text($0.title).tag($0) }
+                }
+                Picker(Copy.officeEnvironmentPicker, selection: $settings.officeEnvironment) {
+                    ForEach(OfficeEnvironment.allCases) { Text($0.title).tag($0) }
+                }
+            } label: {
+                Label(Copy.officeStyleMenu, systemImage: "paintbrush")
+            }
+            .help(Copy.officeStyleHint)
             Button {
                 controller.resetCamera()
                 model.select(nil)
@@ -50,28 +64,45 @@ struct OfficeView: View {
             guard windowVisible else { return }
             await model.runPollLoop(every: .seconds(2))
         }
+        // The conversation is read as soon as a figure is picked; the poll keeps it fresh.
+        .task(id: model.selectedId) { await model.loadChat() }
         .accessibilityElement(children: .contain)
     }
 
-    /// What floats over the scene: the summary, errors, the hint and the detail card.
+    /// The sky behind the scene: pale blue over the city and the park, grey over snow; night blue
+    /// in dark mode.
+    static func sky(_ environment: OfficeEnvironment, dark: Bool) -> Color {
+        switch (environment, dark) {
+        case (.snow, false): Color(red: 0.86, green: 0.88, blue: 0.9)
+        case (.snow, true): Color(red: 0.1, green: 0.11, blue: 0.15)
+        case (.park, false): Color(red: 0.8, green: 0.91, blue: 0.96)
+        case (_, false): Color(red: 0.8, green: 0.9, blue: 0.98)
+        case (_, true): Color(red: 0.06, green: 0.08, blue: 0.14)
+        }
+    }
+
+    /// What floats over the scene: the summary, errors, the hint and, on the right, the Chat Panel.
     private var overlays: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            summary
-            if let text = model.errorText { NoticeBox(text: text, tint: .red) }
-            Spacer()
-            if model.selected == nil && !model.sessions.isEmpty {
-                Text(Copy.officeControlsHint)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .glass(in: Capsule())
-                    .frame(maxWidth: .infinity, alignment: .trailing)
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 8) {
+                summary
+                if let text = model.errorText { NoticeBox(text: text, tint: .red) }
+                Spacer()
+                if model.selected == nil && !model.sessions.isEmpty {
+                    Text(Copy.officeControlsHint)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .glass(in: Capsule())
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                }
             }
             if let session = model.selected {
-                OfficeDetailCard(session: session) { model.select(nil) }
-                    .frame(maxWidth: 420)
-                    .transition(Motion.slide(from: .bottom, motion))
+                OfficeChatPanel(session: session, chat: model.chat, error: model.chatError) { model.select(nil) }
+                    .frame(width: 380)
+                    .frame(maxHeight: .infinity)
+                    .transition(Motion.slide(from: .trailing, motion))
             }
         }
         .padding(16)
@@ -121,6 +152,8 @@ struct OfficeView: View {
 private struct OfficeSceneView: View {
     let model: OfficeModel
     let controller: OfficeSceneController
+    let style: OfficeStyle
+    let environment: OfficeEnvironment
     @Environment(\.colorScheme) private var scheme
     @Environment(\.motionLevel) private var motion
     @State private var lastDrag = CGSize.zero
@@ -136,8 +169,8 @@ private struct OfficeSceneView: View {
             } update: { _ in
                 controller.setAspect(Float(proxy.size.width / max(proxy.size.height, 1)))
                 controller.sync(
-                    layout: layout, sessions: sessions, selected: selected, dark: scheme == .dark,
-                    animate: motion == .full)
+                    layout: layout, sessions: sessions, selected: selected, style: style, environment: environment,
+                    dark: scheme == .dark, animate: motion == .full)
             }
             .gesture(
                 SpatialTapGesture().targetedToAnyEntity().onEnded { value in
@@ -250,21 +283,43 @@ private struct ScrollControl: NSViewRepresentable {
     }
 }
 
-/// What one agent is doing: its type, project, status and last actions.
-private struct OfficeDetailCard: View {
+/// The Chat Panel: one Session's title, project, status and last actions, and its conversation as
+/// chat bubbles. It only shows; the Office cannot write to an agent.
+struct OfficeChatPanel: View {
     let session: OfficeSession
+    let chat: OfficeChatDocument?
+    let error: String?
     let close: () -> Void
+    @State private var actionsShown = false
+    @Environment(\.motionLevel) private var motion
 
     private var agent: OfficeAgent { OfficeAgent(kind: session.agent) }
 
     private var path: String { (session.cwd as NSString).abbreviatingWithTildeInPath }
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            header.padding(14)
+            Divider()
+            conversation
+        }
+        .glass(in: RoundedRectangle(cornerRadius: 16))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(session.heading)
+    }
+
+    private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
+            HStack(alignment: .top, spacing: 8) {
                 Circle().fill(Color(red: agent.colour.red, green: agent.colour.green, blue: agent.colour.blue))
                     .frame(width: 12, height: 12)
-                Text(agent.name).font(.headline)
+                    .padding(.top, 3)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(session.heading).font(.headline).lineLimit(2)
+                    Text("\(agent.name) · \(Copy.officeStatusName(session.status.rawValue))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 Spacer()
                 if let app = session.hostApp, FileManager.default.fileExists(atPath: app) {
                     Button(Copy.openAgent) {
@@ -281,7 +336,6 @@ private struct OfficeDetailCard: View {
             }
             Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 10, verticalSpacing: 3) {
                 row(Copy.officeProject, path)
-                row(Copy.officeStatus, Copy.officeStatusName(session.status.rawValue))
                 if let started = session.startedAt {
                     row(
                         Copy.officeStarted,
@@ -290,25 +344,59 @@ private struct OfficeDetailCard: View {
                 }
             }
             .font(.callout)
-            Text(Copy.officeLastActions).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-            if session.recentActions.isEmpty {
-                Text(Copy.officeNoActions).font(.callout).foregroundStyle(.secondary)
-            } else {
-                VStack(alignment: .leading, spacing: 2) {
-                    ForEach(Array(session.recentActions.reversed().enumerated()), id: \.offset) { _, action in
-                        HStack(spacing: 8) {
-                            Text(action.text).lineLimit(1)
-                            Spacer(minLength: 8)
-                            Text(Date(timeIntervalSince1970: Double(action.at) / 1000), style: .relative)
-                                .foregroundStyle(.secondary)
+            DisclosureGroup(isExpanded: $actionsShown) {
+                if session.recentActions.isEmpty {
+                    Text(Copy.officeNoActions).font(.callout).foregroundStyle(.secondary)
+                } else {
+                    VStack(alignment: .leading, spacing: 2) {
+                        ForEach(Array(session.recentActions.reversed().enumerated()), id: \.offset) { _, action in
+                            HStack(spacing: 8) {
+                                Text(action.text).lineLimit(1)
+                                Spacer(minLength: 8)
+                                Text(Date(timeIntervalSince1970: Double(action.at) / 1000), style: .relative)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .font(.callout)
                         }
-                        .font(.callout)
                     }
+                    .padding(.top, 4)
                 }
+            } label: {
+                Text(Copy.officeLastActions).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            }
+            .motion(value: actionsShown)
+        }
+    }
+
+    /// The messages, newest at the bottom, scrolled there whenever one arrives.
+    private var conversation: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 10) {
+                    if let chat {
+                        if chat.messages.isEmpty {
+                            Text(Copy.officeNoChat).font(.callout).foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .center)
+                                .padding(.top, 20)
+                        }
+                        ForEach(Array(chat.messages.enumerated()), id: \.offset) { _, message in
+                            ChatBubble(message: message, agent: agent)
+                        }
+                    } else if error == nil {
+                        Text(Copy.officeChatLoading).font(.callout).foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                            .padding(.top, 20)
+                    }
+                    if let error { NoticeBox(text: error, tint: .red) }
+                    Color.clear.frame(height: 1).id("end")
+                }
+                .padding(14)
+            }
+            .onAppear { proxy.scrollTo("end", anchor: .bottom) }
+            .onChange(of: chat?.messages.count) { _, _ in
+                withMotion(.smooth(duration: 0.3), motion) { proxy.scrollTo("end", anchor: .bottom) }
             }
         }
-        .padding(14)
-        .glass(in: RoundedRectangle(cornerRadius: 16))
     }
 
     private func row(_ label: String, _ value: String) -> some View {
@@ -316,5 +404,38 @@ private struct OfficeDetailCard: View {
             Text(label).foregroundStyle(.secondary)
             Text(value).lineLimit(2).truncationMode(.middle).textSelection(.enabled)
         }
+    }
+}
+
+/// One turn: the Owner's on the right in the accent colour, the agent's on the left.
+private struct ChatBubble: View {
+    let message: OfficeChatMessage
+    let agent: OfficeAgent
+
+    private var mine: Bool { message.role == .user }
+
+    var body: some View {
+        VStack(alignment: mine ? .trailing : .leading, spacing: 3) {
+            Text(message.text)
+                .font(.callout)
+                .textSelection(.enabled)
+                .foregroundStyle(mine ? Color.white : Color.primary)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(
+                    mine ? Color.accentColor : Color.primary.opacity(0.09), in: RoundedRectangle(cornerRadius: 12))
+            HStack(spacing: 4) {
+                Text(mine ? Copy.officeYou : agent.name)
+                if message.at > 0 {
+                    Text("·")
+                    Text(Date(timeIntervalSince1970: Double(message.at) / 1000), style: .time)
+                }
+            }
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: mine ? .trailing : .leading)
+        .padding(.leading, mine ? 40 : 0)
+        .padding(.trailing, mine ? 0 : 40)
     }
 }

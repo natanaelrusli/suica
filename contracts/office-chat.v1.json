@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "agent": "claude",
+  "sessionId": "c1",
+  "title": "Office chat window",
+  "messages": [
+    {
+      "at": 1792549940000,
+      "role": "user",
+      "text": "Show the agent's conversation when I click its figure."
+    },
+    {
+      "at": 1792549960000,
+      "role": "assistant",
+      "text": "I'll add a chat panel to the Office page that reads the session transcript."
+    }
+  ]
+}

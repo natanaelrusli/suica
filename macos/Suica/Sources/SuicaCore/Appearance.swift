@@ -127,6 +127,34 @@ public enum Backdrop: String, CaseIterable, Identifiable, Sendable {
     public var drifts: Bool { self == .aurora }
 }
 
+/// What the Office building is made of: its walls, floors and desks.
+public enum OfficeStyle: String, CaseIterable, Identifiable, Sendable {
+    /// White plaster, wooden planks and carpet tiles.
+    case modern
+    /// Red brick, terracotta tiles and a stone hall.
+    case brick
+    /// Steel frames with tinted glass, concrete floors and a slate hall.
+    case glass
+    /// Honey logs, dark planks and a woven rug.
+    case timber
+    public var id: String { rawValue }
+
+    public var title: String { Copy.title(self) }
+}
+
+/// What lies outside the Office building.
+public enum OfficeEnvironment: String, CaseIterable, Identifiable, Sendable {
+    /// A street: road, pavements, lamps, cars, cyclists and walkers.
+    case city
+    /// A lawn with paths, flower beds, a pond and more trees; no cars.
+    case park
+    /// The street under snow, with a pale sky.
+    case snow
+    public var id: String { rawValue }
+
+    public var title: String { Copy.title(self) }
+}
+
 /// A system sound for a celebration.
 public enum SoundEffect: String, CaseIterable, Identifiable, Sendable {
     case off, pop, glass, purr, hero, tink, submarine
@@ -245,6 +273,11 @@ public final class AppearanceSettings {
     /// Confetti when you send, approve or reach inbox zero.
     public var celebrations: Bool { didSet { defaults.set(celebrations, forKey: Key.celebrations) } }
     public var sound: SoundEffect { didSet { store(sound.rawValue, Key.sound) } }
+    /// The Office building's style and what lies outside it.
+    public var officeStyle: OfficeStyle { didSet { store(officeStyle.rawValue, Key.officeStyle) } }
+    public var officeEnvironment: OfficeEnvironment {
+        didSet { store(officeEnvironment.rawValue, Key.officeEnvironment) }
+    }
 
     @ObservationIgnored private let defaults: any PreferenceStore
 
@@ -262,9 +295,11 @@ public final class AppearanceSettings {
         static let backdrop = "appearance.backdrop"
         static let celebrations = "appearance.celebrations"
         static let sound = "appearance.sound"
+        static let officeStyle = "appearance.officeStyle"
+        static let officeEnvironment = "appearance.officeEnvironment"
         static let all = [
             theme, mode, density, motion, badge, counters, start, customAccent, icon, emoji, backdrop, celebrations,
-            sound,
+            sound, officeStyle, officeEnvironment,
         ]
     }
 
@@ -284,6 +319,8 @@ public final class AppearanceSettings {
         static let backdrop = Backdrop.wash
         static let celebrations = true
         static let sound = SoundEffect.off
+        static let officeStyle = OfficeStyle.modern
+        static let officeEnvironment = OfficeEnvironment.city
     }
 
     /// `defaults` is the app's own (`UserDefaults.standard`) unless a test passes its own store.
@@ -308,6 +345,8 @@ public final class AppearanceSettings {
         backdrop = read(Key.backdrop, Default.backdrop)
         celebrations = defaults.object(forKey: Key.celebrations) as? Bool ?? Default.celebrations
         sound = read(Key.sound, Default.sound)
+        officeStyle = read(Key.officeStyle, Default.officeStyle)
+        officeEnvironment = read(Key.officeEnvironment, Default.officeEnvironment)
     }
 
     /// The accent colour as 0xRRGGBB, or nil for the system's.
@@ -323,7 +362,8 @@ public final class AppearanceSettings {
             && menuBarBadge == Default.badge && showsPopoverCounters == Default.counters
             && startPage == Default.start && customAccent == Default.customAccent && menuBarIcon == Default.icon
             && menuBarEmoji == Default.emoji && backdrop == Default.backdrop && celebrations == Default.celebrations
-            && sound == Default.sound
+            && sound == Default.sound && officeStyle == Default.officeStyle
+            && officeEnvironment == Default.officeEnvironment
     }
 
     /// Every choice back to its default, and the stored values removed.
@@ -341,6 +381,8 @@ public final class AppearanceSettings {
         backdrop = Default.backdrop
         celebrations = Default.celebrations
         sound = Default.sound
+        officeStyle = Default.officeStyle
+        officeEnvironment = Default.officeEnvironment
         for key in Key.all { defaults.removeObject(forKey: key) }
     }
 

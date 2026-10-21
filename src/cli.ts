@@ -57,12 +57,13 @@ import { RANKING_WINDOW, buildStats, localDayKey } from "./stats.ts";
 import { openStore } from "./store.ts";
 import { formatOutbox } from "./teams/format-outbox.ts";
 import { OUTBOX_STATUSES } from "./teams/types.ts";
+import { readChat } from "./office/chat.ts";
 import { adaptersFor, collectOffice } from "./office/collect.ts";
 import { realProbe } from "./office/probe.ts";
 import { buildUsage } from "./usage.ts";
 
 const USAGE =
-  "usage: suica <once|status|state|stats|usage|office --json|pause|resume|pending [--all]|send <id> [--json]|skip <id> [--json]|retry <id> [--json]|selftest|reviews --json|mr <key> --json|mr approve <key> <sha> --json|mr comment <key> --json (body on stdin)|mr close <key> --json|mr merge <key> <sha> [--squash] [--remove-source-branch] [--when-pipeline-succeeds] --json (message on stdin)|review queue <key> --json|review post <id> [--inline|--comment] --json|review discard <id> --json|review cancel <id> --json|fix list --json|fix queue <key> [--pipeline] --json|fix confirm <id> --json (edits on stdin)|fix retry <id> --json (note on stdin)|fix discard <id> --json|fix cancel <id> --json|fix replies <id> --json|config show --json|config set --json|templates show --json|templates set --json|agent install|agent uninstall|agent restart --json>\n";
+  "usage: suica <once|status|state|stats|usage|office --json|office chat <agent> <sessionId> --json|pause|resume|pending [--all]|send <id> [--json]|skip <id> [--json]|retry <id> [--json]|selftest|reviews --json|mr <key> --json|mr approve <key> <sha> --json|mr comment <key> --json (body on stdin)|mr close <key> --json|mr merge <key> <sha> [--squash] [--remove-source-branch] [--when-pipeline-succeeds] --json (message on stdin)|review queue <key> --json|review post <id> [--inline|--comment] --json|review discard <id> --json|review cancel <id> --json|fix list --json|fix queue <key> [--pipeline] --json|fix confirm <id> --json (edits on stdin)|fix retry <id> --json (note on stdin)|fix discard <id> --json|fix cancel <id> --json|fix replies <id> --json|config show --json|config set --json|templates show --json|templates set --json|agent install|agent uninstall|agent restart --json>\n";
 const TEAMS_DISABLED = "teams is disabled: set teams.enabled to true in the config\n";
 const SHOWN_WITH_ALL = 50;
 
@@ -239,6 +240,13 @@ function usageJson(): number {
 function officeJson(): number {
   const config = loadConfig(defaultConfigPath());
   const document = collectOffice(adaptersFor(config.office), realProbe());
+  process.stdout.write(`${JSON.stringify(document)}\n`);
+  return 0;
+}
+
+/** `suica office chat <agent> <sessionId> --json`: one Session's last messages, for the chat panel. */
+function officeChatJson(agent: string, sessionId: string): number {
+  const document = readChat(realProbe().home, agent, sessionId);
   process.stdout.write(`${JSON.stringify(document)}\n`);
   return 0;
 }
@@ -609,6 +617,14 @@ async function main(argv: readonly string[]): Promise<number> {
     if (argv[1] === "set" && argv.includes("--json")) return setConfig();
     process.stderr.write(USAGE);
     return 2;
+  }
+  if (command === "office" && argv[1] === "chat" && argv.includes("--json")) {
+    const [agent, sessionId] = argv.slice(2).filter((arg) => !arg.startsWith("--"));
+    if (agent === undefined || sessionId === undefined) {
+      process.stderr.write(USAGE);
+      return 2;
+    }
+    return officeChatJson(agent, sessionId);
   }
   if (command === "office" && argv.includes("--json")) return officeJson();
   if (command === "reviews" && argv.includes("--json")) return reviewsJson();

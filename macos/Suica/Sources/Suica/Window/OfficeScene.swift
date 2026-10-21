@@ -8,13 +8,13 @@ struct DeskTag: Component {
     var id: String
 }
 
-/// The floor, wall and desk colours of one appearance.
+/// The colours of one building style, environment and appearance.
 private struct Palette {
     let floor: NSColor
-    /// Every other plank of a project Room's wooden floor.
+    /// Every other plank of a project Room's floor.
     let plank: NSColor
     let hallFloor: NSColor
-    /// Every other carpet tile in the Center Room.
+    /// Every other tile of the Center Room's floor.
     let hallTile: NSColor
     let wall: NSColor
     /// The dark top of a wall, where it is cut away to show the room.
@@ -34,6 +34,10 @@ private struct Palette {
     let pavement: NSColor
     let road: NSColor
     let lampGlow: NSColor
+    /// A window pane by day; lit warm at night.
+    let glass: NSColor
+    let windowFrame: NSColor
+    let awning: NSColor
 
     static let light = Palette(
         floor: NSColor(red: 0.86, green: 0.71, blue: 0.52, alpha: 1),
@@ -49,7 +53,9 @@ private struct Palette {
         bubble: .white, bubbleText: NSColor(white: 0.12, alpha: 1),
         background: NSColor(white: 0.96, alpha: 1),
         grass: NSColor(red: 0.5, green: 0.76, blue: 0.36, alpha: 1), pavement: NSColor(white: 0.84, alpha: 1),
-        road: NSColor(white: 0.36, alpha: 1), lampGlow: NSColor(white: 0.92, alpha: 1))
+        road: NSColor(white: 0.36, alpha: 1), lampGlow: NSColor(white: 0.92, alpha: 1),
+        glass: NSColor(red: 0.72, green: 0.85, blue: 0.93, alpha: 1), windowFrame: NSColor(white: 0.5, alpha: 1),
+        awning: NSColor(red: 0.16, green: 0.42, blue: 0.5, alpha: 1))
     static let dark = Palette(
         floor: NSColor(red: 0.42, green: 0.33, blue: 0.24, alpha: 1),
         plank: NSColor(red: 0.38, green: 0.29, blue: 0.21, alpha: 1),
@@ -64,19 +70,114 @@ private struct Palette {
         bubble: NSColor(white: 0.32, alpha: 1), bubbleText: .white,
         background: NSColor(white: 0.11, alpha: 1),
         grass: NSColor(red: 0.17, green: 0.27, blue: 0.17, alpha: 1), pavement: NSColor(white: 0.32, alpha: 1),
-        road: NSColor(white: 0.15, alpha: 1), lampGlow: NSColor(red: 1, green: 0.85, blue: 0.5, alpha: 1))
+        road: NSColor(white: 0.15, alpha: 1), lampGlow: NSColor(red: 1, green: 0.85, blue: 0.5, alpha: 1),
+        glass: NSColor(red: 1, green: 0.88, blue: 0.62, alpha: 1), windowFrame: NSColor(white: 0.2, alpha: 1),
+        awning: NSColor(red: 0.1, green: 0.26, blue: 0.32, alpha: 1))
+
+    /// The base appearance with the style's walls, floors and desks and the environment's ground.
+    static func make(style: OfficeStyle, environment: OfficeEnvironment, dark: Bool) -> Palette {
+        let base = dark ? Palette.dark : Palette.light
+        func rgb(_ red: Double, _ green: Double, _ blue: Double) -> NSColor {
+            NSColor(red: red, green: green, blue: blue, alpha: 1)
+        }
+        func pick(_ light: NSColor, _ night: NSColor) -> NSColor { dark ? night : light }
+        var wall = base.wall
+        var wallCap = base.wallCap
+        var floor = base.floor
+        var plank = base.plank
+        var hallFloor = base.hallFloor
+        var hallTile = base.hallTile
+        var desk = base.desk
+        var deskTop = base.deskTop
+        var deskFrame = base.deskFrame
+        var plinth = base.plinth
+        var windowFrame = base.windowFrame
+        var awning = base.awning
+        switch style {
+        case .modern: break
+        case .brick:
+            wall = pick(rgb(0.72, 0.33, 0.26), rgb(0.42, 0.2, 0.16))
+            wallCap = pick(rgb(0.93, 0.88, 0.78), rgb(0.5, 0.46, 0.4))
+            floor = pick(rgb(0.8, 0.5, 0.36), rgb(0.4, 0.26, 0.19))
+            plank = pick(rgb(0.74, 0.45, 0.32), rgb(0.36, 0.23, 0.17))
+            hallFloor = pick(rgb(0.7, 0.69, 0.66), rgb(0.24, 0.24, 0.23))
+            hallTile = pick(rgb(0.64, 0.63, 0.6), rgb(0.2, 0.2, 0.19))
+            desk = pick(rgb(0.5, 0.36, 0.26), rgb(0.3, 0.22, 0.16))
+            deskTop = pick(rgb(0.9, 0.85, 0.76), rgb(0.5, 0.46, 0.4))
+            plinth = pick(rgb(0.6, 0.55, 0.5), rgb(0.26, 0.24, 0.22))
+            windowFrame = pick(rgb(0.93, 0.88, 0.78), rgb(0.5, 0.46, 0.4))
+            awning = pick(rgb(0.16, 0.3, 0.2), rgb(0.1, 0.18, 0.13))
+        case .glass:
+            wall = pick(rgb(0.7, 0.86, 0.9), rgb(0.3, 0.42, 0.48))
+            wallCap = pick(rgb(0.2, 0.22, 0.25), rgb(0.08, 0.09, 0.1))
+            floor = pick(NSColor(white: 0.78, alpha: 1), NSColor(white: 0.36, alpha: 1))
+            plank = pick(NSColor(white: 0.74, alpha: 1), NSColor(white: 0.33, alpha: 1))
+            hallFloor = pick(rgb(0.3, 0.32, 0.36), rgb(0.14, 0.15, 0.18))
+            hallTile = pick(rgb(0.26, 0.28, 0.32), rgb(0.11, 0.12, 0.15))
+            desk = pick(NSColor(white: 0.6, alpha: 1), NSColor(white: 0.3, alpha: 1))
+            deskTop = pick(NSColor(white: 0.98, alpha: 1), NSColor(white: 0.7, alpha: 1))
+            deskFrame = pick(NSColor(white: 0.3, alpha: 1), NSColor(white: 0.18, alpha: 1))
+            plinth = pick(NSColor(white: 0.62, alpha: 1), NSColor(white: 0.26, alpha: 1))
+            windowFrame = wallCap
+            awning = wallCap
+        case .timber:
+            wall = pick(rgb(0.78, 0.58, 0.36), rgb(0.4, 0.3, 0.18))
+            wallCap = pick(rgb(0.45, 0.3, 0.17), rgb(0.22, 0.15, 0.09))
+            floor = pick(rgb(0.52, 0.36, 0.24), rgb(0.28, 0.19, 0.13))
+            plank = pick(rgb(0.46, 0.31, 0.2), rgb(0.24, 0.16, 0.11))
+            hallFloor = pick(rgb(0.7, 0.3, 0.28), rgb(0.35, 0.15, 0.14))
+            hallTile = pick(rgb(0.62, 0.26, 0.24), rgb(0.3, 0.13, 0.12))
+            desk = pick(rgb(0.55, 0.38, 0.24), rgb(0.3, 0.21, 0.13))
+            deskTop = pick(rgb(0.76, 0.58, 0.4), rgb(0.45, 0.34, 0.23))
+            deskFrame = pick(rgb(0.4, 0.28, 0.17), rgb(0.2, 0.14, 0.09))
+            plinth = pick(rgb(0.6, 0.58, 0.54), rgb(0.26, 0.25, 0.23))
+            windowFrame = wallCap
+            awning = pick(rgb(0.55, 0.2, 0.18), rgb(0.3, 0.12, 0.1))
+        }
+        var grass = base.grass
+        var pavement = base.pavement
+        var road = base.road
+        var hedge = base.hedge
+        switch environment {
+        case .city: break
+        case .park:
+            grass = pick(rgb(0.48, 0.74, 0.34), rgb(0.16, 0.27, 0.16))
+            pavement = pick(rgb(0.8, 0.78, 0.72), rgb(0.3, 0.29, 0.27))
+            road = pick(rgb(0.8, 0.74, 0.62), rgb(0.32, 0.3, 0.26))
+        case .snow:
+            grass = pick(rgb(0.95, 0.96, 0.98), rgb(0.4, 0.42, 0.48))
+            pavement = pick(rgb(0.9, 0.91, 0.93), rgb(0.36, 0.37, 0.4))
+            road = pick(NSColor(white: 0.3, alpha: 1), NSColor(white: 0.12, alpha: 1))
+            hedge = pick(rgb(0.26, 0.42, 0.24), rgb(0.12, 0.2, 0.12))
+        }
+        return Palette(
+            floor: floor, plank: plank, hallFloor: hallFloor, hallTile: hallTile, wall: wall, wallCap: wallCap,
+            plinth: plinth, desk: desk, deskTop: deskTop, deskFrame: deskFrame, chair: base.chair, hedge: hedge,
+            label: base.label, bubble: base.bubble, bubbleText: base.bubbleText, background: base.background,
+            grass: grass, pavement: pavement, road: road, lampGlow: base.lampGlow, glass: base.glass,
+            windowFrame: windowFrame, awning: awning)
+    }
 }
 
 private func material(_ colour: NSColor, roughness: Float = 0.7) -> SimpleMaterial {
     SimpleMaterial(color: colour, roughness: MaterialScalarParameter(floatLiteral: roughness), isMetallic: false)
 }
 
-/// The sun's face, the sun's rays or the moon's face, painted into a square texture for a flat card
-/// that faces the camera. `paint` draws around the centre; the second argument is the card's half
-/// width. Unlit and kept out of tone mapping, so the sun stays bright yellow rather than olive. If
+/// A see-through pane, for the glass style's walls.
+private func glassMaterial(_ colour: NSColor, opacity: Float) -> PhysicallyBasedMaterial {
+    var pane = PhysicallyBasedMaterial()
+    pane.baseColor = .init(tint: colour)
+    pane.roughness = .init(floatLiteral: 0.2)
+    pane.blending = .transparent(opacity: .init(floatLiteral: opacity))
+    return pane
+}
+
+/// A square texture painted with Core Graphics, on a flat card: the sun, the moon, a lamp's haze
+/// or a monitor's screen. `paint` draws around the centre; the second argument is the card's half
+/// width. Unlit and kept out of tone mapping, so a bright yellow stays yellow rather than olive. If
 /// the texture cannot be made the card is left invisible: a plain colour would draw a square.
 @MainActor
-private func skyCard(_ paint: (CGContext, CGFloat) -> Void) -> UnlitMaterial {
+private func paintedCard(_ paint: (CGContext, CGFloat) -> Void) -> UnlitMaterial {
     var card = UnlitMaterial(applyPostProcessToneMap: false)
     card.blending = .transparent(opacity: .init(floatLiteral: 0))
     let size = 512
@@ -119,7 +220,7 @@ private func disc(_ context: CGContext, radius: CGFloat, centre: NSColor, rim: N
 }
 
 /// A bright disc in a warm haze that fades into the sky.
-@MainActor private let sunFace = skyCard { context, half in
+@MainActor private let sunFace = paintedCard { context, half in
     radialFill(
         context, radius: half, NSColor(red: 1, green: 0.92, blue: 0.6, alpha: 1),
         [(0, 0.95), (0.3, 0.85), (0.4, 0.5), (0.6, 0.18), (0.8, 0.05), (1, 0)])
@@ -129,7 +230,7 @@ private func disc(_ context: CGContext, radius: CGFloat, centre: NSColor, rim: N
 }
 
 /// Long and short rays, alternating, that fade as they reach out; they turn slowly behind the sun.
-@MainActor private let sunRays = skyCard { context, half in
+@MainActor private let sunRays = paintedCard { context, half in
     let count = 12
     for index in 0..<count {
         let angle = CGFloat(index) / CGFloat(count) * 2 * .pi
@@ -147,7 +248,7 @@ private func disc(_ context: CGContext, radius: CGFloat, centre: NSColor, rim: N
 }
 
 /// A pale disc with a cool glow around it.
-@MainActor private let moonFace = skyCard { context, half in
+@MainActor private let moonFace = paintedCard { context, half in
     radialFill(
         context, radius: half, NSColor(red: 0.72, green: 0.8, blue: 1, alpha: 1),
         [(0, 0.6), (0.27, 0.5), (0.4, 0.2), (0.62, 0.06), (1, 0)])
@@ -158,7 +259,7 @@ private func disc(_ context: CGContext, radius: CGFloat, centre: NSColor, rim: N
 
 /// The haze round a lit street lamp. It writes no depth, so its clear rim hides nothing behind it.
 @MainActor private let lampHalo: UnlitMaterial = {
-    var card = skyCard { context, half in
+    var card = paintedCard { context, half in
         radialFill(
             context, radius: half, NSColor(red: 1, green: 0.82, blue: 0.5, alpha: 1),
             [(0, 0.9), (0.1, 0.75), (0.25, 0.32), (0.5, 0.1), (0.75, 0.03), (1, 0)])
@@ -166,6 +267,51 @@ private func disc(_ context: CGContext, radius: CGFloat, centre: NSColor, rim: N
     card.writesDepth = false
     return card
 }()
+
+/// A monitor at work: a dark editor with lines of code in a few colours, under a cyan glow at the
+/// edge. The lines are the same on every monitor; they are too small to tell apart.
+@MainActor private let screenWorking = paintedCard { context, half in
+    context.setFillColor(NSColor(red: 0.08, green: 0.12, blue: 0.2, alpha: 1).cgColor)
+    context.fill(CGRect(x: -half, y: -half, width: 2 * half, height: 2 * half))
+    context.setStrokeColor(NSColor(red: 0.45, green: 0.85, blue: 1, alpha: 1).cgColor)
+    context.setLineWidth(half * 0.06)
+    context.stroke(CGRect(x: -half, y: -half, width: 2 * half, height: 2 * half))
+    let inks = [
+        NSColor(red: 0.55, green: 0.8, blue: 1, alpha: 1), NSColor(red: 1, green: 0.78, blue: 0.4, alpha: 1),
+        NSColor(red: 0.7, green: 0.9, blue: 0.6, alpha: 1), NSColor(red: 0.95, green: 0.6, blue: 0.75, alpha: 1),
+        NSColor(white: 0.8, alpha: 1),
+    ]
+    var seed = OfficeSeed("screen")
+    let rows = 11
+    for row in 0..<rows {
+        let y = half * 0.78 - CGFloat(row) * half * 1.6 / CGFloat(rows)
+        let indent = CGFloat(Int.random(in: 0...3, using: &seed)) * half * 0.12
+        var x = -half * 0.8 + indent
+        let words = Int.random(in: 1...4, using: &seed)
+        for _ in 0..<words {
+            let width = CGFloat(Int.random(in: 2...7, using: &seed)) * half * 0.055
+            context.setFillColor(inks[Int.random(in: 0..<inks.count, using: &seed)].cgColor)
+            context.fill(CGRect(x: x, y: y, width: width, height: half * 0.08))
+            x += width + half * 0.05
+            if x > half * 0.8 { break }
+        }
+    }
+}
+
+/// A monitor waiting for the Owner: amber, with a question mark.
+@MainActor private let screenWaiting = paintedCard { context, half in
+    context.setFillColor(NSColor(red: 1, green: 0.72, blue: 0.2, alpha: 1).cgColor)
+    context.fill(CGRect(x: -half, y: -half, width: 2 * half, height: 2 * half))
+    NSGraphicsContext.saveGraphicsState()
+    NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
+    let text = "?" as NSString
+    let attributes: [NSAttributedString.Key: Any] = [
+        .font: NSFont.systemFont(ofSize: half * 1.5, weight: .bold), .foregroundColor: NSColor(white: 0.12, alpha: 1),
+    ]
+    let size = text.size(withAttributes: attributes)
+    text.draw(at: NSPoint(x: -size.width / 2, y: -size.height / 2), withAttributes: attributes)
+    NSGraphicsContext.restoreGraphicsState()
+}
 
 private func nsColour(_ colour: OfficeColour) -> NSColor {
     NSColor(red: colour.red, green: colour.green, blue: colour.blue, alpha: 1)
@@ -185,11 +331,104 @@ private struct FigurePart {
     let colour: OfficeColour
 }
 
+/// A figure's joints. Each is a pivot: its limb hangs down from it, so a turn about x swings the
+/// limb forward (the figure faces -z at yaw 0) and a turn about z swings it out to the side.
+private struct FigureRig {
+    /// On the floor, under the figure; turned to face where it walks.
+    let root: Entity
+    /// At hip height: lower when seated, bouncing a little when walking.
+    let pelvis: Entity
+    let torso: Entity
+    /// At the neck.
+    let head: Entity
+    /// Left then right.
+    let shoulders: [Entity]
+    let elbows: [Entity]
+    let hips: [Entity]
+    let knees: [Entity]
+    let parts: [FigurePart]
+
+    static let standingHip: Float = 0.7
+    static let seatedHip: Float = 0.4
+}
+
+/// How a figure holds itself: the hip height and a turn per joint.
+private struct Pose {
+    var hip: Float = FigureRig.standingHip
+    var torsoPitch: Float = 0
+    var torsoYaw: Float = 0
+    var headPitch: Float = 0
+    var headYaw: Float = 0
+    /// Per arm: forward swing and sideways lift.
+    var shoulderPitch: [Float] = [0, 0]
+    var shoulderRoll: [Float] = [0, 0]
+    var elbow: [Float] = [0, 0]
+    var hipPitch: [Float] = [0, 0]
+    var knee: [Float] = [0, 0]
+
+    static let standing = Pose()
+
+    /// On the chair, legs under the desk, elbows low and the forearms up to the keyboard.
+    static let seated = Pose(
+        hip: FigureRig.seatedHip, torsoPitch: -0.08, shoulderPitch: [1.0, 1.0], elbow: [0.95, 0.95],
+        hipPitch: [.pi / 2, .pi / 2], knee: [-.pi / 2, -.pi / 2])
+
+    /// Typing: the forearms tap in turn and the head bobs a little.
+    static func typing(at time: Float) -> Pose {
+        var pose = seated
+        pose.elbow = [0.95 + 0.12 * sin(time * 9), 0.95 + 0.12 * sin(time * 9 + .pi)]
+        pose.headPitch = 0.04 * sin(time * 2.3)
+        return pose
+    }
+
+    /// Nodding off: leaning back, arms in the lap, the head sinking and lifting slowly.
+    static func dozing(at time: Float) -> Pose {
+        var pose = seated
+        pose.torsoPitch = 0.22
+        pose.shoulderPitch = [0.2, 0.2]
+        pose.elbow = [0.7, 0.7]
+        pose.headPitch = 0.3 + 0.12 * sin(time * 1.3)
+        return pose
+    }
+
+    /// Standing beside the desk, one arm up, waving.
+    static func waving(at time: Float) -> Pose {
+        var pose = standing
+        pose.shoulderRoll = [0, 2.7]
+        pose.elbow = [0, 0.5 + 0.35 * sin(time * 6)]
+        pose.shoulderPitch = [0.1, 0]
+        return pose
+    }
+
+    /// One stride: the legs swing against the arms, a knee bends on the back swing.
+    static func walking(phase: Float) -> Pose {
+        var pose = standing
+        let swing = sin(phase)
+        pose.hip = FigureRig.standingHip + 0.02 * abs(cos(phase))
+        pose.hipPitch = [0.45 * swing, -0.45 * swing]
+        pose.knee = [0.5 * max(0, -swing), 0.5 * max(0, swing)]
+        pose.shoulderPitch = [-0.35 * swing, 0.35 * swing]
+        pose.elbow = [0.3, 0.3]
+        return pose
+    }
+}
+
+/// Where a figure is going: its chair, a spot beside the desk, or out of the office.
+private enum FigureGoal: Equatable {
+    case seated, standingBy, gone
+}
+
+/// A figure on its way: along `path`, `walked` metres so far, to `goal`.
+private struct Walk {
+    let path: OfficePath
+    var walked: Float
+    let goal: FigureGoal
+}
+
 /// One Desk: its furniture, its figure and its bubble.
 private struct DeskNode {
     let entity: Entity
-    let figure: Entity
-    var parts: [FigurePart]
+    var rig: FigureRig
     let screen: ModelEntity
     let bubble: Entity
     let rug: ModelEntity
@@ -198,6 +437,13 @@ private struct DeskNode {
     var agent: String
     var dark: Bool
     var target: SIMD3<Float>
+    /// The way from the Room's doorway to the chair.
+    var way: OfficePath
+    /// Where the figure stands or sits now, when it is not walking.
+    var at: FigureGoal
+    var walk: Walk?
+    /// The stride cycle while walking.
+    var stride: Float
 }
 
 /// One traveller on the street, with the limbs that swing and the wheels that turn as it goes.
@@ -235,9 +481,14 @@ final class OfficeSceneController {
     private var updates: EventSubscription?
     private var animate = true
     private var dark = false
+    private var style = OfficeStyle.modern
+    private var environment = OfficeEnvironment.city
     private var layoutExtent = SIMD2<Float>(8, 6)
     private static let doorWidth: Float = 1.4
     private static let wallHeight: Float = 0.55
+    /// How fast a figure walks, in metres per second, and how many strides it takes per metre.
+    private static let walkSpeed: Float = 1.0
+    private static let strideRate: Float = 6.5
 
     // The camera: where it looks, how it is turned and how far it stands.
     static let defaultYaw: Float = 0.42
@@ -304,11 +555,19 @@ final class OfficeSceneController {
         camera.look(at: focus, from: focus + eye, relativeTo: nil)
         placeSun()
         faceHalos()
+        faceStandingFigures()
     }
 
     private func faceHalos() {
         let facing = camera.orientation(relativeTo: nil)
         for halo in halos { halo.setOrientation(facing, relativeTo: nil) }
+    }
+
+    /// A figure standing beside its desk looks at the viewer, wherever the view is turned.
+    private func faceStandingFigures() {
+        for node in desks.values where node.at == .standingBy && node.walk == nil {
+            node.rig.root.orientation = simd_quatf(angle: .pi + yaw, axis: [0, 1, 0])
+        }
     }
 
     /// In the top right of the sky of the default view, behind the whole scene, its glow clear of
@@ -373,23 +632,37 @@ final class OfficeSceneController {
 
     // MARK: Sync
 
-    func sync(layout: OfficeLayout, sessions: [OfficeSession], selected: String?, dark: Bool, animate: Bool) {
+    func sync(
+        layout: OfficeLayout, sessions: [OfficeSession], selected: String?, style: OfficeStyle,
+        environment: OfficeEnvironment, dark: Bool, animate: Bool
+    ) {
         self.animate = animate
         let darkChanged = self.dark != dark
         self.dark = dark
-        let palette = dark ? Palette.dark : Palette.light
+        self.style = style
+        self.environment = environment
+        let palette = Palette.make(style: style, environment: environment, dark: dark)
         layoutExtent = SIMD2(Float(layout.width), Float(layout.depth))
         if !adjusted { applyCamera() }
 
-        // Rooms: the project Rooms and the Center Room they open onto.
+        // Rooms: the project Rooms and the Center Room they open onto. A wall on the building's
+        // edge is an outer wall and gets windows.
         var liveRooms = Set<String>()
         for room in layout.all {
             liveRooms.insert(room.path)
+            var outer = Set<OfficeSide>()
+            if abs(room.center.z - room.depth / 2 + layout.depth / 2) < 0.01 { outer.insert(.north) }
+            if abs(room.center.z + room.depth / 2 - layout.depth / 2) < 0.01 { outer.insert(.south) }
+            if abs(room.center.x - room.width / 2 + layout.width / 2) < 0.01 { outer.insert(.west) }
+            if abs(room.center.x + room.width / 2 - layout.width / 2) < 0.01 { outer.insert(.east) }
+            outer = outer.intersection(room.walls)
             let walls = room.walls.map(\.rawValue).sorted().joined(separator: ",")
-            let signature = "\(room.name)|\(room.width)|\(room.depth)|\(walls)|\(room.door?.rawValue ?? "")|\(dark)"
+            let outerWalls = outer.map(\.rawValue).sorted().joined(separator: ",")
+            let signature =
+                "\(room.name)|\(room.width)|\(room.depth)|\(walls)|\(outerWalls)|\(room.door?.rawValue ?? "")|\(dark)|\(style)"
             if rooms[room.path]?.signature != signature {
                 rooms[room.path]?.entity.removeFromParent()
-                let entity = makeRoom(room, palette)
+                let entity = makeRoom(room, outer: outer, palette)
                 root.addChild(entity)
                 rooms[room.path] = RoomNode(entity: entity, signature: signature)
             }
@@ -400,8 +673,8 @@ final class OfficeSceneController {
             rooms[path] = nil
         }
 
-        // The street outside, laid out again only when the building's size or the appearance changes.
-        let streetSignature = "\(layout.width)|\(layout.depth)|\(dark)"
+        // The street outside, laid out again only when the building's size or the look changes.
+        let streetSignature = "\(layout.width)|\(layout.depth)|\(dark)|\(style)|\(environment)"
         if streetSignature != self.streetSignature {
             self.streetSignature = streetSignature
             streetEntity?.removeFromParent()
@@ -416,20 +689,23 @@ final class OfficeSceneController {
 
         // Desks
         let sessionsById = Dictionary(uniqueKeysWithValues: sessions.map { ($0.id, $0) })
-        var placed: [String: SIMD3<Float>] = [:]
+        var placed: [String: (position: SIMD3<Float>, way: OfficePath)] = [:]
         for room in layout.rooms {
-            for desk in room.desks { placed[desk.sessionId] = [Float(desk.position.x), 0, Float(desk.position.z)] }
+            for desk in room.desks {
+                placed[desk.sessionId] = (
+                    [Float(desk.position.x), 0, Float(desk.position.z)], OfficeLayout.walk(in: room, to: desk)
+                )
+            }
         }
-        for (id, position) in placed {
+        for (id, place) in placed {
             guard let session = sessionsById[id] else { continue }
             if desks[id] == nil {
-                let node = makeDesk(session, palette)
-                node.entity.position = position
+                let node = makeDesk(session, at: place.position, way: place.way, palette)
                 if animate {
                     node.entity.scale = [0.01, 0.01, 0.01]
                     root.addChild(node.entity)
                     node.entity.move(
-                        to: Transform(scale: .one, translation: position), relativeTo: root, duration: 0.45,
+                        to: Transform(scale: .one, translation: place.position), relativeTo: root, duration: 0.45,
                         timingFunction: .easeOut)
                 } else {
                     root.addChild(node.entity)
@@ -437,13 +713,14 @@ final class OfficeSceneController {
                 desks[id] = node
             }
             guard var node = desks[id] else { continue }
-            if node.target != position {
-                node.target = position
+            node.way = place.way
+            if node.target != place.position {
+                node.target = place.position
                 if animate {
                     node.entity.move(
-                        to: Transform(scale: .one, translation: position), relativeTo: root, duration: 0.35)
+                        to: Transform(scale: .one, translation: place.position), relativeTo: root, duration: 0.35)
                 } else {
-                    node.entity.position = position
+                    node.entity.position = place.position
                 }
             }
             update(&node, with: session, palette: palette, force: darkChanged)
@@ -474,7 +751,7 @@ final class OfficeSceneController {
         }
     }
 
-    private func tick(_ delta: Float) {
+    func tick(_ delta: Float) {
         clock += delta
         guard animate else { return }
         moveTravellers()
@@ -483,8 +760,116 @@ final class OfficeSceneController {
             rays.orientation = simd_quatf(angle: clock * 0.05, axis: [0, 0, 1])
             rays.scale = .init(repeating: 1 + 0.04 * sin(clock * 0.9))
         }
-        for node in desks.values where node.status == .working {
-            node.figure.position.y = sin(clock * 5 + Float(abs(node.target.x))) * 0.025
+        for (id, node) in desks {
+            var node = node
+            if node.walk != nil {
+                advance(&node, by: delta)
+            } else {
+                switch (node.at, node.status) {
+                case (.seated, .working): apply(.typing(at: clock + Float(abs(node.target.x))), to: node.rig)
+                case (.seated, _): apply(.dozing(at: clock + Float(abs(node.target.x))), to: node.rig)
+                case (.standingBy, _): apply(.waving(at: clock), to: node.rig)
+                case (.gone, _): break
+                }
+            }
+            desks[id] = node
+        }
+    }
+
+    // MARK: Figures on the move
+
+    /// Where a figure stands or sits for `goal`, in the office (world) frame: its chair, the spot
+    /// in the gap beside the desk, or the doorway.
+    private func spot(_ goal: FigureGoal, of node: DeskNode) -> OfficePoint {
+        let chair = node.way.end ?? OfficePoint(x: Double(node.target.x), z: Double(node.target.z) + OfficeLayout.chairOffset)
+        switch goal {
+        case .seated: return chair
+        case .standingBy:
+            // The gap the figure walked down, beside the chair.
+            let gap = node.way.points.count >= 2 ? node.way.points[node.way.points.count - 2].x : chair.x + 0.7
+            return OfficePoint(x: gap, z: chair.z)
+        case .gone: return node.way.start ?? chair
+        }
+    }
+
+    /// The way from `from` to `goal`: by the chair whenever the doorway is one end.
+    private func route(_ node: DeskNode, from: FigureGoal, to goal: FigureGoal) -> OfficePath {
+        switch (from, goal) {
+        case (.gone, _): return OfficePath(node.way.points + [spot(goal, of: node)])
+        case (_, .gone): return OfficePath([spot(from, of: node)] + node.way.points.reversed())
+        default: return OfficePath([spot(from, of: node), spot(goal, of: node)])
+        }
+    }
+
+    /// A figure that is gone waits under the lawn: a model that is disabled or scaled to nothing
+    /// when it first draws is culled by those bounds and never shows again.
+    private static let hidden: Float = -3
+
+    /// Puts the figure at `point` (an office point), facing `heading` or, when there is none, its
+    /// monitor.
+    private func place(_ node: DeskNode, at point: OfficePoint, heading: OfficePoint?) {
+        node.rig.root.position = [Float(point.x) - node.target.x, 0, Float(point.z) - node.target.z]
+        let yaw = heading.map { atan2(-Float($0.x), -Float($0.z)) } ?? 0
+        node.rig.root.orientation = simd_quatf(angle: yaw, axis: [0, 1, 0])
+    }
+
+    /// Sets the figure down where `goal` puts it, with the pose that goes with it.
+    private func settle(_ node: inout DeskNode, at goal: FigureGoal) {
+        node.at = goal
+        node.walk = nil
+        place(node, at: spot(goal, of: node), heading: nil)
+        switch goal {
+        case .seated: apply(.seated, to: node.rig)
+        case .standingBy:
+            apply(.waving(at: 0), to: node.rig)
+            node.rig.root.orientation = simd_quatf(angle: .pi + yaw, axis: [0, 1, 0])
+        case .gone: node.rig.root.position.y = Self.hidden
+        }
+    }
+
+    /// Sends the figure to `goal`: walking there with animation on, or at once without. A figure
+    /// already on its way somewhere else is set down there first.
+    private func send(_ node: inout DeskNode, to goal: FigureGoal) {
+        if let walk = node.walk, walk.goal != goal { settle(&node, at: walk.goal) }
+        guard node.walk == nil, node.at != goal else { return }
+        guard animate else {
+            settle(&node, at: goal)
+            return
+        }
+        let path = route(node, from: node.at, to: goal)
+        node.walk = Walk(path: path, walked: 0, goal: goal)
+        advance(&node, by: 0)
+    }
+
+    private func advance(_ node: inout DeskNode, by delta: Float) {
+        guard var walk = node.walk else { return }
+        walk.walked += delta * Self.walkSpeed
+        if Double(walk.walked) >= walk.path.length {
+            settle(&node, at: walk.goal)
+            return
+        }
+        node.walk = walk
+        node.stride += delta * Self.walkSpeed * Self.strideRate
+        let now = walk.path.position(at: Double(walk.walked))
+        place(node, at: now.point, heading: now.heading)
+        apply(.walking(phase: node.stride), to: node.rig)
+    }
+
+    private func apply(_ pose: Pose, to rig: FigureRig) {
+        let x = SIMD3<Float>(1, 0, 0)
+        let y = SIMD3<Float>(0, 1, 0)
+        let z = SIMD3<Float>(0, 0, 1)
+        rig.pelvis.position.y = pose.hip
+        rig.torso.orientation = simd_quatf(angle: pose.torsoYaw, axis: y) * simd_quatf(angle: pose.torsoPitch, axis: x)
+        rig.head.orientation = simd_quatf(angle: pose.headYaw, axis: y) * simd_quatf(angle: pose.headPitch, axis: x)
+        for side in 0..<2 {
+            // The left arm lifts out to -x, the right to +x.
+            let roll = (side == 0 ? -1 : 1) * pose.shoulderRoll[side]
+            rig.shoulders[side].orientation =
+                simd_quatf(angle: roll, axis: z) * simd_quatf(angle: pose.shoulderPitch[side], axis: x)
+            rig.elbows[side].orientation = simd_quatf(angle: pose.elbow[side], axis: x)
+            rig.hips[side].orientation = simd_quatf(angle: pose.hipPitch[side], axis: x)
+            rig.knees[side].orientation = simd_quatf(angle: pose.knee[side], axis: x)
         }
     }
 
@@ -502,6 +887,96 @@ final class OfficeSceneController {
             containerFrame: .zero, alignment: .center, lineBreakMode: .byTruncatingTail)
     }
 
+    /// A piece of wall in the building's style, with the cut-away cap along its top. The style
+    /// decides what it is made of: plaster, brick with mortar lines, a tinted pane in a steel
+    /// frame, or stacked logs.
+    private func wallPiece(_ size: SIMD3<Float>, at position: SIMD3<Float>, to entity: Entity, _ palette: Palette) {
+        let height = Self.wallHeight
+        let along = size.x > size.z
+        switch style {
+        case .modern:
+            entity.addChild(box(size, palette.wall, at: position))
+        case .brick:
+            entity.addChild(box(size, palette.wall, at: position))
+            // Mortar lines on both faces, so the brick reads from any side.
+            var y: Float = 0.09
+            while y < height - 0.04 {
+                let line: SIMD3<Float> = along ? [size.x, 0.012, size.z + 0.004] : [size.x + 0.004, 0.012, size.z]
+                entity.addChild(box(line, palette.wallCap, at: [position.x, y, position.z]))
+                y += 0.09
+            }
+        case .glass:
+            let pane = ModelEntity(mesh: .generateBox(size: size), materials: [glassMaterial(palette.wall, opacity: 0.45)])
+            pane.position = position
+            entity.addChild(pane)
+            // Steel posts every 1.2 m and a rail along the foot.
+            let length = along ? size.x : size.z
+            var offset = -length / 2
+            while offset <= length / 2 + 0.01 {
+                let at: SIMD3<Float> = along ? [position.x + offset, height / 2, position.z] : [position.x, height / 2, position.z + offset]
+                entity.addChild(box([0.05, height, 0.05], palette.wallCap, at: at))
+                offset += 1.2
+            }
+            let foot: SIMD3<Float> = along ? [size.x, 0.04, size.z + 0.02] : [size.x + 0.02, 0.04, size.z]
+            entity.addChild(box(foot, palette.wallCap, at: [position.x, 0.02, position.z]))
+        case .timber:
+            // Four logs, every other one a shade darker, so the wall looks stacked.
+            let logs = 4
+            let radius = height / Float(logs) / 2
+            for index in 0..<logs {
+                let shade = index.isMultiple(of: 2) ? palette.wall : palette.wall.blended(withFraction: 0.12, of: .black) ?? palette.wall
+                let log = ModelEntity(
+                    mesh: .generateCylinder(height: along ? size.x : size.z, radius: radius * 1.08), materials: [material(shade)])
+                log.orientation = along ? simd_quatf(angle: .pi / 2, axis: [0, 0, 1]) : simd_quatf(angle: .pi / 2, axis: [1, 0, 0])
+                log.position = [position.x, radius + Float(index) * 2 * radius, position.z]
+                entity.addChild(log)
+            }
+        }
+        entity.addChild(box([size.x + 0.004, 0.025, size.z + 0.004], palette.wallCap, at: [position.x, height, position.z]))
+    }
+
+    /// Windows along an outer wall: panes in a frame, every 1.4 m, kept off a near wall's first
+    /// metres where the Room's name stands.
+    private func addWindows(to entity: Entity, side: OfficeSide, room: PlacedRoom, palette: Palette) {
+        let width = Float(room.width)
+        let depth = Float(room.depth)
+        let length = side == .north || side == .south ? width : depth
+        let start: Float = side == .south ? -length / 2 + 2.4 : -length / 2 + 0.9
+        let pane: SIMD3<Float> = [0.7, 0.26, 0.09]
+        var glass: any RealityKit.Material = material(palette.glass, roughness: 0.3)
+        if dark {
+            var warm = UnlitMaterial(applyPostProcessToneMap: false)
+            warm.color = .init(tint: palette.glass)
+            glass = warm
+        }
+        var offset = start
+        while offset + pane.x / 2 < length / 2 - 0.5 {
+            let window = Entity()
+            let model = ModelEntity(mesh: .generateBox(size: pane), materials: [glass])
+            model.position = [0, 0.33, 0]
+            window.addChild(model)
+            // The frame: a sill and a lintel, two jambs and a mullion.
+            for (size, at) in [
+                (SIMD3<Float>(0.78, 0.03, 0.1), SIMD3<Float>(0, 0.185, 0)), ([0.78, 0.03, 0.1], [0, 0.475, 0]),
+                ([0.03, 0.3, 0.1], [-0.37, 0.33, 0]), ([0.03, 0.3, 0.1], [0.37, 0.33, 0]), ([0.02, 0.26, 0.1], [0, 0.33, 0]),
+            ] {
+                window.addChild(box(size, palette.windowFrame, at: at))
+            }
+            switch side {
+            case .north: window.position = [offset, 0, -depth / 2 + 0.03]
+            case .south: window.position = [offset, 0, depth / 2 - 0.03]
+            case .west:
+                window.position = [-width / 2 + 0.03, 0, offset]
+                window.orientation = simd_quatf(angle: .pi / 2, axis: [0, 1, 0])
+            case .east:
+                window.position = [width / 2 - 0.03, 0, offset]
+                window.orientation = simd_quatf(angle: .pi / 2, axis: [0, 1, 0])
+            }
+            entity.addChild(window)
+            offset += 1.4
+        }
+    }
+
     /// A low wall along one side of a room, with a doorway in its middle when `door` is set.
     private func addWall(
         to entity: Entity, side: OfficeSide, room: PlacedRoom, palette: Palette
@@ -511,22 +986,16 @@ final class OfficeSceneController {
         let thickness: Float = 0.06
         let height = Self.wallHeight
         let walls = room.walls
-        /// A wall piece in plaster with the dark cut-away cap along its top.
-        func piece(_ size: SIMD3<Float>, at position: SIMD3<Float>) {
-            entity.addChild(box(size, palette.wall, at: position))
-            entity.addChild(
-                box([size.x + 0.004, 0.025, size.z + 0.004], palette.wallCap, at: [position.x, height, position.z]))
-        }
         switch side {
         case .north, .south:
             let z = (side == .north ? -1 : 1) * (depth / 2 - thickness / 2)
             guard room.door == side else {
-                piece([width, height, thickness], at: [0, height / 2, z])
+                wallPiece([width, height, thickness], at: [0, height / 2, z], to: entity, palette)
                 return
             }
             let side = (width - Self.doorWidth) / 2
             for direction: Float in [-1, 1] {
-                piece([side, height, thickness], at: [direction * (Self.doorWidth + side) / 2, height / 2, z])
+                wallPiece([side, height, thickness], at: [direction * (Self.doorWidth + side) / 2, height / 2, z], to: entity, palette)
             }
             // A mat in the doorway, so the way through reads from above.
             entity.addChild(box([Self.doorWidth, 0.014, 0.5], palette.desk, at: [0, 0.007, z]))
@@ -535,11 +1004,11 @@ final class OfficeSceneController {
             let top = walls.contains(.north) ? thickness : 0
             let bottom = walls.contains(.south) ? thickness : 0
             let x = (side == .west ? -1 : 1) * (width / 2 - thickness / 2)
-            piece([thickness, height, depth - top - bottom], at: [x, height / 2, (top - bottom) / 2])
+            wallPiece([thickness, height, depth - top - bottom], at: [x, height / 2, (top - bottom) / 2], to: entity, palette)
         }
     }
 
-    private func makeRoom(_ room: PlacedRoom, _ palette: Palette) -> Entity {
+    private func makeRoom(_ room: PlacedRoom, outer: Set<OfficeSide>, _ palette: Palette) -> Entity {
         let entity = Entity()
         let width = Float(room.width)
         let depth = Float(room.depth)
@@ -558,7 +1027,7 @@ final class OfficeSceneController {
                 }
             }
         } else {
-            // Wooden planks across the room, every other one a shade darker.
+            // Planks across the room, every other one a shade darker.
             let plank: Float = 0.3
             var z = -depth / 2 + plank
             while z < depth / 2 {
@@ -569,6 +1038,7 @@ final class OfficeSceneController {
         }
         for side in [OfficeSide.north, .south, .west, .east] where room.walls.contains(side) {
             addWall(to: entity, side: side, room: room, palette: palette)
+            if outer.contains(side) { addWindows(to: entity, side: side, room: room, palette: palette) }
         }
         for piece in room.furniture {
             let item = makeFurniture(piece, palette)
@@ -593,8 +1063,10 @@ final class OfficeSceneController {
         return entity
     }
 
-    private func makeDesk(_ session: OfficeSession, _ palette: Palette) -> DeskNode {
+    /// A Desk at `position` (in the office), with its figure on its way in.
+    private func makeDesk(_ session: OfficeSession, at position: SIMD3<Float>, way: OfficePath, _ palette: Palette) -> DeskNode {
         let entity = Entity()
+        entity.position = position
         // Furniture: a light desk on a metal frame, a monitor facing the viewer with a keyboard in
         // front of it, and an office chair on wheels.
         entity.addChild(box([1.2, 0.04, 0.6], palette.deskTop, at: [0, 0.72, -0.15]))
@@ -607,10 +1079,36 @@ final class OfficeSceneController {
         entity.addChild(box([0.18, 0.015, 0.12], palette.deskFrame, at: [0, 0.748, -0.32]))
         entity.addChild(box([0.04, 0.2, 0.04], palette.deskFrame, at: [0, 0.85, -0.32]))
         entity.addChild(box([0.6, 0.38, 0.025], NSColor(white: 0.1, alpha: 1), at: [0, 1.1, -0.31]))
-        let screen = ModelEntity(mesh: .generateBox(size: [0.54, 0.32, 0.03]), materials: [UnlitMaterial(color: .darkGray)])
-        screen.position = [0, 1.1, -0.3]
+        // The screen: a painted card just in front of the bezel, swapped with the status.
+        let screen = ModelEntity(mesh: .generatePlane(width: 0.54, height: 0.32), materials: [UnlitMaterial(color: .darkGray)])
+        screen.position = [0, 1.1, -0.296]
         entity.addChild(screen)
         entity.addChild(box([0.44, 0.015, 0.14], NSColor(white: 0.22, alpha: 1), at: [0, 0.748, 0.0]))
+        // Something of the Session's own on the desk: a mug, a notebook or a succulent.
+        var seed = OfficeSeed("desk:\(session.id)")
+        switch Int.random(in: 0..<3, using: &seed) {
+        case 0:
+            let mugs = [NSColor.systemRed, .systemBlue, .white, NSColor(red: 0.95, green: 0.8, blue: 0.3, alpha: 1)]
+            let colour = mugs[Int.random(in: 0..<mugs.count, using: &seed)]
+            let mug = ModelEntity(mesh: .generateCylinder(height: 0.08, radius: 0.035), materials: [material(colour)])
+            mug.position = [0.44, 0.78, -0.2]
+            entity.addChild(mug)
+            entity.addChild(box([0.015, 0.04, 0.03], colour, at: [0.485, 0.78, -0.2]))
+        case 1:
+            let covers = [NSColor(red: 0.2, green: 0.35, blue: 0.6, alpha: 1), NSColor(red: 0.7, green: 0.25, blue: 0.2, alpha: 1), NSColor(white: 0.25, alpha: 1)]
+            entity.addChild(box([0.15, 0.016, 0.2], covers[Int.random(in: 0..<covers.count, using: &seed)], at: [-0.42, 0.748, -0.18]))
+            entity.addChild(box([0.012, 0.01, 0.14], NSColor(white: 0.95, alpha: 1), at: [-0.34, 0.76, -0.2]))
+        default:
+            let pot = ModelEntity(
+                mesh: .generateCylinder(height: 0.06, radius: 0.04),
+                materials: [material(NSColor(red: 0.76, green: 0.42, blue: 0.3, alpha: 1))])
+            pot.position = [0.46, 0.77, -0.3]
+            entity.addChild(pot)
+            let leaves = ModelEntity(
+                mesh: .generateSphere(radius: 0.045), materials: [material(NSColor(red: 0.35, green: 0.62, blue: 0.35, alpha: 1))])
+            leaves.position = [0.46, 0.83, -0.3]
+            entity.addChild(leaves)
+        }
         // The chair: a five-spoke base on wheels, a column, a padded seat and a low back.
         for spoke in 0..<5 {
             let angle = Float(spoke) * 2 * .pi / 5
@@ -631,9 +1129,10 @@ final class OfficeSceneController {
             entity.addChild(pad)
         }
 
-        // The figure, dressed by its look, bobbing as one.
-        let figure = Entity()
-        entity.addChild(figure)
+        // The figure, dressed by its look, on its own root so it can walk about.
+        let rig = dress(OfficeLook(session: session))
+        rig.root.position = [0, 0, Float(OfficeLayout.chairOffset)]
+        entity.addChild(rig.root)
 
         // The bubble above it, always facing the camera.
         let bubble = Entity()
@@ -656,142 +1155,209 @@ final class OfficeSceneController {
         entity.addChild(hit)
 
         var node = DeskNode(
-            entity: entity, figure: figure, parts: [], screen: screen, bubble: bubble, rug: rug,
-            bubbleText: "", status: .idle, agent: "", dark: dark, target: entity.position)
+            entity: entity, rig: rig, screen: screen, bubble: bubble, rug: rug, bubbleText: "", status: .idle,
+            agent: "", dark: dark, target: entity.position, way: way, at: .gone, walk: nil, stride: 0)
+        // A new figure walks in from the doorway; without animation it is seated at once.
+        node.rig.root.position.y = Self.hidden
         update(&node, with: session, palette: palette, force: true)
         return node
+    }
+
+    /// Fits the figure with a click target, tagged with its Session, so a walking figure is clickable too.
+    private func tag(_ rig: FigureRig, _ id: String) {
+        let hit = Entity()
+        hit.components.set(CollisionComponent(shapes: [.generateBox(size: [0.5, 1.6, 0.5])]))
+        hit.components.set(InputTargetComponent())
+        hit.components.set(DeskTag(id: id))
+        hit.position = [0, 0.8, 0]
+        rig.root.addChild(hit)
     }
 
     private func update(_ node: inout DeskNode, with session: OfficeSession, palette: Palette, force: Bool) {
         let live = session.status == .working || session.status == .waiting
         let text = session.bubble
+        let title = session.bubbleTitle
+        let bubbleText = "\(title)\n\(text)"
         if node.agent != session.agent {
-            for child in Array(node.figure.children) { child.removeFromParent() }
-            node.parts = dress(node.figure, OfficeLook(session: session))
+            if !node.agent.isEmpty {
+                // The agent of a Session never changes; this guards the id staying while the type does.
+                node.rig.root.removeFromParent()
+                let rig = dress(OfficeLook(session: session))
+                node.entity.addChild(rig.root)
+                node.rig = rig
+                node.at = .gone
+                node.walk = nil
+            }
+            tag(node.rig, session.id)
         }
         if force || node.status != session.status || node.agent != session.agent {
-            for part in node.parts {
+            for part in node.rig.parts {
                 part.entity.model?.materials = [material(nsColour(live ? part.colour : part.colour.greyed))]
             }
-            let screen: NSColor =
+            let screen: any RealityKit.Material =
                 switch session.status {
-                case .working: NSColor(red: 0.45, green: 0.85, blue: 1, alpha: 1)
-                case .waiting: amber
-                default: NSColor(white: 0.18, alpha: 1)
+                case .working: screenWorking
+                case .waiting: screenWaiting
+                default: UnlitMaterial(color: NSColor(white: 0.12, alpha: 1))
                 }
-            node.screen.model?.materials = [UnlitMaterial(color: screen)]
-            if session.status != .working { node.figure.position.y = 0 }
+            node.screen.model?.materials = [screen]
         }
-        if force || node.bubbleText != text || node.status != session.status {
+        if force || node.bubbleText != bubbleText || node.status != session.status {
             // A copy: removing while walking `children` skips every other one and the old text stays.
             for child in Array(node.bubble.children) { child.removeFromParent() }
             let mesh = textMesh(text, size: 0.15)
             let bounds = mesh.bounds
-            let width = max(0.7, bounds.extents.x + 0.3)
+            let titleMesh = title.isEmpty ? nil : textMesh(title, size: 0.1)
+            let titleBounds = titleMesh?.bounds
+            let width = max(0.7, bounds.extents.x + 0.3, (titleBounds?.extents.x ?? 0) + 0.3)
+            let height: Float = titleMesh == nil ? 0.32 : 0.5
             let background = session.status == .waiting ? amber : palette.bubble
+            let ink = session.status == .waiting ? NSColor(white: 0.1, alpha: 1) : palette.bubbleText
             let plate = ModelEntity(
-                mesh: .generatePlane(width: width, height: 0.32, cornerRadius: 0.1),
+                mesh: .generatePlane(width: width, height: height, cornerRadius: 0.1),
                 materials: [UnlitMaterial(color: background)])
-            let label = ModelEntity(
-                mesh: mesh,
-                materials: [UnlitMaterial(color: session.status == .waiting ? NSColor(white: 0.1, alpha: 1) : palette.bubbleText)])
-            label.position = [-(bounds.min.x + bounds.extents.x / 2), -(bounds.min.y + bounds.extents.y / 2), 0.004]
             node.bubble.addChild(plate)
+            let label = ModelEntity(mesh: mesh, materials: [UnlitMaterial(color: ink)])
+            let lift: Float = titleMesh == nil ? 0 : -0.08
+            label.position = [-(bounds.min.x + bounds.extents.x / 2), lift - (bounds.min.y + bounds.extents.y / 2), 0.004]
             node.bubble.addChild(label)
+            if let titleMesh, let titleBounds {
+                // The Session Title above the activity, a little lighter.
+                let heading = ModelEntity(
+                    mesh: titleMesh, materials: [UnlitMaterial(color: ink.blended(withFraction: 0.35, of: background) ?? ink)])
+                heading.position = [
+                    -(titleBounds.min.x + titleBounds.extents.x / 2), 0.12 - (titleBounds.min.y + titleBounds.extents.y / 2), 0.004,
+                ]
+                node.bubble.addChild(heading)
+            }
         }
-        node.bubbleText = text
+        node.bubbleText = bubbleText
         node.status = session.status
         node.agent = session.agent
         node.dark = dark
+        // Where the figure should be: at its chair, standing by for the Owner, or gone.
+        let goal: FigureGoal =
+            switch session.status {
+            case .exited: .gone
+            case .waiting: .standingBy
+            case .working, .idle: .seated
+            }
+        send(&node, to: goal)
     }
 
-    /// Seats a figure dressed by `look` at the chair, facing its monitor (the viewer sees its back).
-    private func dress(_ figure: Entity, _ look: OfficeLook) -> [FigurePart] {
+    /// Builds a figure dressed by `look`, standing on its root and facing -z.
+    private func dress(_ look: OfficeLook) -> FigureRig {
         var parts: [FigurePart] = []
         func add(
-            _ mesh: MeshResource, _ colour: OfficeColour, at position: SIMD3<Float>,
+            _ mesh: MeshResource, _ colour: OfficeColour, at position: SIMD3<Float>, to parent: Entity,
             turn: simd_quatf = simd_quatf(angle: 0, axis: [0, 1, 0]), scale: SIMD3<Float> = .one
         ) {
             let entity = ModelEntity(mesh: mesh, materials: [material(nsColour(colour))])
             entity.position = position
             entity.orientation = turn
             entity.scale = scale
-            figure.addChild(entity)
+            parent.addChild(entity)
             parts.append(FigurePart(entity: entity, colour: colour))
         }
-        let alongZ = simd_quatf(angle: .pi / 2, axis: [1, 0, 0])
+        func pivot(at position: SIMD3<Float>, under parent: Entity) -> Entity {
+            let joint = Entity()
+            joint.position = position
+            parent.addChild(joint)
+            return joint
+        }
         let alongX = simd_quatf(angle: .pi / 2, axis: [0, 0, 1])
         let dark = OfficeColour(red: 0.12, green: 0.12, blue: 0.14)
-        let head = SIMD3<Float>(0, 0.97, 0.55)
+        let shoe = OfficeColour(red: 0.16, green: 0.12, blue: 0.1)
 
-        // Seated legs: thighs on the chair, shins down under the desk.
+        let root = Entity()
+        let pelvis = pivot(at: [0, FigureRig.standingHip, 0], under: root)
+        // Legs: a thigh from each hip, a shin from each knee, a shoe at the end.
+        var hips: [Entity] = []
+        var knees: [Entity] = []
         for x: Float in [-0.08, 0.08] {
-            add(.generateBox(size: [0.12, 0.11, 0.38]), look.trousers, at: [x, 0.39, 0.36])
-            add(.generateBox(size: [0.11, 0.36, 0.11]), look.trousers, at: [x, 0.18, 0.2])
+            let hip = pivot(at: [x, 0, 0], under: pelvis)
+            add(.generateBox(size: [0.12, 0.36, 0.12]), look.trousers, at: [0, -0.18, 0], to: hip)
+            let knee = pivot(at: [0, -0.36, 0], under: hip)
+            add(.generateBox(size: [0.11, 0.34, 0.11]), look.trousers, at: [0, -0.17, 0], to: knee)
+            add(.generateBox(size: [0.12, 0.06, 0.2]), shoe, at: [0, -0.34, -0.04], to: knee)
+            hips.append(hip)
+            knees.append(knee)
         }
-        add(.generateCylinder(height: 0.46, radius: 0.17), look.shirtColour, at: [0, 0.58, 0.55])
+        // The torso from the pelvis up, with the shirt's details on it.
+        let torso = pivot(at: .zero, under: pelvis)
+        add(.generateCylinder(height: 0.46, radius: 0.17), look.shirtColour, at: [0, 0.23, 0], to: torso)
         switch look.shirt {
         case .tee: break
         case .stripe:
-            add(
-                .generateCylinder(height: 0.07, radius: 0.176), look.shirtColour.mixed(with: dark, 0.5),
-                at: [0, 0.62, 0.55])
+            add(.generateCylinder(height: 0.07, radius: 0.176), look.shirtColour.mixed(with: dark, 0.5), at: [0, 0.27, 0], to: torso)
         case .hoodie:
-            add(.generateSphere(radius: 0.12), look.shirtColour.mixed(with: dark, 0.2), at: [0, 0.8, 0.67])
+            add(.generateSphere(radius: 0.12), look.shirtColour.mixed(with: dark, 0.2), at: [0, 0.45, 0.12], to: torso)
         case .collar:
-            add(
-                .generateCylinder(height: 0.04, radius: 0.1), OfficeColour(red: 0.95, green: 0.95, blue: 0.95),
-                at: [0, 0.82, 0.55])
+            add(.generateCylinder(height: 0.04, radius: 0.1), OfficeColour(red: 0.95, green: 0.95, blue: 0.95), at: [0, 0.47, 0], to: torso)
         }
-        // Arms reaching to the keyboard.
+        // Arms: an upper arm from each shoulder, a forearm with a hand from each elbow.
+        var shoulders: [Entity] = []
+        var elbows: [Entity] = []
         for x: Float in [-0.19, 0.19] {
-            add(.generateCylinder(height: 0.4, radius: 0.045), look.shirtColour, at: [x, 0.75, 0.36], turn: alongZ)
-            add(.generateSphere(radius: 0.05), look.skin, at: [x * 0.9, 0.77, 0.14])
+            let shoulder = pivot(at: [x, 0.42, 0], under: torso)
+            add(.generateCylinder(height: 0.26, radius: 0.045), look.shirtColour, at: [0, -0.13, 0], to: shoulder)
+            let elbow = pivot(at: [0, -0.26, 0], under: shoulder)
+            add(.generateCylinder(height: 0.24, radius: 0.04), look.shirtColour, at: [0, -0.12, 0], to: elbow)
+            add(.generateSphere(radius: 0.05), look.skin, at: [0, -0.26, 0], to: elbow)
+            shoulders.append(shoulder)
+            elbows.append(elbow)
         }
-        add(.generateSphere(radius: 0.14), look.skin, at: head)
-        for x: Float in [-0.05, 0.05] { add(.generateSphere(radius: 0.018), dark, at: head + [x, 0.01, -0.13]) }
-
-        // Hair sits up and back, leaving the face.
+        // The head on a neck; hair sits up and back, leaving the face.
+        let neck = pivot(at: [0, 0.46, 0], under: torso)
+        add(.generateCylinder(height: 0.06, radius: 0.05), look.skin, at: [0, 0.02, 0], to: neck)
+        let head = SIMD3<Float>(0, 0.16, 0)
+        add(.generateSphere(radius: 0.14), look.skin, at: head, to: neck)
+        add(.generateSphere(radius: 0.025), look.skin.mixed(with: dark, 0.15), at: head + [0, -0.02, -0.14], to: neck)
+        for x: Float in [-0.05, 0.05] { add(.generateSphere(radius: 0.018), dark, at: head + [x, 0.01, -0.13], to: neck) }
         let cap = head + [0, 0.035, 0.03]
         switch look.hair {
         case .bald: break
-        case .short: add(.generateSphere(radius: 0.142), look.hairColour, at: cap)
+        case .short: add(.generateSphere(radius: 0.142), look.hairColour, at: cap, to: neck)
         case .long:
-            add(.generateSphere(radius: 0.142), look.hairColour, at: cap)
-            add(.generateBox(size: [0.26, 0.3, 0.09]), look.hairColour, at: head + [0, -0.09, 0.09])
+            add(.generateSphere(radius: 0.142), look.hairColour, at: cap, to: neck)
+            add(.generateBox(size: [0.26, 0.3, 0.09]), look.hairColour, at: head + [0, -0.09, 0.09], to: neck)
         case .bun:
-            add(.generateSphere(radius: 0.142), look.hairColour, at: cap)
-            add(.generateSphere(radius: 0.07), look.hairColour, at: head + [0, 0.12, 0.1])
+            add(.generateSphere(radius: 0.142), look.hairColour, at: cap, to: neck)
+            add(.generateSphere(radius: 0.07), look.hairColour, at: head + [0, 0.12, 0.1], to: neck)
         case .ponytail:
-            add(.generateSphere(radius: 0.142), look.hairColour, at: cap)
-            add(.generateCylinder(height: 0.22, radius: 0.04), look.hairColour, at: head + [0, -0.06, 0.17])
+            add(.generateSphere(radius: 0.142), look.hairColour, at: cap, to: neck)
+            add(.generateCylinder(height: 0.22, radius: 0.04), look.hairColour, at: head + [0, -0.06, 0.17], to: neck)
         case .spiky:
-            add(.generateSphere(radius: 0.14), look.hairColour, at: cap)
+            add(.generateSphere(radius: 0.14), look.hairColour, at: cap, to: neck)
             for (x, z): (Float, Float) in [(0, 0), (-0.07, 0.04), (0.07, 0.04), (-0.04, -0.06), (0.04, -0.06), (0, 0.09)] {
                 add(
-                    .generateBox(size: [0.05, 0.1, 0.05]), look.hairColour, at: head + [x, 0.15, z + 0.02],
+                    .generateBox(size: [0.05, 0.1, 0.05]), look.hairColour, at: head + [x, 0.15, z + 0.02], to: neck,
                     turn: simd_quatf(angle: x * 4 - z * 3, axis: [0, 0, 1]) * simd_quatf(angle: z * 4, axis: [1, 0, 0]))
             }
         case .cap:
             // Worn backwards, so the brim shows from behind.
-            add(.generateSphere(radius: 0.148), look.trousers, at: head + [0, 0.03, 0], scale: [1, 0.85, 1])
-            add(.generateBox(size: [0.2, 0.02, 0.14]), look.trousers, at: head + [0, 0.06, 0.18])
+            add(.generateSphere(radius: 0.148), look.trousers, at: head + [0, 0.03, 0], to: neck, scale: [1, 0.85, 1])
+            add(.generateBox(size: [0.2, 0.02, 0.14]), look.trousers, at: head + [0, 0.06, 0.18], to: neck)
         }
         switch look.extra {
         case .none: break
         case .glasses:
             for x: Float in [-0.055, 0.055] {
-                add(.generateBox(size: [0.075, 0.05, 0.015]), dark, at: head + [x, 0.01, -0.135])
-                add(.generateBox(size: [0.01, 0.015, 0.15]), dark, at: head + [x * 2.5, 0.01, -0.06])
+                add(.generateBox(size: [0.075, 0.05, 0.015]), dark, at: head + [x, 0.01, -0.135], to: neck)
+                add(.generateBox(size: [0.01, 0.015, 0.15]), dark, at: head + [x * 2.5, 0.01, -0.06], to: neck)
             }
         case .headphones:
-            add(.generateBox(size: [0.3, 0.025, 0.045]), dark, at: head + [0, 0.16, 0])
+            add(.generateBox(size: [0.3, 0.025, 0.045]), dark, at: head + [0, 0.16, 0], to: neck)
             for x: Float in [-0.145, 0.145] {
-                add(.generateBox(size: [0.025, 0.12, 0.045]), dark, at: head + [x, 0.08, 0])
-                add(.generateCylinder(height: 0.05, radius: 0.055), dark, at: head + [x, 0, 0], turn: alongX)
+                add(.generateBox(size: [0.025, 0.12, 0.045]), dark, at: head + [x, 0.08, 0], to: neck)
+                add(.generateCylinder(height: 0.05, radius: 0.055), dark, at: head + [x, 0, 0], to: neck, turn: alongX)
             }
         }
-        return parts
+        let rig = FigureRig(
+            root: root, pelvis: pelvis, torso: torso, head: neck, shoulders: shoulders, elbows: elbows, hips: hips,
+            knees: knees, parts: parts)
+        apply(.seated, to: rig)
+        return rig
     }
 
     // MARK: Street
@@ -816,8 +1382,8 @@ final class OfficeSceneController {
         }
     }
 
-    /// The ground around the building, the street in front of it, the sun (or the moon) behind it,
-    /// and the people, bicycles and cars passing by.
+    /// The ground around the building, the street (or the park path) in front of it, the sun (or
+    /// the moon) behind it, and the people, bicycles and cars passing by.
     private func makeStreet(_ street: OfficeStreet, layout: OfficeLayout, _ palette: Palette) -> Entity {
         let entity = Entity()
         let length = Float(street.length)
@@ -826,6 +1392,9 @@ final class OfficeSceneController {
         let front = Float(street.pavements[1]) + Float(OfficeStreet.pavementWidth) / 2
         let grassEnd = front + 3
         let grassStart = back - 3.5
+        let snow = environment == .snow
+        let park = environment == .park
+        let white = NSColor(white: 0.96, alpha: 1)
         // The lawn sits just under the office floor; the road just above the lawn.
         entity.addChild(
             box(
@@ -837,17 +1406,39 @@ final class OfficeSceneController {
         }
         let road = Float(street.road)
         let roadWidth = Float(OfficeStreet.roadWidth)
-        entity.addChild(box([length + 6, 0.04, roadWidth], palette.road, at: [0, -0.05, road]))
-        // A dashed centre line, and a solid line marking off each bike lane.
+        // A road in the city and under snow; a gravel path through the park.
+        entity.addChild(box([length + 6, 0.04, park ? roadWidth * 0.6 : roadWidth], palette.road, at: [0, -0.05, road]))
         let marking = NSColor(white: 0.95, alpha: 1)
-        var x = -length / 2 - 3
-        while x < length / 2 + 3 {
-            entity.addChild(box([1, 0.005, 0.1], marking, at: [x + 0.5, -0.028, road]))
-            x += 2.5
+        let carLane = Float(OfficeStreet.bikeLaneWidth / 2 + (OfficeStreet.roadWidth / 2 - OfficeStreet.bikeLaneWidth) / 2)
+        switch environment {
+        case .city:
+            // A dashed centre line, and a solid line marking off each bike lane.
+            var x = -length / 2 - 3
+            while x < length / 2 + 3 {
+                entity.addChild(box([1, 0.005, 0.1], marking, at: [x + 0.5, -0.028, road]))
+                x += 2.5
+            }
+            for side: Float in [-1, 1] {
+                let z = road + side * (roadWidth / 2 - Float(OfficeStreet.bikeLaneWidth))
+                entity.addChild(box([length + 6, 0.005, 0.05], marking, at: [0, -0.028, z]))
+            }
+        case .snow:
+            // Tyre tracks in the slush along each lane.
+            let track = palette.road.blended(withFraction: 0.35, of: white) ?? palette.road
+            for side: Float in [-1, 1] {
+                for wheel: Float in [-0.35, 0.35] {
+                    entity.addChild(box([length + 6, 0.004, 0.18], track, at: [0, -0.028, road + side * carLane + wheel]))
+                }
+            }
+        case .park: break
         }
-        for side: Float in [-1, 1] {
-            let z = road + side * (roadWidth / 2 - Float(OfficeStreet.bikeLaneWidth))
-            entity.addChild(box([length + 6, 0.005, 0.05], marking, at: [0, -0.028, z]))
+        if !park {
+            // A zebra crossing where the path meets the road.
+            var x: Float = -0.9
+            while x <= 0.9 {
+                entity.addChild(box([0.22, 0.005, roadWidth - 0.3], marking, at: [x, -0.027, road]))
+                x += 0.36
+            }
         }
         // The concrete slab the building stands on, a step proud of the lawn, and a path from its
         // edge to the pavement.
@@ -855,15 +1446,75 @@ final class OfficeSceneController {
         let rim: Float = 0.15
         entity.addChild(box([width + 2 * rim, 0.09, depth + 2 * rim], palette.plinth, at: [0, -0.055, 0]))
         entity.addChild(box([1.4, 0.06, 0.4 - rim], palette.pavement, at: [0, -0.05, depth / 2 + rim + (0.4 - rim) / 2]))
+        // The entrance: an awning over the path, with the Office's sign on it.
+        for x: Float in [-0.85, 0.85] {
+            entity.addChild(box([0.06, 0.9, 0.06], palette.windowFrame, at: [x, 0.45, depth / 2 + 0.32]))
+        }
+        let canopy = box([1.9, 0.05, 0.75], palette.awning, at: [0, 0.92, depth / 2 + 0.2])
+        canopy.orientation = simd_quatf(angle: 0.18, axis: [1, 0, 0])
+        entity.addChild(canopy)
+        // The sign lies on the canopy, read from above like the Center Room's name.
+        let signMesh = textMesh(Copy.officeEntranceSign, size: 0.22)
+        let sign = ModelEntity(mesh: signMesh, materials: [UnlitMaterial(color: white)])
+        let signBounds = signMesh.bounds
+        sign.orientation = simd_quatf(angle: -.pi / 2 + 0.18, axis: [1, 0, 0])
+        sign.position = [-(signBounds.min.x + signBounds.extents.x / 2), 0.955, depth / 2 + 0.2 + (signBounds.min.y + signBounds.extents.y / 2)]
+        entity.addChild(sign)
+        // Flower beds either side of the path; under snow they are just mounds.
+        for side: Float in [-1, 1] {
+            let bed = SIMD3<Float>(side * 1.1, 0, depth / 2 + 0.26)
+            entity.addChild(box([0.5, 0.12, 0.22], snow ? white : NSColor(red: 0.36, green: 0.26, blue: 0.18, alpha: 1), at: bed + [0, 0.04, 0]))
+            if !snow {
+                let blooms = [NSColor.systemPink, .systemYellow, .systemRed, .white, .systemPurple]
+                for (index, x) in [-0.16, 0, 0.16].enumerated() {
+                    let stem = box([0.015, 0.14, 0.015], NSColor(red: 0.3, green: 0.55, blue: 0.3, alpha: 1), at: bed + [Float(x), 0.16, 0])
+                    entity.addChild(stem)
+                    let bloom = ModelEntity(
+                        mesh: .generateSphere(radius: 0.04), materials: [material(blooms[(index + Int(side + 1)) % blooms.count])])
+                    bloom.position = bed + [Float(x), 0.25, 0]
+                    entity.addChild(bloom)
+                }
+            }
+        }
+        // A bench on the near pavement, facing the road.
+        let benchWood = NSColor(red: 0.55, green: 0.38, blue: 0.22, alpha: 1)
+        let benchZ = Float(street.pavements[0]) - 0.35
+        for x: Float in [-0.55, 0.55] {
+            entity.addChild(box([0.05, 0.42, 0.4], NSColor(white: 0.25, alpha: 1), at: [2.8 + x, 0.21, benchZ]))
+        }
+        entity.addChild(box([1.2, 0.05, 0.4], benchWood, at: [2.8, 0.44, benchZ]))
+        entity.addChild(box([1.2, 0.35, 0.05], benchWood, at: [2.8, 0.6, benchZ - 0.2]))
+        if snow { entity.addChild(box([1.2, 0.03, 0.4], white, at: [2.8, 0.48, benchZ])) }
         // Low clipped hedges along the back and the sides, clear of the street side so they hide no Desk.
         func hedge(_ size: SIMD3<Float>, at position: SIMD3<Float>) {
             let model = ModelEntity(
                 mesh: .generateBox(size: size, cornerRadius: 0.1), materials: [material(palette.hedge, roughness: 0.9)])
             model.position = position
             entity.addChild(model)
+            if snow { entity.addChild(box([size.x, 0.05, size.z], white, at: position + [0, size.y / 2, 0])) }
         }
         hedge([width + 1.2, 0.4, 0.4], at: [0, 0.14, back - 0.5])
         for side: Float in [-1, 1] { hedge([0.4, 0.4, depth - 0.4], at: [side * (width / 2 + 0.5), 0.14, -0.2]) }
+        // A pond on the park's lawn, past the far path.
+        let pondX = -width / 2 - 6
+        if park {
+            let pondZ = front + 1.6
+            let water = ModelEntity(
+                mesh: .generateCylinder(height: 0.03, radius: 1.5),
+                materials: [material(dark ? NSColor(red: 0.12, green: 0.2, blue: 0.32, alpha: 1) : NSColor(red: 0.45, green: 0.7, blue: 0.86, alpha: 1), roughness: 0.1)])
+            water.position = [pondX, -0.06, pondZ]
+            water.scale = [1.3, 1, 0.8]
+            entity.addChild(water)
+            let bank = ModelEntity(mesh: .generateCylinder(height: 0.04, radius: 1.65), materials: [material(palette.pavement)])
+            bank.position = [pondX, -0.07, pondZ]
+            bank.scale = [1.3, 1, 0.8]
+            entity.addChild(bank)
+            for (dx, dz) in [(-0.6, 0.3), (0.5, -0.2), (0.1, 0.5)] {
+                let lily = ModelEntity(mesh: .generateCylinder(height: 0.01, radius: 0.12), materials: [material(NSColor(red: 0.3, green: 0.6, blue: 0.32, alpha: 1))])
+                lily.position = [pondX + Float(dx) * 1.3, -0.04, pondZ + Float(dz) * 0.8]
+                entity.addChild(lily)
+            }
+        }
 
         // Trees behind the building and along the far pavement, street lamps between them. Nothing
         // tall stands between the building and the road, so the Desks stay in view.
@@ -881,11 +1532,18 @@ final class OfficeSceneController {
                 let crown = ModelEntity(mesh: .generateSphere(radius: radius * size), materials: [material(colour)])
                 crown.position = offset * size
                 tree.addChild(crown)
+                if snow {
+                    // A cap of snow on each crown.
+                    let cap = ModelEntity(mesh: .generateSphere(radius: radius * size * 0.95), materials: [material(white)])
+                    cap.position = offset * size + [0, radius * size * 0.3, 0]
+                    cap.scale = [1, 0.4, 1]
+                    tree.addChild(cap)
+                }
             }
             entity.addChild(tree)
         }
         var step: Float = 0
-        x = -width / 2 - 1
+        var x = -width / 2 - 1
         while x <= width / 2 + 1 {
             tree(at: [x, -0.06, back - 1.6 - (step.truncatingRemainder(dividingBy: 2)) * 0.8], size: 1.1)
             x += 2.6
@@ -902,11 +1560,14 @@ final class OfficeSceneController {
         halos = []
         while x < length / 2 - 1 {
             if step.truncatingRemainder(dividingBy: 2) == 0 {
-                tree(at: [x, 0, edge], size: 1)
+                if !(park && abs(x - pondX) < 2.2) { tree(at: [x, 0, edge], size: 1) }
+                // The park has a second row of trees behind the first.
+                if park { tree(at: [x + 1.8, 0, edge + 2.2], size: 0.85) }
             } else {
                 entity.addChild(box([0.08, 2.6, 0.08], metal, at: [x, 1.3, edge]))
                 entity.addChild(box([0.08, 0.06, 0.6], metal, at: [x, 2.6, edge - 0.27]))
                 entity.addChild(box([0.26, 0.08, 0.32], metal, at: [x, 2.58, edge - 0.55]))
+                if snow { entity.addChild(box([0.28, 0.04, 0.34], white, at: [x, 2.64, edge - 0.55])) }
                 let bulb = SIMD3<Float>(x, 2.53, edge - 0.55)
                 let glass = ModelEntity(mesh: .generateBox(size: [0.22, 0.02, 0.28]), materials: [lens])
                 glass.position = bulb
@@ -937,8 +1598,9 @@ final class OfficeSceneController {
         fill.light.intensity = dark ? 900 : 1_500
         fill.light.color = key.light.color
 
-        travellers = street.travellers.map { traveller in
-            let node = makeTraveller(traveller)
+        // No cars in the park; winter coats under snow.
+        travellers = street.travellers.filter { !(park && $0.kind == .car) }.map { traveller in
+            let node = makeTraveller(traveller, coats: snow)
             entity.addChild(node.entity)
             return node
         }
@@ -946,11 +1608,11 @@ final class OfficeSceneController {
     }
 
     /// A walker, a cyclist or a car, built facing east and turned round when it heads west.
-    private func makeTraveller(_ traveller: OfficeTraveller) -> TravellerNode {
+    private func makeTraveller(_ traveller: OfficeTraveller, coats: Bool) -> TravellerNode {
         let entity = Entity()
         entity.position = [0, 0, Float(traveller.z)]
         if traveller.speed < 0 { entity.orientation = simd_quatf(angle: .pi, axis: [0, 1, 0]) }
-        let body = nsColour(traveller.body)
+        let body = nsColour(coats && traveller.kind != .car ? traveller.body.mixed(with: OfficeColour(red: 0, green: 0, blue: 0), 0.35) : traveller.body)
         let skin = nsColour(traveller.skin)
         let legs = nsColour(traveller.legs)
         let dark = NSColor(white: 0.12, alpha: 1)
@@ -991,6 +1653,8 @@ final class OfficeSceneController {
         func head(at position: SIMD3<Float>) {
             add(.generateSphere(radius: 0.13), skin, at: position)
             add(.generateSphere(radius: 0.132), nsColour(traveller.hair), at: position + [-0.02, 0.035, 0])
+            // A woolly hat in the snow.
+            if coats { add(.generateSphere(radius: 0.136), body, at: position + [-0.02, 0.05, 0]) }
         }
 
         switch traveller.kind {
@@ -1021,7 +1685,7 @@ final class OfficeSceneController {
             add(
                 .generateBox(size: [1.0, 0.32, 0.84], cornerRadius: 0.06), NSColor(red: 0.22, green: 0.3, blue: 0.4, alpha: 1),
                 at: [-0.12, 0.78, 0])
-            add(.generateBox(size: [0.94, 0.06, 0.8]), body, at: [-0.12, 0.96, 0])
+            add(.generateBox(size: [0.94, 0.06, 0.8]), coats ? NSColor(white: 0.96, alpha: 1) : body, at: [-0.12, 0.96, 0])
             for x: Float in [-0.58, 0.58] {
                 for z: Float in [-0.42, 0.42] { wheel(at: [x, 0.2, z], radius: 0.2, thickness: 0.12) }
             }
@@ -1171,5 +1835,5 @@ final class OfficeSceneController {
         return nil
     }
 
-    var backgroundColour: NSColor { (dark ? Palette.dark : Palette.light).background }
+    var backgroundColour: NSColor { Palette.make(style: style, environment: environment, dark: dark).background }
 }
