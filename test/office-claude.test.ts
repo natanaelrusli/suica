@@ -103,6 +103,25 @@ describe("claudeAdapter", () => {
     expect(claudeAdapter(probe)).toEqual([]);
   });
 
+  it("does not treat a Claude app helper that took a dead session's pid as that session", () => {
+    put(join(home, ".claude", "sessions", "9.json"), session(9, { updatedAt: NOW - 3_600_000 }));
+    const helper =
+      "/Applications/Claude.app/Contents/Frameworks/Claude Helper.app/Contents/MacOS/Claude Helper --type=renderer";
+    expect(
+      claudeAdapter(fakeProbe({ home, procs: [{ pid: 9, ppid: 1, command: helper }] })),
+    ).toEqual([]);
+  });
+
+  it("does not count a pid the process list does not show as alive", () => {
+    put(join(home, ".claude", "sessions", "9.json"), session(9, { updatedAt: NOW - 3_600_000 }));
+    const probe = fakeProbe({
+      home,
+      alive: [9],
+      procs: [{ pid: 1, ppid: 0, command: "/sbin/launchd" }],
+    });
+    expect(claudeAdapter(probe)).toEqual([]);
+  });
+
   it("reads the tail of a transcript whose last lines are huge request blobs", () => {
     put(join(home, ".claude", "sessions", "100.json"), session(100));
     const blob = { type: "api-request", params: { text: "x".repeat(700_000) } };

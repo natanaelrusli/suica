@@ -9,6 +9,8 @@ export interface FakeProbeOptions {
   readonly alive?: readonly number[];
   readonly procs?: readonly ProcInfo[];
   readonly cwds?: Readonly<Record<number, string>>;
+  /** Files a process has open. */
+  readonly files?: Readonly<Record<number, readonly string[]>>;
 }
 
 export function fakeProbe(options: FakeProbeOptions): Probe {
@@ -19,6 +21,7 @@ export function fakeProbe(options: FakeProbeOptions): Probe {
     pidAlive: (pid) => alive.has(pid),
     processes: () => options.procs ?? [],
     cwdOf: (pid) => options.cwds?.[pid] ?? null,
+    openFiles: (pid) => options.files?.[pid] ?? [],
   };
 }
 

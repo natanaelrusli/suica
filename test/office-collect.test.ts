@@ -121,6 +121,29 @@ describe("collectOffice", () => {
     expect(hostAppOf(20, desktop)).toBe("/Applications/Claude.app");
   });
 
+  it("prints whole milliseconds, which is all the app decodes", () => {
+    const doc = collectOffice(
+      [
+        {
+          name: "claude",
+          run: () => [
+            raw({
+              cwd: home,
+              startedAt: NOW - 60_000.25,
+              updatedAt: NOW - 1_000.5054,
+              recentActions: [{ at: NOW - 2_000.75, text: "Reading a.ts" }],
+            }),
+          ],
+        },
+      ],
+      fakeProbe({ home }),
+    );
+    const [one] = doc.sessions;
+    expect(Number.isInteger(one?.updatedAt)).toBe(true);
+    expect(Number.isInteger(one?.startedAt)).toBe(true);
+    expect(one?.recentActions.every((a) => Number.isInteger(a.at))).toBe(true);
+  });
+
   it("matches the golden contract file", () => {
     const golden = JSON.parse(readFileSync("contracts/office.v1.json", "utf8")) as OfficeJson;
     const adapter: Adapter = () => [

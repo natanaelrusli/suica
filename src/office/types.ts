@@ -54,6 +54,8 @@ export interface Probe {
   processes(): readonly ProcInfo[];
   /** The working folder of a process, or null when it cannot be read. */
   cwdOf(pid: number): string | null;
+  /** The files a process has open (paths), or none when they cannot be read. */
+  openFiles(pid: number): readonly string[];
 }
 
 export type Adapter = (probe: Probe) => readonly RawSession[];

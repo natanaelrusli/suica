@@ -80,7 +80,16 @@ export function collectOffice(
 
   const sessions: OfficeSession[] = [...newest.values()].map((session) => {
     const room = roomOf(session.cwd);
-    return { ...session, room, roomName: basename(room), hostApp: hostApp(session.pid) };
+    return {
+      ...session,
+      // File times have fractions on APFS; the app decodes whole milliseconds.
+      startedAt: session.startedAt === null ? null : Math.floor(session.startedAt),
+      updatedAt: Math.floor(session.updatedAt),
+      recentActions: session.recentActions.map((a) => ({ at: Math.floor(a.at), text: a.text })),
+      room,
+      roomName: basename(room),
+      hostApp: hostApp(session.pid),
+    };
   });
   sessions.sort(
     (a, b) =>

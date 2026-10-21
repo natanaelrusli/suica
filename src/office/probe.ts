@@ -42,5 +42,11 @@ export function realProbe(now = Date.now()): Probe {
         .find((candidate) => candidate.startsWith("n"));
       return line === undefined ? null : line.slice(1);
     },
+    openFiles(pid) {
+      return run("lsof", ["-p", String(pid), "-Fn"])
+        .split("\n")
+        .filter((line) => line.startsWith("n/"))
+        .map((line) => line.slice(1));
+    },
   };
 }

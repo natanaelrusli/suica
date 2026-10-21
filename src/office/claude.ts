@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { describeTool } from "./describe.ts";
-import { processesRunning } from "./proc.ts";
+import { processesRunning, runs } from "./proc.ts";
 import { activityFor, classifyByActivity } from "./status.ts";
 import { readTail } from "./tail.ts";
 import {
@@ -187,7 +187,12 @@ export const claudeAdapter: Adapter = (probe) => {
     if (typeof sessionId !== "string" || typeof cwd !== "string") continue;
     handled.add(pid);
     const proc = procs.get(pid);
-    const alive = probe.pidAlive(pid) && (proc === undefined || /claude/i.test(proc.command));
+    // The pid must still belong to a `claude` program: a dead session's pid is reused by other
+    // programs, among them the Claude app's own helpers. Only an empty process list (ps failed)
+    // falls back to the pid check alone.
+    const alive =
+      probe.pidAlive(pid) &&
+      (procs.size === 0 || (proc !== undefined && runs(proc.command, "claude")));
     const transcript = transcriptOf(probe.home, cwd, sessionId);
     const updatedAt = Math.max(Number(file["updatedAt"]) || 0, mtimeOf(transcript));
     if (!alive && probe.now - updatedAt > EXITED_STAY_MS) continue;

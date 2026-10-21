@@ -44,6 +44,8 @@ export function parseCustomAgent(text: string): CustomAgent | string {
 
 const MAX_ACTIONS = 5;
 const SCAN_LINES = 400;
+/** Quiet logs read per poll while a process runs, to find the one it writes. */
+const MAX_STALE_READS = 20;
 
 function lookup(value: unknown, key: string): string | undefined {
   let current: unknown = value;
@@ -72,14 +74,24 @@ export function genericAdapter(agent: CustomAgent): Adapter {
       if (cwd !== null) running.add(cwd);
     }
 
-    const sessions: RawSession[] = [];
+    const dated: { file: string; mtime: number }[] = [];
     for (const file of files) {
-      let mtime: number;
       try {
-        mtime = statSync(file).mtimeMs;
+        dated.push({ file, mtime: statSync(file).mtimeMs });
       } catch {
-        continue;
+        // Removed since the listing.
       }
+    }
+    dated.sort((a, b) => b.mtime - a.mtime);
+
+    const sessions: RawSession[] = [];
+    // A running process keeps one Desk: its folder's newest log, not every old log of the folder.
+    const claimed = new Set<string>();
+    let staleRead = 0;
+    for (const { file, mtime } of dated) {
+      const recent = probe.now - mtime <= LIVE_WINDOW_MS;
+      if (!recent && (running.size === 0 || staleRead >= MAX_STALE_READS)) continue;
+      if (!recent) staleRead += 1;
       let cwd: string | undefined;
       const actions: RecentAction[] = [];
       for (const line of readTail(file, 256 * 1024).slice(-SCAN_LINES)) {
@@ -94,16 +106,17 @@ export function genericAdapter(agent: CustomAgent): Adapter {
         if (text !== undefined) actions.push({ at: mtime, text: clip(text, 80) });
       }
       if (cwd === undefined) continue;
-      if (probe.now - mtime > LIVE_WINDOW_MS && !running.has(cwd)) continue;
+      if (!recent && (!running.has(cwd) || claimed.has(cwd))) continue;
+      claimed.add(cwd);
       const status = classifyByActivity({ now: probe.now, lastActivityAt: mtime });
-      const recent = actions.slice(-MAX_ACTIONS);
+      const recentActions = actions.slice(-MAX_ACTIONS);
       sessions.push({
         agent: agent.name,
         sessionId: file,
         cwd,
         status,
-        activity: activityFor(status, recent, probe.now),
-        recentActions: recent,
+        activity: activityFor(status, recentActions, probe.now),
+        recentActions,
         startedAt: null,
         updatedAt: mtime,
         pid: null,

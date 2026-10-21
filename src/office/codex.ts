@@ -4,7 +4,13 @@ import { describeCommand, describeTool } from "./describe.ts";
 import { processesRunning } from "./proc.ts";
 import { activityFor, classifyByActivity } from "./status.ts";
 import { readHead, readTail } from "./tail.ts";
-import { LIVE_WINDOW_MS, type Adapter, type RawSession, type RecentAction } from "./types.ts";
+import {
+  LIVE_WINDOW_MS,
+  type Adapter,
+  type ProcInfo,
+  type RawSession,
+  type RecentAction,
+} from "./types.ts";
 
 const MAX_ACTIONS = 5;
 const TAIL_BYTES = 512 * 1024;
@@ -183,16 +189,20 @@ function metaOf(path: string): Meta | undefined {
   return { id, cwd, startedAt: Number.isNaN(started) ? null : started };
 }
 
+const ROLLOUT = /\/rollout-[^/]*\.jsonl$/;
+
 /**
- * Codex: rollout files under `~/.codex/sessions`. A rollout is a live Session when it was written
- * in the last few minutes or a `codex` process (not the `app-server` daemon) runs in its folder.
+ * Codex: rollout files under `~/.codex/sessions`. A rollout is a live Session when a `codex`
+ * process (not the `app-server` daemon) has it open or runs in its folder, or it was written in
+ * the last few minutes.
  */
 export const codexAdapter: Adapter = (probe) => {
   const rollouts = recentRollouts(probe.home, probe.now);
-  const processes = processesRunning(probe.processes(), "codex").filter(
+  const found = processesRunning(probe.processes(), "codex").filter(
     (proc) => !/\sapp-server(\s|$)/.test(proc.command),
   );
-  const cwds = new Map(processes.map((proc) => [proc.pid, probe.cwdOf(proc.pid)]));
+  // A wrapper and the program it starts are both `codex`: they are one Session, the child's.
+  const processes = found.filter((proc) => !found.some((other) => other.ppid === proc.pid));
 
   const claimed = new Map<string, number>();
   const metas = new Map<string, Meta | undefined>();
@@ -200,9 +210,26 @@ export const codexAdapter: Adapter = (probe) => {
     if (!metas.has(path)) metas.set(path, metaOf(path));
     return metas.get(path);
   };
+  const fallback: ProcInfo[] = [];
   for (const proc of processes) {
-    const cwd = cwds.get(proc.pid);
-    if (cwd === null || cwd === undefined) continue;
+    // The rollout the process is writing, wherever its folder: it may be days old.
+    const open = probe.openFiles(proc.pid).find((file) => ROLLOUT.test(file));
+    if (open === undefined) {
+      fallback.push(proc);
+      continue;
+    }
+    claimed.set(open, proc.pid);
+    if (!rollouts.some((r) => r.path === open)) {
+      try {
+        rollouts.push({ path: open, mtime: statSync(open).mtimeMs });
+      } catch {
+        claimed.delete(open);
+      }
+    }
+  }
+  for (const proc of fallback) {
+    const cwd = probe.cwdOf(proc.pid);
+    if (cwd === null) continue;
     const match = rollouts.find((r) => !claimed.has(r.path) && metaFor(r.path)?.cwd === cwd);
     if (match !== undefined) claimed.set(match.path, proc.pid);
   }

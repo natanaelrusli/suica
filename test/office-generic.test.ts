@@ -71,4 +71,21 @@ describe("genericAdapter", () => {
     put(join(home, ".aider", "one.jsonl"), lines({ other: 1 }), NOW - 1_000);
     expect(genericAdapter(entry)(fakeProbe({ home }))).toEqual([]);
   });
+
+  it("shows one Desk per running process, not one per old log in its folder", () => {
+    for (const n of [1, 2, 3, 4, 5]) {
+      put(
+        join(home, ".aider", `old${n}.jsonl`),
+        lines({ meta: { cwd: "/work/p" } }),
+        NOW - 500_000 - n * 1000,
+      );
+    }
+    const probe = fakeProbe({
+      home,
+      procs: [{ pid: 3, ppid: 1, command: "/usr/local/bin/aider" }],
+      cwds: { 3: "/work/p" },
+    });
+    const found = genericAdapter(entry)(probe);
+    expect(found.map((s) => s.sessionId)).toEqual([join(home, ".aider", "old1.jsonl")]);
+  });
 });

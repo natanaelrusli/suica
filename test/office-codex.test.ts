@@ -161,4 +161,39 @@ describe("codexAdapter", () => {
     rollout("ggg", [call("shell", { command: ["ls"] }, NOW - 1_000)], NOW - 1_000);
     expect(codexAdapter(fakeProbe({ home }))).toEqual([]);
   });
+
+  it("finds the rollout a process has open, however old its folder", () => {
+    const old = new Date(NOW - 3 * 86_400_000);
+    const path = join(
+      home,
+      ".codex",
+      "sessions",
+      String(old.getFullYear()),
+      String(old.getMonth() + 1).padStart(2, "0"),
+      String(old.getDate()).padStart(2, "0"),
+      "rollout-old-hhh.jsonl",
+    );
+    put(path, lines(meta("hhh", "/work/kinsen", NOW - 4 * 86_400_000)), NOW - 200_000);
+    const probe = fakeProbe({
+      home,
+      procs: [{ pid: 12, ppid: 1, command: "/usr/local/bin/codex resume" }],
+      cwds: { 12: "/work/kinsen" },
+      files: { 12: [path] },
+    });
+    expect(codexAdapter(probe)[0]).toMatchObject({ sessionId: "hhh", pid: 12 });
+  });
+
+  it("gives a wrapper and its child one Session, not two", () => {
+    rollout("new", [meta("new", "/work/kinsen", NOW - 90_000)], NOW - 30_000);
+    rollout("old", [meta("old", "/work/kinsen", NOW - 900_000)], NOW - 500_000);
+    const probe = fakeProbe({
+      home,
+      procs: [
+        { pid: 20, ppid: 1, command: "node /usr/local/bin/codex" },
+        { pid: 21, ppid: 20, command: "/usr/local/lib/codex/bin/codex" },
+      ],
+      cwds: { 20: "/work/kinsen", 21: "/work/kinsen" },
+    });
+    expect(codexAdapter(probe).map((s) => s.sessionId)).toEqual(["new"]);
+  });
 });

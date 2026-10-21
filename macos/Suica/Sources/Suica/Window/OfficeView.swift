@@ -8,6 +8,8 @@ import SwiftUI
 struct OfficeView: View {
     let model: OfficeModel
     @State private var controller = OfficeSceneController()
+    /// False while the window is minimized, hidden or covered: nothing is polled then.
+    @State private var windowVisible = true
     @Environment(\.colorScheme) private var scheme
     @Environment(\.motionLevel) private var motion
 
@@ -41,8 +43,12 @@ struct OfficeView: View {
             .motion(value: model.selectedId)
         }
         .clipped()
+        .background(WindowVisibility { windowVisible = $0 })
         // Polls only while the page is on screen: the scene and the detection stop with it.
-        .task { await model.runPollLoop(every: .seconds(2)) }
+        .task(id: windowVisible) {
+            guard windowVisible else { return }
+            await model.runPollLoop(every: .seconds(2))
+        }
         .accessibilityElement(children: .contain)
     }
 
@@ -115,6 +121,39 @@ private struct OfficeSceneView: View {
                     .onEnded { _ in lastMagnification = 1 }
             )
             .background(ScrollZoom { controller.zoom(by: $0) })
+        }
+    }
+}
+
+/// Reports whether the view's window can be seen: not minimized, hidden or fully covered.
+private struct WindowVisibility: NSViewRepresentable {
+    let onChange: (Bool) -> Void
+
+    func makeNSView(context: Context) -> ObserverView {
+        let view = ObserverView()
+        view.onChange = onChange
+        return view
+    }
+
+    func updateNSView(_ view: ObserverView, context: Context) { view.onChange = onChange }
+
+    final class ObserverView: NSView {
+        var onChange: ((Bool) -> Void)?
+        private var observer: (any NSObjectProtocol)?
+
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+        override func viewWillMove(toWindow newWindow: NSWindow?) {
+            if let observer { NotificationCenter.default.removeObserver(observer) }
+            observer = nil
+            guard let newWindow else { return }
+            observer = NotificationCenter.default.addObserver(
+                forName: NSWindow.didChangeOcclusionStateNotification, object: newWindow, queue: .main
+            ) { [weak self] note in
+                guard let window = note.object as? NSWindow else { return }
+                let visible = window.occlusionState.contains(.visible)
+                MainActor.assumeIsolated { self?.onChange?(visible) }
+            }
         }
     }
 }
