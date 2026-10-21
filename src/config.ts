@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { parse } from "yaml";
 import { z } from "zod";
 import { MODEL_CLI_CHOICES } from "./model-cli.ts";
+import { BUILT_IN_AGENTS, parseCustomAgent } from "./office/generic.ts";
 import { REVIEW_EFFORTS } from "./review-runner.ts";
 import { errorMessage } from "./util.ts";
 
@@ -109,6 +110,22 @@ export const configSchema = z
         timeoutMinutes: positiveInt.default(20),
         // How many reviews run at once, each with its own CLI process and checkout.
         concurrency: z.number().int().min(1).max(4).default(2),
+      })
+      .strict()
+      .default({}),
+    office: z
+      .object({
+        // Which built-in adapters look for Coding Agents on this Mac.
+        agents: z.array(z.enum(BUILT_IN_AGENTS)).default([...BUILT_IN_AGENTS]),
+        // More Coding Agents: `name|process|log glob|cwd key|activity key`, one per entry.
+        custom: z
+          .array(
+            z.string().superRefine((entry, ctx) => {
+              const parsed = parseCustomAgent(entry);
+              if (typeof parsed === "string") ctx.addIssue({ code: "custom", message: parsed });
+            }),
+          )
+          .default([]),
       })
       .strict()
       .default({}),

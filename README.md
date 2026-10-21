@@ -70,6 +70,8 @@ Config file: `~/.config/suica/config.yaml` (override the path with `SUICA_CONFIG
 | `review.rereviewAfterMinutes`      | `10`                             | Agent Re-review after the Author's latest push has stood this long without a newer one |
 | `review.timeoutMinutes`            | `20`                             | A review run is stopped after this long                          |
 | `review.concurrency`               | `2`                              | How many Agent Reviews run at the same time, 1 to 4, each with its own CLI process and checkout |
+| `office.agents`                    | `[claude, codex, gemini]`        | Which Coding Agents the Office looks for on this Mac |
+| `office.custom`                    | `[]`                             | More Coding Agents, one entry each: `name\|process\|log glob\|cwd key\|activity key` (the program's name, a JSONL log pattern such as `~/.aider/*.jsonl`, and the dotted keys of the working folder and the activity in a log line) |
 | `statePath`                        | `~/Library/Application Support/suica/state.db` | SQLite state file |
 
 In `gitlab.glabPath`, `teams.command`, `teams.templatesPath` and `statePath` a leading `~` or `~/` stands for your home folder: it is expanded when the config is loaded, and the file keeps the text as you wrote it. `~user` and a `~` later in the path are taken literally.

@@ -121,7 +121,7 @@ private func data(_ text: String) -> Data { Data(text.utf8) }
     let config = try decodeDocument(ConfigDocument.self, from: contract("config.v1.json"))
     #expect(config.path == "/tmp/config.yaml" && config.exists && config.sha256 == "0")
     #expect(config.issues.isEmpty)
-    #expect(config.fields.count == 42)
+    #expect(config.fields.count == 44)
     let first = try #require(config.fields.first)
     #expect(first.path == ["gitlab", "hostname"] && first.type == .string)
     #expect(first.value == .string("repo.example") && first.effective == .string("repo.example"))
@@ -271,5 +271,5 @@ func documentGarbageIsBadOutput(text: String) {
     for field in config.fields where !seen.contains(ConfigCategory.of(field)) { seen.append(ConfigCategory.of(field)) }
     #expect(seen == ConfigCategory.known)
     #expect(ConfigCategory.known.map(\.title)
-        == ["GitLab", "Polling", "Notifications", "Teams", "Language model", "Agent Review", "Storage"])
+        == ["GitLab", "Polling", "Notifications", "Teams", "Language model", "Agent Review", "Office", "Storage"])
 }

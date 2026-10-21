@@ -138,6 +138,7 @@ extension ConfigCategory {
         case "teams": "bubble.left.and.bubble.right"
         case "model": "sparkles"
         case "review": "checkmark.bubble"
+        case "office": "building.2"
         default: "internaldrive"
         }
     }
@@ -150,6 +151,7 @@ extension ConfigCategory {
         case "teams": .indigo
         case "model": .purple
         case "review": .green
+        case "office": .cyan
         default: .gray
         }
     }

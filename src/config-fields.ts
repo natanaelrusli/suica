@@ -306,6 +306,18 @@ export const CONFIG_FIELDS: readonly ConfigField[] = [
     max: 4,
   },
   {
+    path: ["office", "agents"],
+    type: "stringList",
+    label: "Coding agents to show",
+    help: "Which agents the Office looks for on this Mac: claude, codex and gemini",
+  },
+  {
+    path: ["office", "custom"],
+    type: "stringList",
+    label: "More coding agents",
+    help: "One per line as name|process|log glob|cwd key|activity key: the program's name, a JSONL log pattern such as ~/.aider/*.jsonl, and the dotted keys of the working folder and the activity in a log line",
+  },
+  {
     path: ["statePath"],
     type: "string",
     label: "State file",
