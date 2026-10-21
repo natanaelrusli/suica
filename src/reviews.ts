@@ -4,7 +4,8 @@ import { UNREVIEWED } from "./domain.ts";
 import type { MergeRequest, Person, Reviewer, Snapshot } from "./domain.ts";
 import { FetchFailure } from "./gitlab.ts";
 import type { GraphqlRunner, PostRunner, RestRunner } from "./gitlab.ts";
-import { type ApproveWhen, isReadyToApprove } from "./inline-review.ts";
+import { approves } from "./approval-judge.ts";
+import type { ApproveWhen } from "./inline-review.ts";
 import type { Logger } from "./log.ts";
 import type { FixRow, FixStatus } from "./fix-store.ts";
 import type { ActivityLine, AgentReviewRow, AgentReviewStatus } from "./store.ts";
@@ -107,9 +108,9 @@ export interface ReviewSummaryJson {
    */
   readonly changedSinceReview: ChangedSinceReviewJson | null;
   /**
-   * True when the newest posted Agent Review is ready to approve by `review.approveWhen` (by
-   * default only Minor or Nit problems left), the MR has not changed since, no newer review is
-   * open, and neither the Owner nor the agent approved it yet.
+   * True when the newest posted Agent Review is ready to approve, by the approval judge's verdict
+   * or else by `review.approveWhen` (by default only Minor or Nit problems left), the MR has not
+   * changed since, no newer review is open, and neither the Owner nor the agent approved it yet.
    */
   readonly readyToApprove: boolean;
   /**
@@ -207,7 +208,7 @@ export function readyToApprove(
   if (latest !== undefined && OPEN_STATUSES.includes(latest.status)) return false;
   if (base.headSha !== mr.headSha || changedSinceReview(mr, latest, base) !== null) return false;
   const mine = mr.reviewers.find((each) => each.username === me.username);
-  return mine?.state !== "APPROVED" && isReadyToApprove(base.body, approveWhen);
+  return mine?.state !== "APPROVED" && approves(base.body, base.approval, approveWhen);
 }
 
 export function buildReviewList(

@@ -337,6 +337,7 @@ func makeBrokenConfigStatus() -> StatusDocument {
 
 @Test func knownPurposesHaveNamesAndOthersAreShownAsSent() {
     #expect(Copy.purpose("review") == "Agent reviews")
+    #expect(Copy.purpose("approve") == "Approval checks")
     #expect(Copy.purpose("reply") == "Replies")
     #expect(Copy.purpose("triage") == "triage")
 }

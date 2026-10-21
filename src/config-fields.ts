@@ -1,3 +1,4 @@
+import { APPROVE_BY } from "./approval-judge.ts";
 import { APPROVE_WHEN } from "./inline-review.ts";
 import { MODEL_CLI_CHOICES } from "./model-cli.ts";
 import { REVIEW_EFFORTS } from "./review-runner.ts";
@@ -256,6 +257,19 @@ export const CONFIG_FIELDS: readonly ConfigField[] = [
     label: "Ready to approve when",
     help: "What a review may leave and still be ready to approve: minor (only Minor or Nit findings), nit (only Nit findings) or clean (no findings). Open items of a re-review's Previous review section count the same way",
     options: APPROVE_WHEN,
+  },
+  {
+    path: ["review", "approveBy"],
+    type: "enum",
+    label: "Ready to approve decided by",
+    help: "agent: a second model run reads the review and decides by Ready to approve when and your approval rules, and never approves when it fails; rules: the review's severity headings decide",
+    options: APPROVE_BY,
+  },
+  {
+    path: ["review", "approveRules"],
+    type: "stringList",
+    label: "Approval rules",
+    help: "Your own rules for the agent that decides, one per line; they win over Ready to approve when. For example: A Major the Author documents as an accepted risk does not hold up approval",
   },
   {
     path: ["review", "skill"],

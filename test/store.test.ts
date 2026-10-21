@@ -183,7 +183,7 @@ describe("schema 10", () => {
     expect(store.getAgentReview(next)?.previousSha).toBe("aaa1111");
     store.close();
     const check = new DatabaseSync(path);
-    expect(check.prepare("PRAGMA user_version").get()?.["user_version"]).toBe(14);
+    expect(check.prepare("PRAGMA user_version").get()?.["user_version"]).toBe(15);
     check.close();
   });
 
@@ -211,8 +211,32 @@ describe("schema 10", () => {
     expect(store.getAgentReview(next)).toMatchObject({ descriptionSha: "d1", approved: true });
     store.close();
     const check = new DatabaseSync(path);
-    expect(check.prepare("PRAGMA user_version").get()?.["user_version"]).toBe(14);
+    expect(check.prepare("PRAGMA user_version").get()?.["user_version"]).toBe(15);
     check.close();
+  });
+
+  it("upgrades schema 14 to 15: agent_review gains the judge's verdict, null on old rows", () => {
+    const path = tempDb();
+    const first = openStore(path);
+    const id = review(first, "g/p!1", "posted", "aaa1111");
+    first.close();
+    const raw = new DatabaseSync(path);
+    raw.exec("ALTER TABLE agent_review DROP COLUMN approval; PRAGMA user_version = 14;");
+    raw.close();
+
+    const store = openStore(path);
+    expect(store.getAgentReview(id)?.approval).toBeNull();
+    const verdict = { approve: false, reason: "A Major is open." };
+    store.transitionAgentReview(id, ["posted"], "posted", { approval: verdict }, NOW);
+    expect(store.getAgentReview(id)?.approval).toEqual(verdict);
+    store.close();
+    const check = new DatabaseSync(path);
+    check.exec('UPDATE agent_review SET approval = \'{"approve": "yes"}\'');
+    check.close();
+    // A verdict that does not parse reads as none, so the headings decide.
+    const again = openStore(path);
+    expect(again.getAgentReview(id)?.approval).toBeNull();
+    again.close();
   });
 
   it("hasAgentReviewAt matches the commit and the description, taking an old row without a hash as the same description", () => {

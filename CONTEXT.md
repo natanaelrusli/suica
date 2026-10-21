@@ -45,7 +45,7 @@ One of several versions of a Teams template; each message uses one, picked from 
 _Avoid_: Alternative, random template
 
 **Agent Review**:
-A review of an MR that the agent writes with a language model following a skill, in answer to a Review Request or when the Owner asks for one, and posts to GitLab as the Owner once the Owner approves it, or at once when it is ready to approve and the agent approves the MR (`review.approve`, as strict as `review.approveWhen`). The Owner can cancel it while it is queued or running.
+A review of an MR that the agent writes with a language model following a skill, in answer to a Review Request or when the Owner asks for one, and posts to GitLab as the Owner once the Owner approves it, or at once when it is ready to approve and the agent approves the MR (`review.approve`, as strict as `review.approveWhen`; with `review.approveBy: agent` a second, tool-less model run reads the review and decides, also by the Owner's `review.approveRules`). The Owner can cancel it while it is queued or running.
 _Avoid_: Auto review, bot review
 
 **Agent Re-review**:

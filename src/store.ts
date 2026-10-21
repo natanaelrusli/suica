@@ -1,6 +1,8 @@
 import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { approvalVerdictSchema } from "./approval-judge.ts";
+import type { ApprovalVerdict } from "./approval-judge.ts";
 import type { Person, Snapshot } from "./domain.ts";
 import { createFixStore } from "./fix-store.ts";
 import type { FixStore } from "./fix-store.ts";
@@ -67,7 +69,7 @@ const HISTORY_KINDS: readonly string[] = [
 ];
 
 /** What a language model run was for. Stored as text, so a later purpose needs no migration. */
-export type TokenPurpose = "review" | "fix" | "reply" | "other";
+export type TokenPurpose = "review" | "approve" | "fix" | "reply" | "other";
 
 /** One language model run, as the model reported it. */
 export interface TokenUsageEntry {
@@ -118,6 +120,8 @@ export interface AgentReviewRow {
   readonly descriptionSha: string | null;
   /** True when the agent approved the MR after posting this review. */
   readonly approved: boolean;
+  /** The approval judge's verdict (`review.approveBy: agent`); null when the parser decides. */
+  readonly approval: ApprovalVerdict | null;
   /** The review as the model wrote it, before it is sanitised for GitLab. */
   readonly body: string | null;
   /** Why it failed or was skipped, or a note about posting. */
@@ -137,6 +141,7 @@ export interface AgentReviewFields {
   readonly previousSha?: string;
   readonly descriptionSha?: string;
   readonly approved?: boolean;
+  readonly approval?: ApprovalVerdict;
   readonly body?: string;
   readonly detail?: string;
 }
@@ -264,7 +269,9 @@ export interface Store {
   close(): void;
 }
 
-const SCHEMA_VERSION = 14;
+const SCHEMA_VERSION = 15;
+/** The approval judge's verdict on a review, as JSON. */
+const SCHEMA_V15 = "ALTER TABLE agent_review ADD COLUMN approval TEXT";
 /**
  * Agent Fix runs; the newest note of each thread a fix handled, so a thread stays quiet until
  * someone writes on it; and when the watcher last read each of the Owner's MRs.
@@ -508,6 +515,17 @@ function toPollLogEntry(row: Row): PollLogEntry {
   };
 }
 
+/** A verdict that does not parse reads as none, so the parser decides. */
+function parseApproval(value: unknown): ApprovalVerdict | null {
+  if (typeof value !== "string") return null;
+  try {
+    const parsed = approvalVerdictSchema.safeParse(JSON.parse(value));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
+
 function toAgentReview(row: Row): AgentReviewRow {
   const status = text(row, "status");
   const trigger = text(row, "trigger");
@@ -527,6 +545,7 @@ function toAgentReview(row: Row): AgentReviewRow {
     previousSha: nullableText(row, "previous_sha"),
     descriptionSha: nullableText(row, "description_sha"),
     approved: row["approved"] === 1,
+    approval: parseApproval(row["approval"]),
     body: nullableText(row, "body"),
     detail: text(row, "detail"),
     activity: parseActivity(row["activity"]),
@@ -597,6 +616,7 @@ function initSchema(db: DatabaseSync): void {
   if (version < 12 && !hasColumn(db, "agent_review", "activity")) db.exec(SCHEMA_V12);
   if (version < 13) db.exec(SCHEMA_V13);
   if (version < 14) db.exec(SCHEMA_V14);
+  if (version < 15 && !hasColumn(db, "agent_review", "approval")) db.exec(SCHEMA_V15);
   if (version !== SCHEMA_VERSION) db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 }
 
@@ -994,7 +1014,7 @@ export function openStore(path: string): Store {
         .prepare(
           `UPDATE agent_review SET status = ?, cli = COALESCE(?, cli), head_sha = COALESCE(?, head_sha),
              previous_sha = COALESCE(?, previous_sha), description_sha = COALESCE(?, description_sha),
-             approved = COALESCE(?, approved), body = COALESCE(?, body), detail = COALESCE(?, detail), mr_title = COALESCE(?, mr_title),
+             approved = COALESCE(?, approved), approval = COALESCE(?, approval), body = COALESCE(?, body), detail = COALESCE(?, detail), mr_title = COALESCE(?, mr_title),
              model = COALESCE(?, model), started_at = COALESCE(?, started_at), updated_at = ?
            WHERE id = ? AND status IN (${from.map(() => "?").join(", ")})`,
         )
@@ -1005,6 +1025,7 @@ export function openStore(path: string): Store {
           fields.previousSha ?? null,
           fields.descriptionSha ?? null,
           fields.approved === undefined ? null : fields.approved ? 1 : 0,
+          fields.approval === undefined ? null : JSON.stringify(fields.approval),
           fields.body ?? null,
           fields.detail ?? null,
           fields.mrTitle ?? null,

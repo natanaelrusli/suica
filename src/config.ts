@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { parse } from "yaml";
 import { z } from "zod";
+import { APPROVE_BY } from "./approval-judge.ts";
 import { APPROVE_WHEN } from "./inline-review.ts";
 import { MODEL_CLI_CHOICES } from "./model-cli.ts";
 import { BUILT_IN_AGENTS, parseCustomAgent } from "./office/generic.ts";
@@ -10,6 +11,9 @@ import { REVIEW_EFFORTS } from "./review-runner.ts";
 import { errorMessage } from "./util.ts";
 
 const positiveInt = z.number().int().positive();
+/** review.approveRules end up in a prompt: a few short lines. */
+const APPROVE_RULES_MAX = 20;
+const APPROVE_RULE_MAX = 500;
 
 // Passed as one argument after --model / -m; a leading letter or digit keeps it from being a flag.
 const modelSchema = z
@@ -102,6 +106,11 @@ export const configSchema = z
         // What may be left for a review to be ready to approve: minor (Minor or Nit findings),
         // nit (Nit findings only) or clean (no findings).
         approveWhen: z.enum(APPROVE_WHEN).default("minor"),
+        // Who decides that a review is ready to approve: agent (a model run reads the review,
+        // by approveWhen and approveRules; it fails closed) or rules (the review's headings).
+        approveBy: z.enum(APPROVE_BY).default("agent"),
+        // The Owner's own rules for the agent, one per line; they win over approveWhen.
+        approveRules: z.array(z.string().max(APPROVE_RULE_MAX)).max(APPROVE_RULES_MAX).default([]),
         // A skill name only, as typed after the slash: it ends up in a prompt and a file path.
         skill: z
           .string()

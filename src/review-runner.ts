@@ -39,13 +39,17 @@ export type ReviewEffort = (typeof REVIEW_EFFORTS)[number];
 /** Codex stops at xhigh. */
 const codexEffort = (effort: ReviewEffort): string => (effort === "max" ? "xhigh" : effort);
 
-/** Read-only tools only: the MR is untrusted, so no shell, no web, no edits. */
-const CLAUDE_TOOLS = ["Read", "Grep", "Glob", "Skill"] as const;
-/** An Agent Fix edits files in its checkout; still no shell, so no project code runs and nothing reaches the network. */
-const CLAUDE_FIX_TOOLS = ["Read", "Glob", "Grep", "Edit", "Write"] as const;
+/** review: read-only; fix: may edit files inside the working folder; judge: no tools at all. */
+export type InvocationMode = "review" | "fix" | "judge";
 
-/** review: read-only; fix: may edit files inside the working folder. */
-export type InvocationMode = "review" | "fix";
+const CLAUDE_TOOLS: Record<InvocationMode, readonly string[]> = {
+  // The MR is untrusted, so no shell, no web, no edits.
+  review: ["Read", "Grep", "Glob", "Skill"],
+  // An Agent Fix edits files in its checkout; still no shell, so no project code runs and nothing reaches the network.
+  fix: ["Read", "Glob", "Grep", "Edit", "Write"],
+  // The approval judge reads only the review in its prompt.
+  judge: [],
+};
 
 /**
  * Claude Code: the skill and the user's plugins load as usual; tools are limited to reading,
@@ -62,7 +66,7 @@ export function buildInvocation(
   effort: ReviewEffort = "medium",
   mode: InvocationMode = "review",
 ): Invocation {
-  const tools = mode === "fix" ? CLAUDE_FIX_TOOLS : CLAUDE_TOOLS;
+  const tools = CLAUDE_TOOLS[mode];
   if (cli === "claude") {
     return {
       args: [
@@ -74,10 +78,10 @@ export function buildInvocation(
         ...(model === undefined ? [] : ["--model", model]),
         "--effort",
         effort,
+        // An empty --tools turns every built-in tool off.
         "--tools",
-        ...tools,
-        "--allowedTools",
-        ...tools,
+        ...(tools.length === 0 ? [""] : tools),
+        ...(tools.length === 0 ? [] : ["--allowedTools", ...tools]),
         "--permission-mode",
         "dontAsk",
         "--strict-mcp-config",
