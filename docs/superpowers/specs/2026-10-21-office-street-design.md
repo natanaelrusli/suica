@@ -17,7 +17,7 @@ Status: written from the Owner's request on 2026-10-21 ("Make the building have 
 ## Sky
 
 - The page paints a sky colour behind the scene (pale blue; night blue in dark mode). The lawn behind the building is short, so a strip of sky shows at the top of the default view.
-- The sun (a pale moon in dark mode) is fixed in the world, 60 m behind the scene where the default view shows it in the strip of sky at the top; orbiting, panning and zooming move the view past it like the rest of the scene, and when the view is turned so ground fills the top, the ground hides it. It was first carried by the camera, which kept it in the same spot on screen however the view turned; the Owner asked on 2026-10-21 for it to stay put instead ("make the moon positioned on the top, not moving with the camera").
+- The sun (a pale moon in dark mode) is fixed in the world, 60 m behind the scene where the default view shows it in the strip of sky at the top; orbiting, panning and zooming move the view past it like the rest of the scene, and when the view is turned so ground fills the top, the ground hides it. It was first carried by the camera, which kept it in the same spot on screen however the view turned; the Owner asked on 2026-10-21 for it to stay put instead ("make the moon positioned on the top, not moving with the camera"). Its look was revised in `2026-10-21-office-sun-moon-design.md`.
 - Option-drag and two-finger scrolling can slide the view as far as the far pavement.
 
 ## Tests
