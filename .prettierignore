@@ -2,3 +2,4 @@ package-lock.json
 *.md
 *.plist.template
 coverage
+.claude/worktrees
