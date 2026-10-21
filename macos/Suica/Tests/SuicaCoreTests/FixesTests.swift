@@ -69,6 +69,10 @@ actor FakeFixesClient: FixesClient {
         calls.append("merge \(key) \(sha) squash=\(choice.squash)")
         return try result.get()
     }
+    func close(key: String) async throws(AgentError) -> ActionResult {
+        calls.append("close \(key)")
+        return try result.get()
+    }
 }
 
 @Test func theFixListAndYourMergeRequestsDecodeFromTheContracts() throws {
@@ -264,4 +268,20 @@ actor FakeFixesClient: FixesClient {
         "PATH": "/usr/bin", "HOME": "/Users/me", "SUICA_ENV": "production",
         "SSH_AUTH_SOCK": "/tmp/agent.sock", "GNUPGHOME": "/Users/me/.gnupg",
     ])
+}
+
+@MainActor @Test func closingAnMRSaysWhatHappened() async throws {
+    let client = FakeFixesClient()
+    await client.setResult(.success(ActionResult(code: "closed")))
+    let model = FixesModel(client: client)
+    #expect(await model.close(key: "g/p!7") == "closed")
+    #expect(await client.calls == ["close g/p!7"])
+    #expect(model.banner == Copy.closeOutcome("closed"))
+    await client.setResult(.success(ActionResult(code: "not-yours")))
+    await model.close(key: "g/p!7")
+    #expect(model.banner == Copy.closeOutcome("not-yours"))
+
+    let runner = FakeRunner([output(#"{"status":"closed"}"#)])
+    #expect(try await CLIAgentClient(config: config, runner: runner).close(key: "g/p!7").code == "closed")
+    #expect(await runner.invocations.map(\.arguments) == [["mr", "close", "g/p!7", "--json"]])
 }

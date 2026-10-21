@@ -500,6 +500,18 @@ public enum Copy {
     public static let mergeRemoveBranch = "Delete source branch"
     public static let mergeMessage = "Commit message"
     public static func mergeSha(_ sha: String) -> String { "At commit \(sha.prefix(8)). A newer push is never merged." }
+    public static let closeMR = "Close MR…"
+    public static let closeConfirmTitle = "Close this MR on GitLab without merging?"
+    public static let closeConfirmMessage = "You can reopen it in GitLab. Suica stops fixing its threads."
+    public static let closeAction = "Close MR"
+    public static func closeOutcome(_ code: String) -> String {
+        switch code {
+        case "closed": "MR closed."
+        case "not-yours": "Not closed: only your own MRs can be closed from Suica."
+        case "bad-key": "This merge request key cannot be closed."
+        default: "Closing failed. Check the MR in GitLab."
+        }
+    }
     public static let mergeNewCommits = "New commits arrived since you opened this. Close it and look at them first."
     public static let mergeBlockedPipeline = "The pipeline failed."
     public static let mergeBlockedApproval = "It still needs approval."

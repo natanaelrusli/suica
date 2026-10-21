@@ -193,6 +193,8 @@ public protocol FixesClient: Sendable {
     func comment(key: String, body: String) async throws(AgentError) -> ActionResult
     /// merged, scheduled, not-mergeable, sha-mismatch, bad-key or failed.
     func merge(key: String, sha: String, choice: MergeChoice) async throws(AgentError) -> ActionResult
+    /// closed, not-yours, bad-key or failed.
+    func close(key: String) async throws(AgentError) -> ActionResult
 }
 
 // MARK: - Model
@@ -279,6 +281,14 @@ public final class FixesModel {
     public func merge(key: String, sha: String, choice: MergeChoice) async -> String? {
         await act(key, Copy.mergeOutcome, refreshing: false) { (client: any FixesClient) async throws(AgentError) -> ActionResult in
             try await client.merge(key: key, sha: sha, choice: choice)
+        }
+    }
+
+    /// Closes your MR without merging; returns the outcome code, nil when the call failed.
+    @discardableResult
+    public func close(key: String) async -> String? {
+        await act(key, Copy.closeOutcome, refreshing: false) { (client: any FixesClient) async throws(AgentError) -> ActionResult in
+            try await client.close(key: key)
         }
     }
 

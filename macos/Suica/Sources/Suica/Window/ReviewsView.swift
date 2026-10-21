@@ -295,6 +295,7 @@ private struct MergeRequestDetailView: View {
     @State private var tab: DetailTab = .description
     @State private var confirmingApprove = false
     @State private var merging = false
+    @State private var confirmingClose = false
 
     private var agentReview: AgentReviewInfo? { model.agentReview(for: detail.key) }
     /// Your own MR: Agent Fix, a comment box and Merge instead of reviewing.
@@ -350,6 +351,20 @@ private struct MergeRequestDetailView: View {
         } message: {
             Text(Copy.approveConfirmMessage(sha: detail.headSha ?? ""))
         }
+        .confirmationDialog(Copy.closeConfirmTitle, isPresented: $confirmingClose) {
+            Button(Copy.closeAction, role: .destructive) {
+                Task {
+                    if await fixes.close(key: detail.key) == "closed" {
+                        await model.refresh()
+                    } else {
+                        onReload()
+                    }
+                }
+            }
+            Button(Copy.cancel, role: .cancel) {}
+        } message: {
+            Text(Copy.closeConfirmMessage)
+        }
         .sheet(isPresented: $merging) {
             MergeSheet(detail: detail, fixes: fixes) {
                 tab = .description
@@ -383,6 +398,10 @@ private struct MergeRequestDetailView: View {
                         Label(Copy.fixFindingsNow, systemImage: "wand.and.stars")
                     }
                     .disabled(fixes.busyKeys.contains(detail.key) || fixes.fix(for: detail.key).map { $0.isActive || $0.isReady } == true)
+                    Button(role: .destructive) { confirmingClose = true } label: {
+                        Label(Copy.closeMR, systemImage: "xmark.circle")
+                    }
+                    .disabled(loading || fixes.busyKeys.contains(detail.key))
                 } else if model.isApprovedByMe(detail) {
                     Badge(text: Copy.approvedByYou, tint: .green)
                 } else if model.canApprove(detail) {

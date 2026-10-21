@@ -44,6 +44,7 @@ extension UnconfiguredClient: FixesClient {
     func merge(key: String, sha: String, choice: MergeChoice) async throws(AgentError) -> ActionResult {
         throw AgentError.launchFailed
     }
+    func close(key: String) async throws(AgentError) -> ActionResult { throw AgentError.launchFailed }
 }
 
 extension UnconfiguredClient: TemplatesClient {

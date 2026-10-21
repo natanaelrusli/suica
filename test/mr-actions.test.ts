@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { FetchFailure } from "../src/gitlab.ts";
-import { commentOnMergeRequest, mergeMergeRequest } from "../src/mr-actions.ts";
+import { closeMergeRequest, commentOnMergeRequest, mergeMergeRequest } from "../src/mr-actions.ts";
 import type { MergeOptions } from "../src/mr-actions.ts";
 
 type Call = [string, Readonly<Record<string, string>>];
@@ -111,5 +111,26 @@ describe("mergeMergeRequest", () => {
     expect(await mergeMergeRequest(run, "nope", "0123abc", OPTIONS)).toBe("bad-key");
     expect(await mergeMergeRequest(run, "g/p!7", "-x", OPTIONS)).toBe("bad-key");
     expect(calls).toEqual([]);
+  });
+});
+
+describe("closeMergeRequest", () => {
+  it("closes your MR with a state event", async () => {
+    const { calls, run } = recorder({ state: "closed" });
+    expect(await closeMergeRequest(run, "g/p!7", "me", "me")).toBe("closed");
+    expect(calls).toEqual([["projects/g%2Fp/merge_requests/7", { state_event: "close" }]]);
+  });
+
+  it("refuses an MR someone else wrote, and a bad key, without calling GitLab", async () => {
+    const { calls, run } = recorder();
+    expect(await closeMergeRequest(run, "g/p!7", "bob", "me")).toBe("not-yours");
+    expect(await closeMergeRequest(run, "nope", "me", "me")).toBe("bad-key");
+    expect(calls).toEqual([]);
+  });
+
+  it("reports a refused close, or a reply that is not closed, as failed", async () => {
+    expect(await closeMergeRequest(refusing(403), "g/p!7", "me", "me")).toBe("failed");
+    const { run } = recorder({ state: "opened" });
+    expect(await closeMergeRequest(run, "g/p!7", "me", "me")).toBe("failed");
   });
 });

@@ -208,6 +208,11 @@ Bodies, replies and diffs are never logged.
 
 The prompt wording, the exact Copy strings, the layout of the Fix tab and Merge sheet, the store schema and migration, and how the fix worker shares the scheduler with the review worker.
 
+## Added after the first build (the Owner's requests)
+
+- **Only the Owner's MRs**: the watcher reads only the Owner's authored MRs, and queueing, running and confirming a fix each check that the signed-in GitLab user (`GET /user`) wrote the MR.
+- **Close MR**: `suica mr close <key> --json` (`PUT merge_requests/:iid` with `state_event=close`, refused with `not-yours` for someone else's MR) and **Close MR…** on the Owner's MR page, after a confirmation.
+
 ## Built differently from the above (decided while building)
 
 - The Reviews page had no list of the Owner's MRs, so it gained a **Your MRs** group; the Owner's MR page shows the **Agent fix** tab, **Merge…** and **Fix findings now** in place of the Agent review tab, Approve and Review with agent.

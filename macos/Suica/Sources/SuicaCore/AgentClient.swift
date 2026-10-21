@@ -507,4 +507,8 @@ extension CLIAgentClient: FixesClient {
         arguments.append("--json")
         return try await action(arguments, timeout: Self.gitlabTimeout, stdin: Data(choice.message.utf8))
     }
+
+    public func close(key: String) async throws(AgentError) -> ActionResult {
+        try await action(["mr", "close", key, "--json"], timeout: Self.gitlabTimeout)
+    }
 }

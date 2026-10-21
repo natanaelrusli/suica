@@ -76,3 +76,25 @@ export async function mergeMergeRequest(
     typeof reply === "object" && reply !== null && "state" in reply ? reply.state : undefined;
   return state === "merged" ? "merged" : "scheduled";
 }
+
+export type CloseOutcome = "closed" | "not-yours" | "bad-key" | "failed";
+
+/** Closes an MR the Owner (`me`) wrote, without merging it. `author` is the MR's Author. */
+export async function closeMergeRequest(
+  put: PutRunner,
+  key: string,
+  author: string,
+  me: string,
+): Promise<CloseOutcome> {
+  const path = mrPath(key);
+  if (path === undefined) return "bad-key";
+  if (author !== me) return "not-yours";
+  try {
+    const reply = await put(path, { state_event: "close" });
+    const state =
+      typeof reply === "object" && reply !== null && "state" in reply ? reply.state : undefined;
+    return state === "closed" ? "closed" : "failed";
+  } catch {
+    return "failed";
+  }
+}

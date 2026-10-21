@@ -17,7 +17,7 @@ import {
   glabRunner,
 } from "./gitlab.ts";
 import { detectModelClis } from "./model-cli.ts";
-import { commentOnMergeRequest, mergeMergeRequest } from "./mr-actions.ts";
+import { closeMergeRequest, commentOnMergeRequest, mergeMergeRequest } from "./mr-actions.ts";
 import {
   approveMergeRequest,
   buildReviewActivity,
@@ -58,7 +58,7 @@ import { OUTBOX_STATUSES } from "./teams/types.ts";
 import { buildUsage } from "./usage.ts";
 
 const USAGE =
-  "usage: suica <once|status|state|stats|usage|pause|resume|pending [--all]|send <id> [--json]|skip <id> [--json]|retry <id> [--json]|selftest|reviews --json|mr <key> --json|mr approve <key> <sha> --json|mr comment <key> --json (body on stdin)|mr merge <key> <sha> [--squash] [--remove-source-branch] [--when-pipeline-succeeds] --json (message on stdin)|review queue <key> --json|review post <id> [--inline|--comment] --json|review discard <id> --json|review cancel <id> --json|fix list --json|fix queue <key> --json|fix confirm <id> --json (edits on stdin)|fix retry <id> --json (note on stdin)|fix discard <id> --json|fix cancel <id> --json|fix replies <id> --json|config show --json|config set --json|templates show --json|templates set --json|agent install|agent uninstall|agent restart --json>\n";
+  "usage: suica <once|status|state|stats|usage|pause|resume|pending [--all]|send <id> [--json]|skip <id> [--json]|retry <id> [--json]|selftest|reviews --json|mr <key> --json|mr approve <key> <sha> --json|mr comment <key> --json (body on stdin)|mr close <key> --json|mr merge <key> <sha> [--squash] [--remove-source-branch] [--when-pipeline-succeeds] --json (message on stdin)|review queue <key> --json|review post <id> [--inline|--comment] --json|review discard <id> --json|review cancel <id> --json|fix list --json|fix queue <key> --json|fix confirm <id> --json (edits on stdin)|fix retry <id> --json (note on stdin)|fix discard <id> --json|fix cancel <id> --json|fix replies <id> --json|config show --json|config set --json|templates show --json|templates set --json|agent install|agent uninstall|agent restart --json>\n";
 const TEAMS_DISABLED = "teams is disabled: set teams.enabled to true in the config\n";
 const SHOWN_WITH_ALL = 50;
 
@@ -453,6 +453,22 @@ async function mergeCommand(key: string, sha: string, argv: readonly string[]): 
   return outcome === "merged" || outcome === "scheduled" ? 0 : 1;
 }
 
+/** `suica mr close <key> --json`: closes an MR you wrote, without merging; prints `{"status": …}`. */
+async function closeCommand(key: string): Promise<number> {
+  const { gitlab } = loadConfig(defaultConfigPath());
+  let outcome: string;
+  if (parseMrKey(key) === undefined) {
+    outcome = "bad-key";
+  } else {
+    const detail = await fetchMrDetail(glabRunner(gitlab), glabRest(gitlab), key);
+    const me = await fetchCurrentUsername(glabRest(gitlab));
+    outcome = await closeMergeRequest(glabPut(gitlab), key, detail.author.username, me);
+  }
+  createLogger().info("mr close", { mr_key: key, outcome });
+  process.stdout.write(`${actionJson(outcome)}\n`);
+  return outcome === "closed" ? 0 : 1;
+}
+
 async function installAgentCommand(): Promise<number> {
   const paths = {
     node: process.execPath,
@@ -588,6 +604,14 @@ async function main(argv: readonly string[]): Promise<number> {
       return 2;
     }
     return commentCommand(key);
+  }
+  if (command === "mr" && argv[1] === "close" && argv.includes("--json")) {
+    const key = argv[2];
+    if (key === undefined) {
+      process.stderr.write(USAGE);
+      return 2;
+    }
+    return closeCommand(key);
   }
   if (command === "mr" && argv[1] === "merge" && argv.includes("--json")) {
     const [key, sha] = [argv[2], argv[3]];
