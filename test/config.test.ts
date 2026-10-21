@@ -55,7 +55,13 @@ describe("parseConfig", () => {
         timeoutMinutes: 20,
         concurrency: 2,
       },
+      fix: { auto: true, effort: "medium", timeoutMinutes: 20, maxPerDay: 10 },
     });
+  });
+
+  it("fix.model follows the review.model rule", () => {
+    expect(parseConfig(`${MINIMAL}fix:\n  model: sonnet\n`).fix.model).toBe("sonnet");
+    expect(() => parseConfig(`${MINIMAL}fix:\n  model: "-x"\n`)).toThrow(/fix\.model/);
   });
 
   it("teams.agentName defaults to Suica and must not be blank", () => {

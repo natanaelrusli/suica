@@ -23,7 +23,7 @@ describe("CONFIG_FIELDS", () => {
     const fromFields = CONFIG_FIELDS.map((field) => field.path.join(".")).sort();
     expect(fromFields).toEqual(fromSchema);
     expect(new Set(fromFields).size).toBe(fromFields.length);
-    expect(fromFields).toHaveLength(42);
+    expect(fromFields).toHaveLength(47);
   });
 
   it("gives enum fields the schema's options", () => {

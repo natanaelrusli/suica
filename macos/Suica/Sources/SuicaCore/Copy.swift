@@ -471,6 +471,7 @@ public enum Copy {
         case "teams": "Teams"
         case "model": "Language model"
         case "review": "Agent Review"
+        case "fix": "Agent Fix"
         default: key.prefix(1).uppercased() + key.dropFirst()
         }
     }
@@ -547,6 +548,7 @@ public enum Copy {
         case "teams": "Messages, modes and hours"
         case "model": "The coding agent CLI"
         case "review": "Posting, model and limits"
+        case "fix": "Fixes for your MRs"
         default: "Where the history is kept"
         }
     }
