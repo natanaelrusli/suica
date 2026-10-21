@@ -14,28 +14,20 @@ struct OfficeView: View {
     @Environment(\.motionLevel) private var motion
 
     var body: some View {
-        // The scene runs up under the title bar, which floats over it on a vignette. It sits in a
-        // ScrollView that never scrolls: over anything else, macOS 26 draws the title bar as an
-        // opaque band with a line under it.
-        GeometryReader { proxy in
-            let titleBar = proxy.safeAreaInsets.top
-            ScrollView {
-                ZStack {
-                    ZStack(alignment: .top) {
-                        // The sky above the street.
-                        (scheme == .dark
-                            ? Color(red: 0.06, green: 0.08, blue: 0.14) : Color(red: 0.8, green: 0.9, blue: 0.98))
-                        OfficeSceneView(model: model, controller: controller)
-                        vignette.frame(height: titleBar + 70)
-                    }
-                    .clipped()
-                    if model.loaded && model.sessions.isEmpty { emptyState }
-                    overlays.padding(.top, titleBar)
+        // The scene runs up under the title bar, which floats over it on a vignette.
+        UnderTitleBar { titleBar in
+            ZStack {
+                ZStack(alignment: .top) {
+                    // The sky above the street.
+                    (scheme == .dark
+                        ? Color(red: 0.06, green: 0.08, blue: 0.14) : Color(red: 0.8, green: 0.9, blue: 0.98))
+                    OfficeSceneView(model: model, controller: controller)
+                    vignette.frame(height: titleBar + 70)
                 }
-                .frame(width: proxy.size.width, height: proxy.size.height + titleBar)
+                .clipped()
+                if model.loaded && model.sessions.isEmpty { emptyState }
+                overlays.padding(.top, titleBar)
             }
-            .modifier(HiddenTopScrollEdge())
-            .ignoresSafeArea(.container, edges: .top)
         }
         .toolbar {
             Button {
@@ -121,17 +113,6 @@ struct OfficeView: View {
         .padding(20)
         .glass(in: RoundedRectangle(cornerRadius: 16))
         .allowsHitTesting(false)
-    }
-}
-
-/// No fade or line where the page meets the title bar: the Office draws its own vignette there.
-private struct HiddenTopScrollEdge: ViewModifier {
-    func body(content: Content) -> some View {
-        if #available(macOS 26, *) {
-            content.scrollEdgeEffectHidden(true, for: .top)
-        } else {
-            content
-        }
     }
 }
 

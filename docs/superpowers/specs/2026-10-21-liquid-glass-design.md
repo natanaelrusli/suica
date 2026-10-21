@@ -32,5 +32,6 @@ and trackpad events before the scroll view sees them.
 
 ## Not done
 
-- Review requests and the other pages keep their current title bar; only the Office runs under it.
+- The other pages keep their current title bar; the Office and Review requests (see the
+  [Review requests title bar spec](2026-10-21-reviews-glass-top-bar-design.md)) run under it.
 - No custom glass on content cards, tiles or rows.
