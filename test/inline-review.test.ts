@@ -147,6 +147,27 @@ describe("countFindings", () => {
       { severity: "Minor", count: 1 },
     ]);
   });
+  it("reads a line that is only a bold severity, as some agents write it, like a subheading", () => {
+    const review = [
+      "## Findings",
+      "**Major (1)**",
+      "1. `a.ts:1` — x",
+      "   **not a label**: a finding's own bold text",
+      "__Minor__",
+      "2. `b.ts:2` — y",
+      "**Outside this diff**",
+      "- `c.ts:3` — an older problem.",
+      "## Done well",
+      "**Nit**",
+      "- `d.ts:4` — good.",
+    ].join("\n");
+    expect(countFindings(review)).toEqual([
+      { severity: "Major", count: 1 },
+      { severity: "Minor", count: 1 },
+    ]);
+    expect(isReadyToApprove("## Findings\n**Minor**\n1. `a.ts:1` x\n**Nit**\n2. y")).toBe(true);
+  });
+
   it("ignores items under a Previous findings heading when counting", () => {
     const body =
       "## Previous findings\n1. `a.ts:3` old — not fixed\n## Findings\n### Minor\n1. `b.ts:4` new\n";

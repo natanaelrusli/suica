@@ -103,10 +103,21 @@ const LIST_MARKER = /^( *)(?:\d+[.)]|[-*+])\s+(.*)$/;
 const NONE_ITEM = /^(none|n\/a|tidak ada)\.?$/i;
 /** One word, then the end or a count: `Minor`, `Major (2)`, `Blocker — none`. */
 const SEVERITY_HEADING = /^\W*([A-Za-z]+)\s*(?:$|[^A-Za-z\s])/;
+/** An unindented line that is only bold text, `**Minor**`: some agents write subheadings so. */
+const BOLD_LABEL = /^(\*\*|__)(.+?)\1\s*$/;
+
+/** The severity a subheading names, capitalised, or undefined when it names none. */
+function severityOf(title: string): string | undefined {
+  const word = SEVERITY_HEADING.exec(title)?.[1];
+  return word === undefined
+    ? undefined
+    : word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+}
 
 /**
  * Every finding under a heading named Findings, located or not, counted per severity subheading
- * (one word, such as `### Minor`). Items under another subheading, such as `### Outside this
+ * (one word, such as `### Minor`, or a bold line such as `**Minor**`). Items under another
+ * subheading, such as `### Outside this
  * diff` or `### Previous review`, are not findings of the MR. Only items at the indent of the section's first item count,
  * so a finding's own Case and Fix bullets do not. Ordered Blocker, Major, Minor, Nit, then other
  * severities as they appear, then the findings without one.
@@ -138,12 +149,13 @@ export function countFindings(markdown: string): FindingCount[] {
         if (sectionLevel !== undefined && level <= sectionLevel) sectionLevel = undefined;
         previousLevel = isPreviousHeading(title) ? level : undefined;
         // Outside a section this is reset when the next Findings heading opens one.
-        const word = SEVERITY_HEADING.exec(title)?.[1];
-        severity =
-          word === undefined
-            ? undefined
-            : word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+        severity = severityOf(title);
       }
+      continue;
+    }
+    const label = BOLD_LABEL.exec(line);
+    if (label !== null && sectionLevel !== undefined && previousLevel === undefined) {
+      severity = severityOf(label[2] ?? "");
       continue;
     }
     const item =
