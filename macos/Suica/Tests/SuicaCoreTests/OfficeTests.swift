@@ -246,3 +246,73 @@ private func rooms(_ counts: [Int]) -> [OfficeRoom] {
     #expect(layout.rooms.isEmpty && layout.width > 0 && layout.depth > 0)
     #expect(layout.center.isCenter && layout.center.width == layout.width && layout.center.depth == layout.depth)
 }
+
+// MARK: - Looks and furniture
+
+@Test func aFigureKeepsItsLookAndFiguresDiffer() {
+    let looks = (0..<40).map { OfficeLook(session: session("s\($0)")) }
+    #expect(OfficeLook(session: session("s7")) == looks[7])
+    #expect(Set(looks.map { "\($0.hair)" }).count >= 4)
+    #expect(Set(looks.map { "\($0.skin.red)" }).count >= 4)
+    #expect(Set(looks.map { "\($0.shirt)" }).count >= 3)
+    #expect(Set(looks.map { "\($0.extra)" }).count == 3)
+}
+
+@Test func aShirtStaysTheAgentsColour() {
+    for index in 0..<20 {
+        let codex = OfficeLook(session: session("c\(index)", agent: "codex")).shirtColour
+        #expect(codex.green > codex.red)
+        let claude = OfficeLook(session: session("a\(index)", agent: "claude")).shirtColour
+        #expect(claude.red > claude.blue)
+    }
+}
+
+@Test func greyedKeepsLightnessButDropsColour() {
+    let coral = OfficeAgent(kind: "claude").colour.greyed
+    #expect(abs(coral.red - coral.blue) < 0.1)
+    #expect(OfficeColour(red: 0.1, green: 0.1, blue: 0.1).greyed.red < OfficeColour(red: 0.9, green: 0.9, blue: 0.9).greyed.red)
+}
+
+@Test func everyRoomIsFurnishedTheSameWayEachTime() {
+    let layout = OfficeLayout.make(rooms([1, 3, 4, 2, 7, 1]))
+    #expect(layout == OfficeLayout.make(rooms([1, 3, 4, 2, 7, 1])))
+    for room in layout.all { #expect(room.furniture.count >= 2) }
+    #expect(OfficeLayout.make([]).center.furniture.count >= 2)
+    // Different Rooms are furnished differently.
+    #expect(Set(layout.rooms.map { $0.furniture.map { "\($0.kind)" } }).count > 1)
+}
+
+@Test func furnitureStandsAgainstASideWallClearOfDesksDoorsAndTheView() {
+    let half = OfficeLayout.furnitureSize / 2
+    for layout in [OfficeLayout.make(rooms([1, 3, 4, 2, 7, 1, 5, 6])), OfficeLayout.make([])] {
+        for room in layout.all {
+            for piece in room.furniture {
+                let x = piece.position.x - room.center.x
+                let z = piece.position.z - room.center.z
+                #expect(abs(x) + half <= room.width / 2 - 0.06 && abs(z) + half <= room.depth / 2 - 0.06)
+                #expect(piece.against == (x < 0 ? .west : .east))
+                // The doorway is 1.4 m wide in the middle of a wall.
+                #expect(abs(x) - half > 0.7)
+                // Tall pieces only in the back half, where they hide nothing from the camera.
+                if piece.kind.isTall { #expect(z < 0) }
+                for desk in room.desks {
+                    // A Desk with its chair spans 1.2 m across and from 0.45 behind to 0.8 in front.
+                    let apartX = abs(piece.position.x - desk.position.x) >= half + 0.6
+                    let apartZ = piece.position.z + half <= desk.position.z - 0.45
+                        || piece.position.z - half >= desk.position.z + 0.8
+                    #expect(apartX || apartZ)
+                }
+            }
+            let spots = Set(room.furniture.map { "\($0.position.x),\($0.position.z)" })
+            #expect(spots.count == room.furniture.count)
+        }
+    }
+}
+
+@Test func theCornerUnderARoomsNameStaysFree() {
+    for room in OfficeLayout.make(rooms([1, 3, 4, 2, 7, 1])).all {
+        for piece in room.furniture {
+            #expect(!(piece.position.x < room.center.x && piece.position.z > room.center.z + room.depth / 2 - 1))
+        }
+    }
+}
