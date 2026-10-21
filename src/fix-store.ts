@@ -1,0 +1,363 @@
+import type { DatabaseSync } from "node:sqlite";
+import { z } from "zod";
+import type { Person } from "./domain.ts";
+import { integer, nullableInteger, nullableText, parseActivity, text } from "./sql-row.ts";
+import type { ActivityLine, Row } from "./sql-row.ts";
+
+export const FIX_STATUSES = [
+  "queued",
+  "running",
+  "ready",
+  "confirming",
+  "pushed",
+  "push-failed",
+  "discarded",
+  "failed",
+  "skipped",
+  "cancelled",
+] as const;
+export type FixStatus = (typeof FIX_STATUSES)[number];
+export type FixTrigger = "auto" | "manual";
+
+/** A Finding Thread as a fix sees it, with the model's answer once it ran. */
+export interface FixThread {
+  /** The GitLab discussion id (gid://gitlab/Discussion/…). */
+  readonly id: string;
+  /** The thread's newest note when the fix took it; the thread is handled at this note. */
+  readonly noteId: string;
+  /** Who started the thread. */
+  readonly author: Person;
+  readonly filePath: string | null;
+  readonly line: number | null;
+  readonly notes: readonly { author: Person; body: string; createdAt: string }[];
+  /** changed: the code changed for it; reply: only a reply; null until the model answered. */
+  readonly action: "changed" | "reply" | null;
+  /** The reply to post; `{{sha}}` becomes the short pushed commit. */
+  readonly reply: string;
+  /** Whether Confirm posts the reply. */
+  readonly post: boolean;
+  /** True once the reply is on GitLab. */
+  readonly posted: boolean;
+}
+
+/** One Agent Fix of one MR, from queued to pushed or dropped. */
+export interface FixRow {
+  readonly id: number;
+  readonly mrKey: string;
+  readonly mrTitle: string | null;
+  readonly trigger: FixTrigger;
+  readonly status: FixStatus;
+  readonly threads: readonly FixThread[];
+  /** The Owner's note for a retry; empty otherwise. */
+  readonly note: string;
+  /** The commit the fix was made on; null until the checkout. */
+  readonly baseSha: string | null;
+  readonly commitMessage: string;
+  /** `git diff --cached --binary` of the change; null until ready, and empty for a reply-only fix. */
+  readonly diff: string | null;
+  readonly pushedSha: string | null;
+  readonly cli: string | null;
+  readonly model: string | null;
+  /** Why it failed, was skipped or cancelled, or a note about the push. */
+  readonly detail: string;
+  readonly activity: readonly ActivityLine[];
+  readonly createdAt: number;
+  readonly updatedAt: number;
+  readonly startedAt: number | null;
+}
+
+export type FixFields = Partial<
+  Pick<
+    FixRow,
+    | "mrTitle"
+    | "threads"
+    | "baseSha"
+    | "commitMessage"
+    | "diff"
+    | "pushedSha"
+    | "cli"
+    | "model"
+    | "detail"
+    | "startedAt"
+  >
+>;
+
+export interface FixStore {
+  /**
+   * Adds the threads to the MR's queued fix (a thread already there takes the newer note), or
+   * queues a new fix; undefined while the MR has a fix that is running, ready or confirming.
+   */
+  queue(
+    mrKey: string,
+    trigger: FixTrigger,
+    threads: readonly FixThread[],
+    now: number,
+    mrTitle?: string,
+    note?: string,
+  ): number | undefined;
+  get(id: number): FixRow | undefined;
+  nextQueued(): FixRow | undefined;
+  /** The MR's fix that is queued, running, ready or confirming. */
+  open(mrKey: string): FixRow | undefined;
+  /** Every open fix and every fix updated since `since`, newest first. */
+  list(since: number): FixRow[];
+  latestByMr(): Map<string, FixRow>;
+  /** Only from one of `from`; false when the row was elsewhere, so two callers never both win. */
+  transition(
+    id: number,
+    from: readonly FixStatus[],
+    to: FixStatus,
+    fields: FixFields,
+    now: number,
+  ): boolean;
+  /** Adds a line to a running fix's activity; does nothing once it stopped running. */
+  appendActivity(id: number, at: number, text: string): void;
+  countAuto(since: number): number;
+  /** Puts a running fix back in the queue, as if it never started. */
+  requeue(id: number, now: number): boolean;
+  /** The newest note id each thread of the MR was handled at. */
+  handledNotes(mrKey: string): Map<string, string>;
+  markHandled(mrKey: string, threads: readonly { id: string; noteId: string }[]): void;
+  interruptedRunning(): FixRow[];
+}
+
+const OPEN: readonly FixStatus[] = ["queued", "running", "ready", "confirming"];
+const DONE: readonly FixStatus[] = [
+  "pushed",
+  "push-failed",
+  "discarded",
+  "failed",
+  "skipped",
+  "cancelled",
+];
+const RETENTION_MS = 90 * 24 * 3_600_000;
+const ACTIVITY_LINES = 50;
+
+const personSchema = z.object({ username: z.string(), name: z.string() });
+const threadsSchema = z.array(
+  z.object({
+    id: z.string(),
+    noteId: z.string(),
+    author: personSchema,
+    filePath: z.string().nullable(),
+    line: z.number().nullable(),
+    notes: z.array(z.object({ author: personSchema, body: z.string(), createdAt: z.string() })),
+    action: z.enum(["changed", "reply"]).nullable(),
+    reply: z.string(),
+    post: z.boolean(),
+    posted: z.boolean(),
+  }),
+);
+
+function isFixStatus(value: string): value is FixStatus {
+  return (FIX_STATUSES as readonly string[]).includes(value);
+}
+
+function parseThreads(value: unknown): FixThread[] {
+  if (typeof value !== "string") return [];
+  try {
+    const parsed = threadsSchema.safeParse(JSON.parse(value));
+    return parsed.success ? parsed.data : [];
+  } catch {
+    return [];
+  }
+}
+
+function toFixRow(row: Row): FixRow {
+  const status = text(row, "status");
+  const trigger = text(row, "trigger");
+  if (!isFixStatus(status) || (trigger !== "auto" && trigger !== "manual")) {
+    throw new Error("fix row has an unknown status or trigger");
+  }
+  return {
+    id: integer(row, "id"),
+    mrKey: text(row, "mr_key"),
+    mrTitle: nullableText(row, "mr_title"),
+    trigger,
+    status,
+    threads: parseThreads(row["threads"]),
+    note: text(row, "note"),
+    baseSha: nullableText(row, "base_sha"),
+    commitMessage: text(row, "commit_message"),
+    diff: nullableText(row, "diff"),
+    pushedSha: nullableText(row, "pushed_sha"),
+    cli: nullableText(row, "cli"),
+    model: nullableText(row, "model"),
+    detail: text(row, "detail"),
+    activity: parseActivity(row["activity"]),
+    createdAt: integer(row, "created_at"),
+    updatedAt: integer(row, "updated_at"),
+    startedAt: nullableInteger(row, "started_at"),
+  };
+}
+
+const marks = (values: readonly unknown[]): string => values.map(() => "?").join(", ");
+
+/** Merges `added` into `threads` by id; an added thread replaces one with the same id. */
+function mergeThreads(threads: readonly FixThread[], added: readonly FixThread[]): FixThread[] {
+  const byId = new Map(threads.map((each) => [each.id, each]));
+  for (const each of added) byId.set(each.id, each);
+  return [...byId.values()];
+}
+
+export function createFixStore(db: DatabaseSync): FixStore {
+  const one = (sql: string, ...params: (string | number)[]): FixRow | undefined => {
+    const row = db.prepare(sql).get(...params);
+    return row === undefined ? undefined : toFixRow(row);
+  };
+  const many = (sql: string, ...params: (string | number)[]): FixRow[] =>
+    db
+      .prepare(sql)
+      .all(...params)
+      .map(toFixRow);
+  const openFix = (mrKey: string): FixRow | undefined =>
+    one(
+      `SELECT * FROM fix_run WHERE mr_key = ? AND status IN (${marks(OPEN)}) ORDER BY id DESC LIMIT 1`,
+      mrKey,
+      ...OPEN,
+    );
+
+  return {
+    queue(mrKey, trigger, threads, now, mrTitle, note = "") {
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        const open = openFix(mrKey);
+        let id: number | undefined;
+        if (open?.status === "queued") {
+          db.prepare("UPDATE fix_run SET threads = ?, updated_at = ? WHERE id = ?").run(
+            JSON.stringify(mergeThreads(open.threads, threads)),
+            now,
+            open.id,
+          );
+          id = open.id;
+        } else if (open === undefined) {
+          const result = db
+            .prepare(
+              `INSERT INTO fix_run (mr_key, trigger, status, mr_title, threads, note, created_at, updated_at)
+               VALUES (?, ?, 'queued', ?, ?, ?, ?, ?)`,
+            )
+            .run(mrKey, trigger, mrTitle ?? null, JSON.stringify(threads), note, now, now);
+          id = Number(result.lastInsertRowid);
+        }
+        db.prepare(`DELETE FROM fix_run WHERE updated_at < ? AND status IN (${marks(DONE)})`).run(
+          now - RETENTION_MS,
+          ...DONE,
+        );
+        db.exec("COMMIT");
+        return id;
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
+    },
+
+    get(id) {
+      return one("SELECT * FROM fix_run WHERE id = ?", id);
+    },
+
+    nextQueued() {
+      return one("SELECT * FROM fix_run WHERE status = 'queued' ORDER BY id LIMIT 1");
+    },
+
+    open: openFix,
+
+    list(since) {
+      return many(
+        `SELECT * FROM fix_run WHERE status IN (${marks(OPEN)}) OR updated_at >= ? ORDER BY id DESC`,
+        ...OPEN,
+        since,
+      );
+    },
+
+    latestByMr() {
+      const latest = new Map<string, FixRow>();
+      for (const row of many(
+        "SELECT * FROM fix_run WHERE id IN (SELECT MAX(id) FROM fix_run GROUP BY mr_key)",
+      )) {
+        latest.set(row.mrKey, row);
+      }
+      return latest;
+    },
+
+    transition(id, from, to, fields, now) {
+      const json = fields.threads === undefined ? null : JSON.stringify(fields.threads);
+      const result = db
+        .prepare(
+          `UPDATE fix_run SET status = ?, mr_title = COALESCE(?, mr_title), threads = COALESCE(?, threads),
+             base_sha = COALESCE(?, base_sha), commit_message = COALESCE(?, commit_message),
+             diff = COALESCE(?, diff), pushed_sha = COALESCE(?, pushed_sha), cli = COALESCE(?, cli),
+             model = COALESCE(?, model), detail = COALESCE(?, detail),
+             started_at = COALESCE(?, started_at), updated_at = ?
+           WHERE id = ? AND status IN (${marks(from)})`,
+        )
+        .run(
+          to,
+          fields.mrTitle ?? null,
+          json,
+          fields.baseSha ?? null,
+          fields.commitMessage ?? null,
+          fields.diff ?? null,
+          fields.pushedSha ?? null,
+          fields.cli ?? null,
+          fields.model ?? null,
+          fields.detail ?? null,
+          fields.startedAt ?? null,
+          now,
+          id,
+          ...from,
+        );
+      return result.changes > 0;
+    },
+
+    appendActivity(id, at, line) {
+      const row = db
+        .prepare("SELECT activity FROM fix_run WHERE id = ? AND status = 'running'")
+        .get(id);
+      if (row === undefined) return;
+      const activity = [...parseActivity(row["activity"]), { at, text: line }].slice(
+        -ACTIVITY_LINES,
+      );
+      db.prepare("UPDATE fix_run SET activity = ? WHERE id = ? AND status = 'running'").run(
+        JSON.stringify(activity),
+        id,
+      );
+    },
+
+    countAuto(since) {
+      const row = db
+        .prepare("SELECT COUNT(*) AS n FROM fix_run WHERE trigger = 'auto' AND created_at >= ?")
+        .get(since);
+      return row === undefined ? 0 : integer(row, "n");
+    },
+
+    requeue(id, now) {
+      return (
+        db
+          .prepare(
+            "UPDATE fix_run SET status = 'queued', started_at = NULL, activity = '[]', updated_at = ? WHERE id = ? AND status = 'running'",
+          )
+          .run(now, id).changes > 0
+      );
+    },
+
+    handledNotes(mrKey) {
+      return new Map(
+        db
+          .prepare("SELECT discussion_id, note_id FROM fix_thread WHERE mr_key = ?")
+          .all(mrKey)
+          .map((row) => [text(row, "discussion_id"), text(row, "note_id")] as const),
+      );
+    },
+
+    markHandled(mrKey, threads) {
+      const upsert = db.prepare(
+        "INSERT OR REPLACE INTO fix_thread (mr_key, discussion_id, note_id) VALUES (?, ?, ?)",
+      );
+      for (const each of threads) upsert.run(mrKey, each.id, each.noteId);
+    },
+
+    interruptedRunning() {
+      return many("SELECT * FROM fix_run WHERE status = 'running' ORDER BY id");
+    },
+  };
+}
