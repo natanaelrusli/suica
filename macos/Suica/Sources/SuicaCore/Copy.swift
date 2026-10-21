@@ -889,6 +889,11 @@ public enum Copy {
     public static let officeNoChat = "No conversation to show."
     public static let officeChatLoading = "Reading the conversation…"
     public static let officeYou = "You"
+    public static let officeChatToggleHint = "Show or hide the conversation of the selected agent"
+    public static let copyMessage = "Copy message"
+    public static func officeMessageCount(_ count: Int) -> String {
+        "\(count) \(count == 1 ? "message" : "messages")"
+    }
     public static let officeEntranceSign = "Office"
     public static func officeSummary(sessions: Int, rooms: Int) -> String {
         "\(sessions) \(sessions == 1 ? "agent" : "agents") in \(rooms) \(rooms == 1 ? "room" : "rooms")"

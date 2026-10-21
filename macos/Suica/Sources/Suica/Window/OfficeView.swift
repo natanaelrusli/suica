@@ -12,6 +12,8 @@ struct OfficeView: View {
     @State private var controller = OfficeSceneController()
     /// False while the window is minimized, hidden or covered: nothing is polled then.
     @State private var windowVisible = true
+    /// The Owner closed the Chat Panel while a figure stays selected; picking a figure reopens it.
+    @State private var panelHidden = false
     @Environment(\.colorScheme) private var scheme
     @Environment(\.motionLevel) private var motion
 
@@ -32,7 +34,23 @@ struct OfficeView: View {
                 overlays.padding(.top, titleBar)
             }
         }
+        // The Chat Panel is a trailing sidebar beside the scene, not over it: scrolling it never
+        // reaches the camera, and the scene keeps every pixel it has left.
+        .inspector(isPresented: panelShown) {
+            if let session = model.selected {
+                OfficeChatPanel(session: session, chat: model.chat, error: model.chatError) { model.select(nil) }
+                    .inspectorColumnWidth(min: 320, ideal: 400, max: 560)
+            }
+        }
+        .onChange(of: model.selectedId) { _, id in if id != nil { panelHidden = false } }
         .toolbar {
+            Button {
+                panelHidden.toggle()
+            } label: {
+                Label(Copy.officeConversation, systemImage: "sidebar.trailing")
+            }
+            .help(Copy.officeChatToggleHint)
+            .disabled(model.selected == nil)
             Menu {
                 Picker(Copy.officeBuildingPicker, selection: $settings.officeStyle) {
                     ForEach(OfficeStyle.allCases) { Text($0.title).tag($0) }
@@ -81,28 +99,27 @@ struct OfficeView: View {
         }
     }
 
-    /// What floats over the scene: the summary, errors, the hint and, on the right, the Chat Panel.
+    /// Open while a figure is selected and the Owner has not closed it; closing it deselects.
+    private var panelShown: Binding<Bool> {
+        Binding(
+            get: { model.selected != nil && !panelHidden },
+            set: { shown in if !shown { model.select(nil) } })
+    }
+
+    /// What floats over the scene: the summary, errors and the hint.
     private var overlays: some View {
-        HStack(alignment: .top, spacing: 12) {
-            VStack(alignment: .leading, spacing: 8) {
-                summary
-                if let text = model.errorText { NoticeBox(text: text, tint: .red) }
-                Spacer()
-                if model.selected == nil && !model.sessions.isEmpty {
-                    Text(Copy.officeControlsHint)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 4)
-                        .glass(in: Capsule())
-                        .frame(maxWidth: .infinity, alignment: .trailing)
-                }
-            }
-            if let session = model.selected {
-                OfficeChatPanel(session: session, chat: model.chat, error: model.chatError) { model.select(nil) }
-                    .frame(width: 380)
-                    .frame(maxHeight: .infinity)
-                    .transition(Motion.slide(from: .trailing, motion))
+        VStack(alignment: .leading, spacing: 8) {
+            summary
+            if let text = model.errorText { NoticeBox(text: text, tint: .red) }
+            Spacer()
+            if model.selected == nil && !model.sessions.isEmpty {
+                Text(Copy.officeControlsHint)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .glass(in: Capsule())
+                    .frame(maxWidth: .infinity, alignment: .trailing)
             }
         }
         .padding(16)
@@ -274,6 +291,14 @@ private struct ScrollControl: NSViewRepresentable {
                 guard let self, self.window != nil, event.window === self.window else { return event }
                 let point = self.convert(event.locationInWindow, from: nil)
                 guard self.bounds.contains(point) else { return event }
+                // A scroll view of its own under the pointer (the Chat Panel's conversation, a
+                // notice) keeps its scroll: only the page's own scroll view, which this catcher
+                // shares, hands the wheel to the camera.
+                if let hit = self.window?.contentView?.hitTest(event.locationInWindow),
+                    let scroller = hit.enclosingScrollView, scroller !== self.enclosingScrollView
+                {
+                    return event
+                }
                 self.onScroll?(
                     Float(event.scrollingDeltaX), Float(event.scrollingDeltaY), event.hasPreciseScrollingDeltas,
                     event.modifierFlags.contains(.command))
@@ -284,7 +309,7 @@ private struct ScrollControl: NSViewRepresentable {
 }
 
 /// The Chat Panel: one Session's title, project, status and last actions, and its conversation as
-/// chat bubbles. It only shows; the Office cannot write to an agent.
+/// chat bubbles in a trailing sidebar. It only shows; the Office cannot write to an agent.
 struct OfficeChatPanel: View {
     let session: OfficeSession
     let chat: OfficeChatDocument?
@@ -295,6 +320,8 @@ struct OfficeChatPanel: View {
 
     private var agent: OfficeAgent { OfficeAgent(kind: session.agent) }
 
+    private var agentColour: Color { Color(red: agent.colour.red, green: agent.colour.green, blue: agent.colour.blue) }
+
     private var path: String { (session.cwd as NSString).abbreviatingWithTildeInPath }
 
     var body: some View {
@@ -303,31 +330,30 @@ struct OfficeChatPanel: View {
             Divider()
             conversation
         }
-        .glass(in: RoundedRectangle(cornerRadius: 16))
         .accessibilityElement(children: .contain)
         .accessibilityLabel(session.heading)
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .top, spacing: 8) {
-                Circle().fill(Color(red: agent.colour.red, green: agent.colour.green, blue: agent.colour.blue))
-                    .frame(width: 12, height: 12)
-                    .padding(.top, 3)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(session.heading).font(.headline).lineLimit(2)
-                    Text("\(agent.name) · \(Copy.officeStatusName(session.status.rawValue))")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                if let app = session.hostApp, FileManager.default.fileExists(atPath: app) {
-                    Button(Copy.openAgent) {
-                        NSWorkspace.shared.openApplication(
-                            at: URL(fileURLWithPath: app), configuration: NSWorkspace.OpenConfiguration())
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 10) {
+                // The agent's initial on its colour, as Teams shows a person without a photo.
+                Text(String(agent.name.prefix(1)))
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                    .frame(width: 32, height: 32)
+                    .background(agentColour.gradient, in: Circle())
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(session.heading).font(.headline).lineLimit(3).textSelection(.enabled)
+                    HStack(spacing: 6) {
+                        Text(agent.name)
+                        StatusPill(status: session.status)
                     }
-                    .help((app as NSString).lastPathComponent)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 }
+                Spacer(minLength: 0)
                 Button(action: close) { Image(systemName: "xmark") }
                     .buttonStyle(.borderless)
                     .foregroundStyle(.secondary)
@@ -344,59 +370,84 @@ struct OfficeChatPanel: View {
                 }
             }
             .font(.callout)
-            DisclosureGroup(isExpanded: $actionsShown) {
-                if session.recentActions.isEmpty {
-                    Text(Copy.officeNoActions).font(.callout).foregroundStyle(.secondary)
-                } else {
-                    VStack(alignment: .leading, spacing: 2) {
-                        ForEach(Array(session.recentActions.reversed().enumerated()), id: \.offset) { _, action in
-                            HStack(spacing: 8) {
-                                Text(action.text).lineLimit(1)
-                                Spacer(minLength: 8)
-                                Text(Date(timeIntervalSince1970: Double(action.at) / 1000), style: .relative)
-                                    .foregroundStyle(.secondary)
+            HStack {
+                DisclosureGroup(isExpanded: $actionsShown) {
+                    if session.recentActions.isEmpty {
+                        Text(Copy.officeNoActions).font(.callout).foregroundStyle(.secondary)
+                    } else {
+                        VStack(alignment: .leading, spacing: 2) {
+                            ForEach(Array(session.recentActions.reversed().enumerated()), id: \.offset) { _, action in
+                                HStack(spacing: 8) {
+                                    Text(action.text).lineLimit(1)
+                                    Spacer(minLength: 8)
+                                    Text(Date(timeIntervalSince1970: Double(action.at) / 1000), style: .relative)
+                                        .foregroundStyle(.secondary)
+                                }
+                                .font(.callout)
                             }
-                            .font(.callout)
                         }
+                        .padding(.top, 4)
                     }
-                    .padding(.top, 4)
+                } label: {
+                    Text(Copy.officeLastActions).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                 }
-            } label: {
-                Text(Copy.officeLastActions).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                .motion(value: actionsShown)
+                if !actionsShown, let app = session.hostApp, FileManager.default.fileExists(atPath: app) {
+                    Spacer()
+                    Button(Copy.openAgent) {
+                        NSWorkspace.shared.openApplication(
+                            at: URL(fileURLWithPath: app), configuration: NSWorkspace.OpenConfiguration())
+                    }
+                    .controlSize(.small)
+                    .help((app as NSString).lastPathComponent)
+                }
             }
-            .motion(value: actionsShown)
         }
     }
 
-    /// The messages, newest at the bottom, scrolled there whenever one arrives.
+    /// The messages, newest at the bottom, where the view stays as more arrive.
     private var conversation: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 10) {
+                LazyVStack(alignment: .leading, spacing: 4) {
                     if let chat {
                         if chat.messages.isEmpty {
-                            Text(Copy.officeNoChat).font(.callout).foregroundStyle(.secondary)
+                            placeholder(Copy.officeNoChat, symbol: "bubble.left.and.bubble.right")
+                        } else {
+                            Text(Copy.officeMessageCount(chat.messages.count))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                                 .frame(maxWidth: .infinity, alignment: .center)
-                                .padding(.top, 20)
+                                .padding(.bottom, 8)
                         }
-                        ForEach(Array(chat.messages.enumerated()), id: \.offset) { _, message in
-                            ChatBubble(message: message, agent: agent)
+                        ForEach(Array(chat.messages.enumerated()), id: \.offset) { index, message in
+                            // A run of messages from one side sits tight; the last one of a run has the time.
+                            let next = index + 1 < chat.messages.count ? chat.messages[index + 1] : nil
+                            ChatBubble(message: message, agent: agent, endsRun: next?.role != message.role)
+                                .padding(.bottom, next?.role != message.role ? 10 : 0)
                         }
                     } else if error == nil {
-                        Text(Copy.officeChatLoading).font(.callout).foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .center)
-                            .padding(.top, 20)
+                        placeholder(Copy.officeChatLoading, symbol: "ellipsis.bubble")
                     }
                     if let error { NoticeBox(text: error, tint: .red) }
                     Color.clear.frame(height: 1).id("end")
                 }
                 .padding(14)
             }
-            .onAppear { proxy.scrollTo("end", anchor: .bottom) }
+            .defaultScrollAnchor(.bottom)
             .onChange(of: chat?.messages.count) { _, _ in
                 withMotion(.smooth(duration: 0.3), motion) { proxy.scrollTo("end", anchor: .bottom) }
             }
         }
+    }
+
+    private func placeholder(_ text: String, symbol: String) -> some View {
+        VStack(spacing: 6) {
+            Image(systemName: symbol).font(.title2).foregroundStyle(.tertiary)
+            Text(text).font(.callout).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .center)
+        .padding(.top, 30)
     }
 
     private func row(_ label: String, _ value: String) -> some View {
@@ -407,35 +458,78 @@ struct OfficeChatPanel: View {
     }
 }
 
-/// One turn: the Owner's on the right in the accent colour, the agent's on the left.
+/// A Session's status as a small tinted pill.
+private struct StatusPill: View {
+    let status: OfficeStatus
+
+    private var tint: Color {
+        switch status {
+        case .working: .green
+        case .waiting: .orange
+        case .idle, .exited: .secondary
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Circle().fill(tint).frame(width: 6, height: 6)
+            Text(Copy.officeStatusName(status.rawValue))
+        }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 2)
+        .background(tint.opacity(0.12), in: Capsule())
+        .foregroundStyle(status == .working || status == .waiting ? tint : Color.secondary)
+    }
+}
+
+/// One turn: the Owner's on the right in the accent colour, the agent's on the left as Markdown
+/// (code blocks, lists and links as the agent wrote them). The time shows under the last message
+/// of a run; every bubble can be copied.
 private struct ChatBubble: View {
     let message: OfficeChatMessage
     let agent: OfficeAgent
+    let endsRun: Bool
 
     private var mine: Bool { message.role == .user }
 
     var body: some View {
         VStack(alignment: mine ? .trailing : .leading, spacing: 3) {
-            Text(message.text)
-                .font(.callout)
-                .textSelection(.enabled)
-                .foregroundStyle(mine ? Color.white : Color.primary)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(
-                    mine ? Color.accentColor : Color.primary.opacity(0.09), in: RoundedRectangle(cornerRadius: 12))
-            HStack(spacing: 4) {
-                Text(mine ? Copy.officeYou : agent.name)
-                if message.at > 0 {
-                    Text("·")
-                    Text(Date(timeIntervalSince1970: Double(message.at) / 1000), style: .time)
+            Group {
+                if mine {
+                    Text(message.text).foregroundStyle(.white)
+                } else {
+                    MarkdownText(source: message.text)
                 }
             }
-            .font(.caption2)
-            .foregroundStyle(.secondary)
+            .font(.callout)
+            .textSelection(.enabled)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(
+                mine ? Color.accentColor : Color.primary.opacity(0.08),
+                in: UnevenRoundedRectangle(
+                    topLeadingRadius: 14, bottomLeadingRadius: mine || !endsRun ? 14 : 4,
+                    bottomTrailingRadius: mine && endsRun ? 4 : 14, topTrailingRadius: 14))
+            .contextMenu {
+                Button(Copy.copyMessage) {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(message.text, forType: .string)
+                }
+            }
+            if endsRun {
+                HStack(spacing: 4) {
+                    Text(mine ? Copy.officeYou : agent.name)
+                    if message.at > 0 {
+                        Text("·")
+                        Text(Date(timeIntervalSince1970: Double(message.at) / 1000), style: .time)
+                    }
+                }
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            }
         }
         .frame(maxWidth: .infinity, alignment: mine ? .trailing : .leading)
-        .padding(.leading, mine ? 40 : 0)
-        .padding(.trailing, mine ? 0 : 40)
+        .padding(.leading, mine ? 36 : 0)
+        .padding(.trailing, mine ? 0 : 36)
     }
 }
