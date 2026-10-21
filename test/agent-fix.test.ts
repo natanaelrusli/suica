@@ -84,7 +84,16 @@ function deps(
     store,
     log: quietLog,
     now: () => now,
-    config: { fix: { auto: true, effort: "medium", timeoutMinutes: 20, maxPerDay: 10, ...fix } },
+    config: {
+      fix: {
+        auto: true,
+        pipelines: true,
+        effort: "medium",
+        timeoutMinutes: 20,
+        maxPerDay: 10,
+        ...fix,
+      },
+    },
     fetched,
     detail: (key) => {
       fetched.push(key);
@@ -254,6 +263,24 @@ describe("queueAutomaticFixes", () => {
       detail: "The MR was approved.",
     });
     expect(store.fixes.get(ready)?.status).toBe("ready");
+  });
+
+  it("keeps a queued fix of a failed pipeline when the MR is approved", async () => {
+    const store = openStore(":memory:");
+    const queued =
+      store.fixes.queue("g/p!7", "auto", [], 1000, "MR 7", "", {
+        iid: "41",
+        url: "https://gitlab.example/g/p/-/pipelines/2921",
+        sha: null,
+        jobs: [],
+        summary: "",
+      }) ?? 0;
+    await queueAutomaticFixes(
+      deps(store, {}),
+      snapshot({ authored: [mine({ reviewers: [reviewer("bob", "APPROVED")] })] }),
+      new Set(),
+    );
+    expect(store.fixes.get(queued)?.status).toBe("queued");
   });
 
   it("reads an approved MR again once it is watched again, so threads written meanwhile are found", async () => {

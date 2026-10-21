@@ -11,7 +11,42 @@ afterEach(() => {
   for (const folder of folders.splice(0)) rmSync(folder, { recursive: true, force: true });
 });
 
+const PIPELINE = {
+  iid: "41",
+  url: "https://gitlab.example/g/p/-/pipelines/2921",
+  sha: null,
+  jobs: [],
+  summary: "",
+};
+
 describe("fix store", () => {
+  it("keeps a fix's pipeline, and a pipeline joins a queued fix of threads", () => {
+    const { fixes } = openStore(":memory:");
+    const id = fixes.queue("g/p!7", "auto", [thread("d1", "n1")], 1000) ?? 0;
+    expect(fixes.get(id)?.pipeline).toBeNull();
+    expect(fixes.queue("g/p!7", "manual", [], 2000, undefined, "", PIPELINE)).toBe(id);
+    expect(fixes.get(id)).toMatchObject({ pipeline: PIPELINE, trigger: "manual" });
+    expect(fixes.get(id)?.threads.map((each) => each.id)).toEqual(["d1"]);
+    // Threads joining later keep the pipeline.
+    fixes.queue("g/p!7", "auto", [thread("d2", "n2")], 3000);
+    expect(fixes.get(id)?.pipeline).toEqual(PIPELINE);
+    const summary = { ...PIPELINE, summary: "A test expects 3." };
+    fixes.transition(id, ["queued"], "running", { pipeline: summary }, 4000);
+    expect(fixes.get(id)?.pipeline).toEqual(summary);
+  });
+
+  it("replaces the pipeline marks each time, so closed MRs are forgotten", () => {
+    const { fixes } = openStore(":memory:");
+    fixes.savePipelineMarks(
+      new Map([
+        ["g/p!7", { iid: "1", status: "RUNNING" }],
+        ["g/p!8", { iid: "2", status: "FAILED" }],
+      ]),
+    );
+    fixes.savePipelineMarks(new Map([["g/p!7", { iid: "1", status: "FAILED" }]]));
+    expect(fixes.pipelineMarks()).toEqual(new Map([["g/p!7", { iid: "1", status: "FAILED" }]]));
+  });
+
   it("queues a fix and adds later threads to it while it is still queued", () => {
     const { fixes } = openStore(":memory:");
     const id = fixes.queue("g/p!7", "auto", [thread("d1", "n1")], 1000, "Add thing");

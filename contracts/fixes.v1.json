@@ -2,6 +2,38 @@
   "version": 1,
   "fixes": [
     {
+      "id": 3,
+      "mrKey": "g/p!9",
+      "mrTitle": "Bump deps",
+      "status": "skipped",
+      "threads": [],
+      "pipeline": {
+        "iid": "41",
+        "url": "https://gitlab.example/g/p/-/pipelines/2921",
+        "sha": "fedcba9876543210fedcba9876543210fedcba98",
+        "jobs": [
+          {
+            "name": "test:unit",
+            "stage": "test",
+            "url": "https://gitlab.example/g/p/-/jobs/25138"
+          }
+        ],
+        "summary": "A runner lost its network."
+      },
+      "note": "",
+      "baseSha": null,
+      "commitMessage": "",
+      "diff": null,
+      "pushedSha": null,
+      "cli": null,
+      "model": null,
+      "detail": "A runner lost its network.",
+      "activity": [],
+      "createdAt": 1792576799700,
+      "updatedAt": 1792576799800,
+      "startedAt": null
+    },
+    {
       "id": 2,
       "mrKey": "g/p!8",
       "mrTitle": null,
@@ -32,6 +64,7 @@
           "posted": false
         }
       ],
+      "pipeline": null,
       "note": "",
       "baseSha": null,
       "commitMessage": "",
@@ -124,6 +157,7 @@
           "posted": false
         }
       ],
+      "pipeline": null,
       "note": "",
       "baseSha": "0123456789abcdef0123456789abcdef01234567",
       "commitMessage": "Rename the total",

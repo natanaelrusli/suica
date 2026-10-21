@@ -67,6 +67,26 @@ function kindOf(fn: () => unknown): string {
   return "no-failure";
 }
 
+describe("the head pipeline", () => {
+  it("is fetched in the snapshot query and becomes a link on the MR's host, or null", () => {
+    expect(SNAPSHOT_QUERY).toContain("headPipeline { iid status path }");
+    const snapshot = parseSnapshot(
+      payload({
+        authored: [
+          node({ headPipeline: { iid: "41", status: "FAILED", path: "/g/p/-/pipelines/2921" } }),
+          node({ iid: "8", headPipeline: null }),
+          node({ iid: "9" }),
+        ],
+      }),
+    );
+    expect(snapshot.authored.map((each) => each.pipeline)).toEqual([
+      { iid: "41", status: "FAILED", url: "https://gitlab.example/g/p/-/pipelines/2921" },
+      null,
+      null,
+    ]);
+  });
+});
+
 describe("the head commit", () => {
   it("is fetched in the one snapshot query, for both lists", () => {
     const fragment = SNAPSHOT_QUERY.slice(SNAPSHOT_QUERY.indexOf("fragment MrFields"));

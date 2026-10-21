@@ -402,6 +402,14 @@
       "effective": true
     },
     {
+      "path": ["fix", "pipelines"],
+      "type": "bool",
+      "label": "Fix failed pipelines",
+      "help": "With Watch my MRs on, also start an Agent Fix when the head pipeline of one of your MRs fails. It reads the failed jobs' logs and waits for you like any fix",
+      "value": null,
+      "effective": true
+    },
+    {
       "path": ["fix", "model"],
       "type": "string",
       "label": "Fix model",

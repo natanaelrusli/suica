@@ -40,6 +40,32 @@ export interface FixThread {
   readonly posted: boolean;
 }
 
+/** One failed job of a Pipeline Fix's pipeline; its log is never kept. */
+export interface FixJob {
+  readonly name: string;
+  readonly stage: string;
+  readonly url: string;
+}
+
+/** The failed pipeline a Pipeline Fix works on. */
+export interface FixPipeline {
+  /** GitLab's per-project pipeline number, as text. */
+  readonly iid: string;
+  readonly url: string;
+  /** The commit it ran on; null until the run read the pipeline. */
+  readonly sha: string | null;
+  /** The failed jobs the run read; empty until then. */
+  readonly jobs: readonly FixJob[];
+  /** The model's sentence: why the jobs failed and what it changed. Empty until it answered. */
+  readonly summary: string;
+}
+
+/** The head pipeline an MR had at the last poll. */
+export interface PipelineMark {
+  readonly iid: string;
+  readonly status: string;
+}
+
 /** One Agent Fix of one MR, from queued to pushed or dropped. */
 export interface FixRow {
   readonly id: number;
@@ -48,6 +74,8 @@ export interface FixRow {
   readonly trigger: FixTrigger;
   readonly status: FixStatus;
   readonly threads: readonly FixThread[];
+  /** The failed pipeline it fixes; null for a fix of threads only. */
+  readonly pipeline: FixPipeline | null;
   /** The Owner's note for a retry; empty otherwise. */
   readonly note: string;
   /** The commit the fix was made on; null until the checkout. */
@@ -71,6 +99,7 @@ export type FixFields = Partial<
     FixRow,
     | "mrTitle"
     | "threads"
+    | "pipeline"
     | "baseSha"
     | "commitMessage"
     | "diff"
@@ -84,8 +113,9 @@ export type FixFields = Partial<
 
 export interface FixStore {
   /**
-   * Adds the threads to the MR's queued fix (a thread already there takes the newer note), or
-   * queues a new fix; undefined while the MR has a fix that is running, ready or confirming.
+   * Adds the threads (and the pipeline, which replaces one already there) to the MR's queued fix
+   * (a thread already there takes the newer note), or queues a new fix; undefined while the MR
+   * has a fix that is running, ready or confirming.
    */
   queue(
     mrKey: string,
@@ -94,6 +124,7 @@ export interface FixStore {
     now: number,
     mrTitle?: string,
     note?: string,
+    pipeline?: FixPipeline,
   ): number | undefined;
   get(id: number): FixRow | undefined;
   nextQueued(): FixRow | undefined;
@@ -124,6 +155,10 @@ export interface FixStore {
   markWatched(mrKey: string, at: number): void;
   /** Forgets that the MR was read, so the watcher reads it again. */
   unwatch(mrKey: string): void;
+  /** The head pipeline each of the Owner's MRs had at the last poll. */
+  pipelineMarks(): Map<string, PipelineMark>;
+  /** Records each MR's head pipeline and forgets the MRs left out. */
+  savePipelineMarks(marks: ReadonlyMap<string, PipelineMark>): void;
 }
 
 const OPEN: readonly FixStatus[] = ["queued", "running", "ready", "confirming"];
@@ -154,6 +189,24 @@ const threadsSchema = z.array(
   }),
 );
 
+const pipelineSchema = z.object({
+  iid: z.string(),
+  url: z.string(),
+  sha: z.string().nullable(),
+  jobs: z.array(z.object({ name: z.string(), stage: z.string(), url: z.string() })),
+  summary: z.string(),
+});
+
+function parsePipeline(value: unknown): FixPipeline | null {
+  if (typeof value !== "string") return null;
+  try {
+    const parsed = pipelineSchema.safeParse(JSON.parse(value));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
+
 function isFixStatus(value: string): value is FixStatus {
   return (FIX_STATUSES as readonly string[]).includes(value);
 }
@@ -181,6 +234,7 @@ function toFixRow(row: Row): FixRow {
     trigger,
     status,
     threads: parseThreads(row["threads"]),
+    pipeline: parsePipeline(row["pipeline"]),
     note: text(row, "note"),
     baseSha: nullableText(row, "base_sha"),
     commitMessage: text(row, "commit_message"),
@@ -197,6 +251,8 @@ function toFixRow(row: Row): FixRow {
 }
 
 const marks = (values: readonly unknown[]): string => values.map(() => "?").join(", ");
+const toJson = (value: FixPipeline | null): string | null =>
+  value === null ? null : JSON.stringify(value);
 
 /** Merges `added` into `threads` by id; an added thread replaces one with the same id. */
 function mergeThreads(threads: readonly FixThread[], added: readonly FixThread[]): FixThread[] {
@@ -223,7 +279,7 @@ export function createFixStore(db: DatabaseSync): FixStore {
     );
 
   return {
-    queue(mrKey, trigger, threads, now, mrTitle, note = "") {
+    queue(mrKey, trigger, threads, now, mrTitle, note = "", pipeline) {
       db.exec("BEGIN IMMEDIATE");
       try {
         const open = openFix(mrKey);
@@ -231,9 +287,10 @@ export function createFixStore(db: DatabaseSync): FixStore {
         if (open?.status === "queued") {
           // Your request joining an automatic fix makes it yours, with your note.
           db.prepare(
-            "UPDATE fix_run SET threads = ?, trigger = ?, note = ?, updated_at = ? WHERE id = ?",
+            "UPDATE fix_run SET threads = ?, pipeline = ?, trigger = ?, note = ?, updated_at = ? WHERE id = ?",
           ).run(
             JSON.stringify(mergeThreads(open.threads, threads)),
+            toJson(pipeline ?? open.pipeline),
             trigger === "manual" ? "manual" : open.trigger,
             note === "" ? open.note : note,
             now,
@@ -243,10 +300,19 @@ export function createFixStore(db: DatabaseSync): FixStore {
         } else if (open === undefined) {
           const result = db
             .prepare(
-              `INSERT INTO fix_run (mr_key, trigger, status, mr_title, threads, note, created_at, updated_at)
-               VALUES (?, ?, 'queued', ?, ?, ?, ?, ?)`,
+              `INSERT INTO fix_run (mr_key, trigger, status, mr_title, threads, pipeline, note, created_at, updated_at)
+               VALUES (?, ?, 'queued', ?, ?, ?, ?, ?, ?)`,
             )
-            .run(mrKey, trigger, mrTitle ?? null, JSON.stringify(threads), note, now, now);
+            .run(
+              mrKey,
+              trigger,
+              mrTitle ?? null,
+              JSON.stringify(threads),
+              toJson(pipeline ?? null),
+              note,
+              now,
+              now,
+            );
           id = Number(result.lastInsertRowid);
         }
         db.prepare(`DELETE FROM fix_run WHERE updated_at < ? AND status IN (${marks(DONE)})`).run(
@@ -294,7 +360,7 @@ export function createFixStore(db: DatabaseSync): FixStore {
       const result = db
         .prepare(
           `UPDATE fix_run SET status = ?, mr_title = COALESCE(?, mr_title), threads = COALESCE(?, threads),
-             base_sha = COALESCE(?, base_sha), commit_message = COALESCE(?, commit_message),
+             pipeline = COALESCE(?, pipeline), base_sha = COALESCE(?, base_sha), commit_message = COALESCE(?, commit_message),
              diff = COALESCE(?, diff), pushed_sha = COALESCE(?, pushed_sha), cli = COALESCE(?, cli),
              model = COALESCE(?, model), detail = COALESCE(?, detail),
              started_at = COALESCE(?, started_at), updated_at = ?
@@ -304,6 +370,7 @@ export function createFixStore(db: DatabaseSync): FixStore {
           to,
           fields.mrTitle ?? null,
           json,
+          toJson(fields.pipeline ?? null),
           fields.baseSha ?? null,
           fields.commitMessage ?? null,
           fields.diff ?? null,
@@ -388,6 +455,36 @@ export function createFixStore(db: DatabaseSync): FixStore {
 
     unwatch(mrKey) {
       db.prepare("DELETE FROM fix_watch WHERE mr_key = ?").run(mrKey);
+    },
+
+    pipelineMarks() {
+      return new Map(
+        db
+          .prepare("SELECT mr_key, pipeline_iid, status FROM pipeline_watch")
+          .all()
+          .map(
+            (row) =>
+              [
+                text(row, "mr_key"),
+                { iid: text(row, "pipeline_iid"), status: text(row, "status") },
+              ] as const,
+          ),
+      );
+    },
+
+    savePipelineMarks(marks) {
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        db.exec("DELETE FROM pipeline_watch");
+        const insert = db.prepare(
+          "INSERT INTO pipeline_watch (mr_key, pipeline_iid, status) VALUES (?, ?, ?)",
+        );
+        for (const [key, mark] of marks) insert.run(key, mark.iid, mark.status);
+        db.exec("COMMIT");
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
     },
   };
 }

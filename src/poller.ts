@@ -50,6 +50,8 @@ export interface PollDeps {
   readonly queueReviews?: (snapshot: Snapshot, newRequests: readonly string[]) => void;
   /** Queues Agent Fixes for the Owner's MRs after the commit; `previous` is from before the poll. May throw. */
   readonly queueFixes?: (snapshot: Snapshot, previous: PreviousState) => Promise<void>;
+  /** Tells the Owner about failed pipelines of their MRs and queues Pipeline Fixes. Never throws. */
+  readonly watchPipelines?: (snapshot: Snapshot) => Promise<void>;
   /**
    * Looks a username up in GitLab, so the statistics can show the names of people no open MR
    * shows any more; undefined when GitLab knows no such user. May throw.
@@ -287,6 +289,7 @@ async function runPoll(deps: PollDeps, start: number): Promise<PollOutcome> {
   }
   queueReviews(deps, snapshot, previous.baselineDone ? events : []);
   await queueFixes(deps, snapshot, previous);
+  await deps.watchPipelines?.(snapshot);
   await runTeams(deps, snapshot, previous);
   await lookUpNames(deps);
   log.debug("poll complete", {

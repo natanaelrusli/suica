@@ -59,7 +59,7 @@ describe("parseConfig", () => {
         timeoutMinutes: 20,
         concurrency: 2,
       },
-      fix: { auto: true, effort: "medium", timeoutMinutes: 20, maxPerDay: 10 },
+      fix: { auto: true, pipelines: true, effort: "medium", timeoutMinutes: 20, maxPerDay: 10 },
     });
   });
 

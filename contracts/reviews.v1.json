@@ -97,7 +97,23 @@
         "threads": 2,
         "changed": 1,
         "detail": ""
+      },
+      "pipeline": {
+        "iid": "41",
+        "status": "FAILED",
+        "url": "https://gitlab.example/g/p/-/pipelines/2921"
       }
+    },
+    {
+      "key": "g/p!10",
+      "title": "MR 10",
+      "url": "https://gitlab.example/g/p/-/merge_requests/10",
+      "draft": false,
+      "createdAt": null,
+      "reviewers": [],
+      "approvedByAll": false,
+      "fix": null,
+      "pipeline": null
     }
   ]
 }

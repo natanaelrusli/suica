@@ -112,6 +112,8 @@ public enum Copy {
         case "alert.fix-ready": "Agent Fix ready"
         case "alert.fix-failed": "Agent Fix failed"
         case "alert.fix-pushed": "Agent Fix pushed, replies missing"
+        case "alert.pipeline-failed": "Pipeline failed"
+        case "alert.pipeline-fix-ready": "Pipeline Fix ready"
         default: name
         }
     }
@@ -143,6 +145,9 @@ public enum Copy {
         case "alert.fix-ready": "To you, when an Agent Fix for your MR waits for you to confirm and push."
         case "alert.fix-failed": "To you, when an Agent Fix run failed."
         case "alert.fix-pushed": "To you, when an Agent Fix was pushed but some replies could not be posted."
+        case "alert.pipeline-failed": "To you, when the head pipeline of one of your MRs fails."
+        case "alert.pipeline-fix-ready":
+            "To you, when a fix of a failed pipeline (and no threads) waits for you to confirm and push."
         default: ""
         }
     }
@@ -436,8 +441,17 @@ public enum Copy {
     // Agent Fix, comments and merging (your own MRs)
     public static let fixTab = "Agent fix"
     public static let fixFindingsNow = "Fix findings now"
+    public static let fixPipelineNow = "Fix pipeline"
+    public static let pipelineFailed = "Pipeline failed"
+    public static let pipelineRunning = "Pipeline running"
+    public static let pipelinePassed = "Pipeline passed"
+    public static func fixPipelineHeading(_ iid: String) -> String { "Failed pipeline #\(iid)" }
+    public static let fixPipelineWaiting = "The failed jobs and their logs are read when the fix starts."
+    public static func fixPipelineJob(name: String, stage: String) -> String {
+        stage.isEmpty ? name : "\(name) · \(stage)"
+    }
     public static let fixNone =
-        "No Agent Fix yet. When a Reviewer opens a thread, Suica answers it here and waits for you before pushing anything."
+        "No Agent Fix yet. When a Reviewer opens a thread or the pipeline fails, Suica works on it here and waits for you before pushing anything."
     public static let fixQueued = "Waiting to start…"
     public static let fixConfirming = "Committing, pushing and replying…"
     public static let fixPushedNote = "Pushed. The Reviewers resolve their threads."
@@ -479,7 +493,9 @@ public enum Copy {
         }
     }
     public static func fixBadge(_ fix: FixSummary) -> String {
-        fix.status == "ready" ? "Fix ready: \(fix.threads) threads" : "Fix: \(fixStatus(fix.status).lowercased())"
+        fix.status != "ready"
+            ? "Fix: \(fixStatus(fix.status).lowercased())"
+            : fix.threads == 0 ? "Fix ready" : "Fix ready: \(fix.threads) threads"
     }
     public static func fixOutcome(_ code: String) -> String {
         switch code {
@@ -487,6 +503,8 @@ public enum Copy {
         case "added": "The threads joined the fix that is waiting to start."
         case "busy": "A fix of this MR is running or waits for you."
         case "nothing-to-fix": "Nothing to fix: no open thread waits for an answer."
+        case "no-failed-pipeline": "Nothing to fix: the MR's head pipeline has not failed."
+        case "not-yours": "Suica only fixes your own MRs."
         case "pushed": "Pushed, and the replies are posted."
         case "partial": "Pushed, but some replies were not posted. Post the missing ones from the Agent fix tab."
         case "branch-moved": "Nothing pushed: the branch moved since the fix was made. Retry to redo it on the new commits."

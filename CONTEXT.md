@@ -57,12 +57,16 @@ An unresolved, resolvable discussion on the Owner's own MR whose newest note was
 _Avoid_: comment, finding (alone)
 
 **Watched MR**:
-An open MR the Owner authored that is not yet approved (it has Reviewers and not all of them approved). Only Watched MRs get automatic Agent Fixes.
+An open MR the Owner authored that is not yet approved (it has Reviewers and not all of them approved). Only Watched MRs get automatic Agent Fixes of threads; a Pipeline Fix needs no Watched MR.
 _Avoid_: tracked MR
 
 **Agent Fix**:
-A change to the Owner's own MR that the agent writes with a language model to answer Finding Threads: it changes code, drafts replies, or both. It is committed, pushed (never with force) and replied as the Owner only once the Owner confirms it; the Reviewers resolve their threads.
+A change to the Owner's own MR that the agent writes with a language model to answer Finding Threads or fix a failed pipeline: it changes code, drafts replies, or both. It is committed, pushed (never with force) and replied as the Owner only once the Owner confirms it; the Reviewers resolve their threads.
 _Avoid_: auto fix, bot commit
+
+**Pipeline Fix**:
+An Agent Fix whose input is the failed head pipeline of the Owner's own MR: the agent reads the failed jobs' logs, the model changes the code, and it waits for the Owner like any Agent Fix. Queued by hand, or automatically when the pipeline watch sees the pipeline fail.
+_Avoid_: CI fix, auto fix
 
 **Pending Message**:
 A Reviewer Nudge, Re-review Nudge or Review Notice written by the agent but held until the Owner sends or skips it, when that flow is set to require approval.

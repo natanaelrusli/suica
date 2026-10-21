@@ -33,6 +33,7 @@ export function mr(
     author: person("author", "Author"),
     reviewers: [],
     notes: [],
+    pipeline: null,
     ...overrides,
   };
 }

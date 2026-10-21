@@ -334,6 +334,12 @@ export const CONFIG_FIELDS: readonly ConfigField[] = [
     help: "Answer new Reviewer threads on your own MRs with an Agent Fix until the MR is approved. A fix waits for you: nothing is committed, pushed or replied before you confirm",
   },
   {
+    path: ["fix", "pipelines"],
+    type: "bool",
+    label: "Fix failed pipelines",
+    help: "With Watch my MRs on, also start an Agent Fix when the head pipeline of one of your MRs fails. It reads the failed jobs' logs and waits for you like any fix",
+  },
+  {
     path: ["fix", "model"],
     type: "string",
     label: "Fix model",

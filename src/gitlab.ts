@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { z } from "zod";
 import type { Config } from "./config.ts";
 import { UNREVIEWED } from "./domain.ts";
-import type { MergeRequest, Person, Snapshot } from "./domain.ts";
+import type { MergeRequest, Person, Pipeline, Snapshot } from "./domain.ts";
 import { defaultExec, execFailure } from "./exec.ts";
 import type { Exec, ExecFailure } from "./exec.ts";
 
@@ -63,6 +63,7 @@ fragment MrFields on MergeRequest {
   project { fullPath }
   author { username name }
   reviewers { nodes { username name mergeRequestInteraction { reviewState } } }
+  headPipeline { iid status path }
 ${notes ? NOTES_FIELD : ""}}
 `;
 }
@@ -95,6 +96,10 @@ const mrSchema = z.object({
   author: personSchema.nullable(),
   reviewers: z.object({ nodes: z.array(reviewerSchema) }),
   notes: z.object({ nodes: z.array(noteSchema) }).optional(),
+  headPipeline: z
+    .object({ iid: z.string(), status: z.string(), path: z.string().nullable() })
+    .nullable()
+    .optional(),
 });
 const connectionSchema = z.object({
   pageInfo: z.object({ hasNextPage: z.boolean() }),
@@ -124,6 +129,20 @@ export function descriptionSha(description: string | null): string {
     .digest("hex");
 }
 
+/** GitLab gives the pipeline's path; the link is on the MR's own host. */
+function toPipeline(
+  webUrl: string,
+  pipeline: z.infer<typeof mrSchema>["headPipeline"],
+): Pipeline | null {
+  if (pipeline === null || pipeline === undefined) return null;
+  const origin = new URL(webUrl).origin;
+  return {
+    iid: pipeline.iid,
+    status: pipeline.status,
+    url: pipeline.path?.startsWith("/") === true ? `${origin}${pipeline.path}` : webUrl,
+  };
+}
+
 function toMergeRequest(node: z.infer<typeof mrSchema>): MergeRequest {
   return {
     key: `${node.project.fullPath}!${node.iid}`,
@@ -146,6 +165,7 @@ function toMergeRequest(node: z.infer<typeof mrSchema>): MergeRequest {
       system: note.system,
       author: note.author ?? GHOST,
     })),
+    pipeline: toPipeline(node.webUrl, node.headPipeline),
   };
 }
 
@@ -195,20 +215,20 @@ export function classifyFailure(failure: ExecFailure): GitlabFailureKind {
   return "gitlab-error";
 }
 
-/** Runs `glab api <endpoint>` with `fields` and parses its JSON output. */
-async function runGlab(
+/** Runs `glab api <endpoint>` with `fields` and returns its output as text. */
+async function runGlabText(
   config: Config["gitlab"],
   exec: Exec,
   endpoint: string,
   fields: readonly string[] = [],
-): Promise<unknown> {
-  let stdout: string;
+): Promise<string> {
   try {
-    ({ stdout } = await exec(
+    const { stdout } = await exec(
       config.glabPath,
       ["api", endpoint, "--hostname", config.hostname, ...fields],
       { timeoutMs: config.timeoutSeconds * 1000 },
-    ));
+    );
+    return stdout;
   } catch (error) {
     const failure = execFailure(error);
     throw new FetchFailure(
@@ -219,6 +239,16 @@ async function runGlab(
       httpStatusOf(failure),
     );
   }
+}
+
+/** Runs `glab api <endpoint>` with `fields` and parses its JSON output. */
+async function runGlab(
+  config: Config["gitlab"],
+  exec: Exec,
+  endpoint: string,
+  fields: readonly string[] = [],
+): Promise<unknown> {
+  const stdout = await runGlabText(config, exec, endpoint, fields);
   try {
     const output: unknown = JSON.parse(stdout);
     return output;
@@ -242,6 +272,13 @@ export type RestRunner = (path: string) => Promise<unknown>;
 
 export function glabRest(config: Config["gitlab"], exec: Exec = defaultExec): RestRunner {
   return (path) => runGlab(config, exec, path);
+}
+
+/** A REST GET of a plain-text resource, such as a job log; `path` must already be URL-encoded. */
+export type TextRunner = (path: string) => Promise<string>;
+
+export function glabText(config: Config["gitlab"], exec: Exec = defaultExec): TextRunner {
+  return (path) => runGlabText(config, exec, path);
 }
 
 /** A REST POST with string form fields, each sent as a literal `-f` value; returns the JSON reply. */

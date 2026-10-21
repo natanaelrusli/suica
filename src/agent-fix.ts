@@ -131,8 +131,10 @@ export async function queueAutomaticFixes(
     if (isApprovedByAll(mr)) {
       // Read again once it is watched again: threads written while approved are seen by then.
       store.fixes.unwatch(mr.key);
+      // A failed pipeline still needs fixing once approved: only a fix of threads alone is dropped.
       if (
         open?.status === "queued" &&
+        open.pipeline === null &&
         store.fixes.transition(
           open.id,
           ["queued"],

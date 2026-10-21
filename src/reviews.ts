@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { RereviewWaitingJson } from "./agent-rereview.ts";
 import { UNREVIEWED } from "./domain.ts";
-import type { MergeRequest, Person, Reviewer, Snapshot } from "./domain.ts";
+import type { MergeRequest, Person, Pipeline, Reviewer, Snapshot } from "./domain.ts";
 import { FetchFailure } from "./gitlab.ts";
 import type { GraphqlRunner, PostRunner, RestRunner } from "./gitlab.ts";
 import { approves } from "./approval-judge.ts";
@@ -154,6 +154,8 @@ export interface YourMrJson {
   readonly approvedByAll: boolean;
   /** Null when the agent never fixed anything on it. */
   readonly fix: FixSummaryJson | null;
+  /** The head pipeline; null when the MR has none. */
+  readonly pipeline: Pipeline | null;
 }
 
 function toAgentReviewJson(row: AgentReviewRow): AgentReviewJson {
@@ -243,6 +245,7 @@ export function buildReviewList(
                 changed: fix.threads.filter((each) => each.action === "changed").length,
                 detail: fix.detail,
               },
+        pipeline: mr.pipeline,
       };
     }),
     mergeRequests: snapshot.reviewRequested.map((mr) => {
