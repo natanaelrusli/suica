@@ -21,7 +21,7 @@ import type { Logger } from "./log.ts";
 import { loadAlerts } from "./alerts.ts";
 import { createNotifier } from "./notifier.ts";
 import { createFixWorker } from "./fix-runner.ts";
-import { fetchMrDetail } from "./reviews.ts";
+import { fetchFixDetail } from "./reviews.ts";
 import { pollOnce } from "./poller.ts";
 import type { PollDeps, PollStatus } from "./poller.ts";
 import { openStore } from "./store.ts";
@@ -138,7 +138,7 @@ export function createRuntime(configPath: string, signal?: AbortSignal): Runtime
           config,
           log,
           now: Date.now,
-          detail: (key) => fetchMrDetail(run, glabRest(config.gitlab), key),
+          detail: (key) => fetchFixDetail(run, glabRest(config.gitlab), key),
         },
         snapshot,
         previous.seenNotes,

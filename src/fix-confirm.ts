@@ -85,6 +85,18 @@ function removeCheckout(deps: Pick<ConfirmDeps, "statePath">, id: number): void 
 }
 
 /** Posts each reply still to post, one by one; returns the threads with `posted` set. */
+/**
+ * GitLab runs a line that starts with `/` in a note as a quick action (`/merge`, `/close`, …) as
+ * the poster; a backslash keeps it text, so a reply never acts as the Owner.
+ */
+export function escapeQuickActions(text: string): string {
+  return text.replace(/^(\s*)\//gm, "$1\\/");
+}
+
+/**
+ * Posts each reply still to post, one by one, and stores each as posted as soon as GitLab took
+ * it, so a confirm cut off halfway never posts that reply again. Returns the threads.
+ */
 async function postReplies(
   deps: ConfirmDeps,
   row: FixRow,
@@ -92,27 +104,32 @@ async function postReplies(
   sha: string | null,
 ): Promise<FixThread[]> {
   const parts = parseMrKey(row.mrKey);
-  const out: FixThread[] = [];
-  for (const thread of threads) {
+  const out = [...threads];
+  for (const [index, thread] of threads.entries()) {
     const discussion = DISCUSSION_ID.exec(thread.id)?.[1];
-    if (!thread.post || thread.posted || parts === undefined || discussion === undefined) {
-      out.push(thread);
-      continue;
-    }
-    const body = thread.reply.replaceAll("{{sha}}", sha === null ? "" : sha.slice(0, 8));
+    if (!thread.post || thread.posted || parts === undefined || discussion === undefined) continue;
+    const body = escapeQuickActions(
+      thread.reply.replaceAll("{{sha}}", sha === null ? "" : sha.slice(0, 8)),
+    );
     try {
       await deps.post(
         `projects/${encodeURIComponent(parts.projectPath)}/merge_requests/${parts.iid}/discussions/${discussion}/notes`,
         { body },
       );
-      out.push({ ...thread, posted: true });
+      out[index] = { ...thread, posted: true };
+      deps.store.fixes.transition(
+        row.id,
+        ["confirming"],
+        "confirming",
+        { threads: out },
+        deps.now(),
+      );
     } catch (error) {
       deps.log.warn("fix reply failed", {
         id: row.id,
         mr_key: row.mrKey,
         reason: error instanceof Error ? error.name : "unknown",
       });
-      out.push(thread);
     }
   }
   return out;
@@ -161,8 +178,11 @@ export async function confirmFix(
   ) {
     return "nothing";
   }
+  // A fix that could not be pushed keeps its threads quiet: Retry redoes it, no automatic fix
+  // runs beside it.
   const fail = (detail: string): void => {
     store.fixes.transition(id, ["confirming"], "push-failed", { detail }, deps.now());
+    store.fixes.markHandled(row.mrKey, row.threads);
     removeCheckout(deps, id);
   };
   try {
@@ -277,13 +297,20 @@ const cleared = (thread: FixThread): FixThread => ({
  * Drops a ready, failed or push-failed fix and queues a new one by hand for the same threads, with
  * the Owner's note; it checks out the branch afresh. Returns the new fix's id.
  */
+export type RetryOutcome = { status: "queued"; id: number } | { status: "busy" | "nothing" };
+
 export function retryFix(
   deps: Pick<ConfirmDeps, "store" | "statePath" | "now">,
   id: number,
   note: string,
-): number | undefined {
+): RetryOutcome {
   const row = deps.store.fixes.get(id);
-  if (row === undefined) return undefined;
+  if (row === undefined || !["ready", "failed", "push-failed"].includes(row.status)) {
+    return { status: "nothing" };
+  }
+  // Another fix of the MR is open: retrying now would drop this row and queue nothing.
+  const open = deps.store.fixes.open(row.mrKey);
+  if (open !== undefined && open.id !== id) return { status: "busy" };
   if (
     !deps.store.fixes.transition(
       id,
@@ -293,10 +320,10 @@ export function retryFix(
       deps.now(),
     )
   ) {
-    return undefined;
+    return { status: "nothing" };
   }
   removeCheckout(deps, id);
-  return deps.store.fixes.queue(
+  const next = deps.store.fixes.queue(
     row.mrKey,
     "manual",
     row.threads.map(cleared),
@@ -304,6 +331,7 @@ export function retryFix(
     row.mrTitle ?? undefined,
     note.trim(),
   );
+  return next === undefined ? { status: "busy" } : { status: "queued", id: next };
 }
 
 /** Drops a fix that waits for the Owner or could not be pushed; its threads stay quiet until someone writes. */
@@ -321,15 +349,21 @@ export function discardFix(
   return true;
 }
 
-/** Stops a queued or running fix; the background agent stops a running one within seconds. */
+/**
+ * Stops a queued or running fix; the background agent stops a running one within seconds. Its
+ * threads stay quiet until someone writes on them, so the next poll does not queue them again.
+ */
 export function cancelFix(store: Store, id: number, now: number): boolean {
-  return store.fixes.transition(
+  const row = store.fixes.get(id);
+  const done = store.fixes.transition(
     id,
     ["queued", "running"],
     "cancelled",
     { detail: "Cancelled by you." },
     now,
   );
+  if (done && row !== undefined) store.fixes.markHandled(row.mrKey, row.threads);
+  return done;
 }
 
 /** Ends confirms cut off by a crash: pushed when the push went out, else push-failed. */
@@ -338,7 +372,9 @@ export function recoverStaleConfirms(store: Store, now: number): number {
   for (const row of store.fixes.list(Number.MAX_SAFE_INTEGER)) {
     if (row.status !== "confirming" || row.updatedAt > now - CONFIRM_STALE_MS) continue;
     const done =
-      row.pushedSha === null
+      // A fix with code to push that never recorded the push did not push; a reply-only fix
+      // had nothing to push.
+      row.pushedSha === null && (row.diff ?? "") !== ""
         ? store.fixes.transition(
             row.id,
             ["confirming"],

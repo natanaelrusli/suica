@@ -229,8 +229,13 @@ export function createFixStore(db: DatabaseSync): FixStore {
         const open = openFix(mrKey);
         let id: number | undefined;
         if (open?.status === "queued") {
-          db.prepare("UPDATE fix_run SET threads = ?, updated_at = ? WHERE id = ?").run(
+          // Your request joining an automatic fix makes it yours, with your note.
+          db.prepare(
+            "UPDATE fix_run SET threads = ?, trigger = ?, note = ?, updated_at = ? WHERE id = ?",
+          ).run(
             JSON.stringify(mergeThreads(open.threads, threads)),
+            trigger === "manual" ? "manual" : open.trigger,
+            note === "" ? open.note : note,
             now,
             open.id,
           );

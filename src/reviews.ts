@@ -514,6 +514,111 @@ export function parseDiffs(raw: unknown): { files: DiffFileJson[]; truncated: bo
   return { files, truncated: parsed.data.length >= FILES_PAGE };
 }
 
+const discussionNodeSchema = z.object({
+  id: z.string(),
+  resolvable: z.boolean(),
+  resolved: z.boolean(),
+  notes: z.object({ nodes: z.array(noteSchema) }),
+});
+
+function toDiscussionJson(discussion: z.infer<typeof discussionNodeSchema>): DiscussionJson {
+  return {
+    id: discussion.id,
+    resolvable: discussion.resolvable,
+    resolved: discussion.resolved,
+    notes: discussion.notes.nodes.map((note) => ({
+      id: note.id,
+      body: note.body,
+      system: note.system,
+      createdAt: note.createdAt,
+      author: note.author ?? GHOST,
+      filePath: note.position?.filePath ?? null,
+      line: note.position?.newLine ?? note.position?.oldLine ?? null,
+    })),
+  };
+}
+
+const ALL_DISCUSSIONS_QUERY = `
+query SuicaAllDiscussions($path: ID!, $iid: String!, $after: String) {
+  project(fullPath: $path) {
+    mergeRequest(iid: $iid) {
+      discussions(first: ${DISCUSSIONS_PAGE}, after: $after) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id
+          resolvable
+          resolved
+          notes {
+            nodes {
+              id
+              body
+              system
+              createdAt
+              author { username name }
+              position { filePath newLine oldLine }
+            }
+          }
+        }
+      }
+    }
+  }
+}`;
+const discussionPageSchema = z.object({
+  data: z.object({
+    project: z.object({
+      mergeRequest: z.object({
+        discussions: z.object({
+          pageInfo: z.object({ hasNextPage: z.boolean(), endCursor: z.string().nullable() }),
+          nodes: z.array(discussionNodeSchema),
+        }),
+      }),
+    }),
+  }),
+});
+/** 2,000 discussions: far beyond any MR on this team, and a bound on the calls. */
+const MAX_DISCUSSION_PAGES = 20;
+
+/**
+ * Every discussion of the MR with its notes in full, a page at a time. The detail reads only the
+ * first 100, oldest first, so on a long MR the newest threads would be cut off.
+ */
+export async function fetchAllDiscussions(
+  graphql: GraphqlRunner,
+  key: string,
+): Promise<DiscussionJson[]> {
+  const parts = parseMrKey(key);
+  if (parts === undefined) throw new FetchFailure("gitlab-error", "malformed merge request key");
+  const all: DiscussionJson[] = [];
+  let after: string | null = null;
+  for (let page = 0; page < MAX_DISCUSSION_PAGES; page++) {
+    const variables: Record<string, string> = { path: parts.projectPath, iid: parts.iid };
+    if (after !== null) variables["after"] = after;
+    const parsed = discussionPageSchema.safeParse(await graphql(ALL_DISCUSSIONS_QUERY, variables));
+    if (!parsed.success)
+      throw new FetchFailure("gitlab-error", "unexpected GraphQL response shape");
+    const { pageInfo, nodes } = parsed.data.data.project.mergeRequest.discussions;
+    all.push(...nodes.map(toDiscussionJson));
+    if (!pageInfo.hasNextPage || pageInfo.endCursor === null) return all;
+    after = pageInfo.endCursor;
+  }
+  throw new FetchFailure("gitlab-error", "too many discussions");
+}
+
+/** The MR's detail with every discussion, for Agent Fix: it must see the newest threads. */
+export async function fetchFixDetail(
+  graphql: GraphqlRunner,
+  rest: RestRunner,
+  key: string,
+): Promise<MrDetailJson> {
+  const detail = await fetchMrDetail(graphql, rest, key);
+  if (!detail.discussionsTruncated) return detail;
+  return {
+    ...detail,
+    discussions: await fetchAllDiscussions(graphql, key),
+    discussionsTruncated: false,
+  };
+}
+
 export function parseMrDetail(
   key: string,
   raw: unknown,
@@ -559,20 +664,7 @@ export function parseMrDetail(
     defaultSquashCommitMessage: mr.defaultSquashCommitMessage ?? null,
     headSha: mr.diffHeadSha,
     canApprove: mr.userPermissions.canApprove,
-    discussions: mr.discussions.nodes.map((discussion) => ({
-      id: discussion.id,
-      resolvable: discussion.resolvable,
-      resolved: discussion.resolved,
-      notes: discussion.notes.nodes.map((note) => ({
-        id: note.id,
-        body: note.body,
-        system: note.system,
-        createdAt: note.createdAt,
-        author: note.author ?? GHOST,
-        filePath: note.position?.filePath ?? null,
-        line: note.position?.newLine ?? note.position?.oldLine ?? null,
-      })),
-    })),
+    discussions: mr.discussions.nodes.map(toDiscussionJson),
     discussionsTruncated: mr.discussions.pageInfo.hasNextPage,
     files: diffs.files,
     filesTruncated: diffs.truncated,

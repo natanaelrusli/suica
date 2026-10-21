@@ -22,6 +22,7 @@ import {
   approveMergeRequest,
   buildReviewActivity,
   buildReviewList,
+  fetchFixDetail,
   fetchMrDetail,
   parseMrKey,
   resolveOwnThreads,
@@ -341,7 +342,7 @@ async function fixCommand(argv: readonly string[]): Promise<number> {
     if (action === "queue") {
       if (target === undefined || parseMrKey(target) === undefined) return reply("bad-key", false);
       const outcome = await queueManualFix(
-        { store, log, now: Date.now, detail: (key) => fetchMrDetail(graphql, rest, key) },
+        { store, log, now: Date.now, detail: (key) => fetchFixDetail(graphql, rest, key) },
         target,
         await owner(),
       );
@@ -379,8 +380,8 @@ async function fixCommand(argv: readonly string[]): Promise<number> {
       }
       case "retry": {
         const note = (await readLimitedStdin(MAX_REQUEST_BYTES)) ?? "";
-        const next = retryFix(deps, id, note);
-        return next === undefined ? reply("nothing", false) : reply("queued", true);
+        const outcome = retryFix(deps, id, note);
+        return reply(outcome.status, outcome.status === "queued");
       }
       case "discard": {
         const done = discardFix(deps, id);

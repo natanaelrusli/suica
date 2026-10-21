@@ -129,6 +129,8 @@ export async function queueAutomaticFixes(
   for (const mr of snapshot.authored) {
     const open = store.fixes.open(mr.key);
     if (isApprovedByAll(mr)) {
+      // Read again once it is watched again: threads written while approved are seen by then.
+      store.fixes.unwatch(mr.key);
       if (
         open?.status === "queued" &&
         store.fixes.transition(

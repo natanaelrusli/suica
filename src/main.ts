@@ -52,6 +52,10 @@ async function main(): Promise<void> {
       // A queued review starts right after the poll too, and runs beside the loop.
       poll: async () => {
         const status = await runtime.poll();
+        // A confirm the app stopped (timeout, quit) is ended here, not only at the next start.
+        if (recoverStaleConfirms(runtime.store, Date.now()) > 0) {
+          runtime.log.warn("agent fix confirms interrupted");
+        }
         runtime.reviews.tick();
         runtime.fixes.tick();
         return status;

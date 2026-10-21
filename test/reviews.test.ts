@@ -8,6 +8,7 @@ import {
   buildReviewList,
   changedSinceReview,
   readyToApprove,
+  fetchAllDiscussions,
   fetchMrDetail,
   MR_DETAIL_QUERY,
   parseDiffs,
@@ -565,5 +566,59 @@ describe("buildReviewActivity", () => {
       running: null,
       runningReviews: [],
     });
+  });
+});
+
+describe("fetchAllDiscussions", () => {
+  const page = (ids: string[], next: string | null) => ({
+    data: {
+      project: {
+        mergeRequest: {
+          discussions: {
+            pageInfo: { hasNextPage: next !== null, endCursor: next },
+            nodes: ids.map((id) => ({
+              id,
+              resolvable: true,
+              resolved: false,
+              notes: {
+                nodes: [
+                  {
+                    id: `note-${id}`,
+                    body: "b",
+                    system: false,
+                    createdAt: "2026-10-21T09:00:00Z",
+                    author: { username: "bob", name: "Bob" },
+                    position: null,
+                  },
+                ],
+              },
+            })),
+          },
+        },
+      },
+    },
+  });
+
+  it("reads every page, with each note in full, so the newest threads of a long MR are not cut off", async () => {
+    const calls: unknown[] = [];
+    const pages = [page(["d1", "d2"], "c1"), page(["d3"], null)];
+    const all = await fetchAllDiscussions((_query, variables) => {
+      calls.push(variables);
+      return Promise.resolve(pages.shift());
+    }, "g/p!7");
+    expect(all.map((each) => each.id)).toEqual(["d1", "d2", "d3"]);
+    expect(all[2]?.notes[0]).toEqual({
+      id: "note-d3",
+      body: "b",
+      system: false,
+      createdAt: "2026-10-21T09:00:00Z",
+      author: { username: "bob", name: "Bob" },
+      filePath: null,
+      line: null,
+    });
+    expect(calls).toEqual([
+      { path: "g/p", iid: "7" },
+      { path: "g/p", iid: "7", after: "c1" },
+    ]);
   });
 });

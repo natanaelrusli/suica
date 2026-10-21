@@ -256,6 +256,25 @@ describe("queueAutomaticFixes", () => {
     expect(store.fixes.get(ready)?.status).toBe("ready");
   });
 
+  it("reads an approved MR again once it is watched again, so threads written meanwhile are found", async () => {
+    const store = openStore(":memory:");
+    const details: Record<string, MrDetailJson> = { "g/p!7": detail([]) };
+    await queueAutomaticFixes(deps(store, details), snapshot({ authored: [mine()] }), new Set());
+    // Bob approves "with nits" and opens a thread in the same poll interval.
+    details["g/p!7"] = detail([discussion("d1", [gitlabNote("n1")])]);
+    const approved = mine({ reviewers: [reviewer("bob", "APPROVED")], notes: [note("n1", bob)] });
+    await queueAutomaticFixes(deps(store, details), snapshot({ authored: [approved] }), new Set());
+    // A new Reviewer is added: the MR is watched again, and n1 is no longer new.
+    const again = deps(store, details);
+    const watched = mine({
+      reviewers: [reviewer("bob", "APPROVED"), reviewer("cy", "UNREVIEWED")],
+      notes: [note("n1", bob)],
+    });
+    await queueAutomaticFixes(again, snapshot({ authored: [watched] }), new Set(["n1"]));
+    expect(again.fetched).toEqual(["g/p!7"]);
+    expect(store.fixes.open("g/p!7")?.threads.map((each) => each.id)).toEqual(["d1"]);
+  });
+
   it("drops the fixes of an MR that is no longer open", async () => {
     const store = openStore(":memory:");
     const queued = store.fixes.queue("g/p!7", "auto", [thread("d1", "n1")], 1000) ?? 0;

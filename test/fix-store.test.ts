@@ -27,6 +27,15 @@ describe("fix store", () => {
     ]);
   });
 
+  it("keeps your note and makes the fix yours when your request joins a queued automatic one", () => {
+    const { fixes } = openStore(":memory:");
+    const id = fixes.queue("g/p!7", "auto", [thread("d1", "n1")], 1000) ?? 0;
+    expect(fixes.queue("g/p!7", "manual", [thread("d1", "n1")], 2000, undefined, "be brief")).toBe(
+      id,
+    );
+    expect(fixes.get(id)).toMatchObject({ trigger: "manual", note: "be brief" });
+  });
+
   it("refuses another fix while one is running, ready or confirming", () => {
     const { fixes } = openStore(":memory:");
     for (const status of ["running", "ready", "confirming"] as const) {

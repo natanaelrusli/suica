@@ -274,6 +274,50 @@ describe("confirmFix", () => {
   });
 });
 
+describe("confirm keeps a record of what reached GitLab", () => {
+  it("marks the threads handled when the push fails, so no automatic fix runs beside it", async () => {
+    const h = harness({ head: PUSHED });
+    const row = h.ready();
+    await confirmFix(h.deps, row.id, KEEP(row));
+    expect(h.db.fixes.handledNotes("g/p!7").size).toBe(3);
+  });
+
+  it("stores each reply as posted right after GitLab took it", async () => {
+    const h = harness();
+    const row = h.ready();
+    const seen: boolean[][] = [];
+    const deps = {
+      ...h.deps,
+      post: (path: string, fields: Readonly<Record<string, string>>) => {
+        seen.push(h.db.fixes.get(row.id)?.threads.map((each) => each.posted) ?? []);
+        return h.deps.post(path, fields);
+      },
+    };
+    await confirmFix(deps, row.id, KEEP(row));
+    expect(seen).toEqual([
+      [false, false, false],
+      [true, false, false],
+    ]);
+  });
+
+  it("escapes GitLab quick actions in replies, so a reply never runs a command as you", async () => {
+    const h = harness();
+    const row = h.ready();
+    const edits = KEEP(row);
+    edits.threads[1] = { id: D2, reply: "Done.\n/merge\n  /approve\nsee a/b path", post: true };
+    await confirmFix(h.deps, row.id, edits);
+    expect(h.posts[1]?.[1]).toEqual({ body: "Done.\n\\/merge\n  \\/approve\nsee a/b path" });
+  });
+
+  it("ends a stale reply-only confirm as pushed, not as a failed push", () => {
+    const h = harness({ diff: "" });
+    const row = h.ready();
+    h.db.fixes.transition(row.id, ["ready"], "confirming", {}, NOW - 20 * 60_000);
+    expect(recoverStaleConfirms(h.db, NOW)).toBe(1);
+    expect(h.db.fixes.get(row.id)?.status).toBe("pushed");
+  });
+});
+
 describe("confirmFix on someone else's MR", () => {
   it("refuses before any git command or reply", async () => {
     const h = harness({ owner: "somebody-else" });
@@ -302,7 +346,9 @@ describe("retry, discard, cancel and recovery", () => {
   it("retries a ready fix as a new manual fix with the note, its answers cleared", () => {
     const h = harness();
     const row = h.ready();
-    const id = retryFix(h.deps, row.id, "only rename, no reply");
+    const retried = retryFix(h.deps, row.id, "only rename, no reply");
+    expect(retried.status).toBe("queued");
+    const id = retried.status === "queued" ? retried.id : 0;
     expect(h.db.fixes.get(row.id)?.status).toBe("discarded");
     expect(existsSync(fixDir(h.statePath, row.id))).toBe(false);
     const next = h.db.fixes.get(id ?? 0);
@@ -317,7 +363,17 @@ describe("retry, discard, cancel and recovery", () => {
       [D2, null, "", false],
       [D3, null, "", false],
     ]);
-    expect(retryFix(h.deps, row.id, "again")).toBeUndefined();
+    expect(retryFix(h.deps, row.id, "again")).toEqual({ status: "nothing" });
+  });
+
+  it("says busy and keeps the row when another fix of the MR is open", () => {
+    const h = harness();
+    const row = h.ready();
+    h.db.fixes.transition(row.id, ["ready"], "push-failed", {}, NOW);
+    const other = h.db.fixes.queue("g/p!7", "auto", [thread(D1, "n9")], NOW) ?? 0;
+    expect(other).not.toBe(row.id);
+    expect(retryFix(h.deps, row.id, "note")).toEqual({ status: "busy" });
+    expect(h.db.fixes.get(row.id)?.status).toBe("push-failed");
   });
 
   it("discards a ready fix, marks its threads handled and deletes its checkout", () => {
@@ -339,6 +395,8 @@ describe("retry, discard, cancel and recovery", () => {
       detail: "Cancelled by you.",
     });
     expect(cancelFix(h.db, h.ready().id, NOW)).toBe(false);
+    // Your cancel sticks: the next poll does not queue the same threads again.
+    expect(h.db.fixes.handledNotes("g/p!9")).toEqual(new Map([[D1, "n1"]]));
   });
 
   it("ends a confirm cut off long ago: pushed when it had pushed, else push-failed", () => {
