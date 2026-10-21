@@ -32,6 +32,12 @@ struct OfficeView: View {
                 }
                 if let text = model.errorText { NoticeBox(text: text, tint: .red) }
                 Spacer()
+                if model.selected == nil && !model.sessions.isEmpty {
+                    Text(Copy.officeControlsHint)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                }
                 if let session = model.selected {
                     OfficeDetailCard(session: session) { model.select(nil) }
                         .frame(maxWidth: 420)
@@ -105,9 +111,14 @@ private struct OfficeSceneView: View {
             .simultaneousGesture(
                 DragGesture(minimumDistance: 4)
                     .onChanged { value in
-                        controller.orbit(
-                            deltaX: Float(value.translation.width - lastDrag.width),
-                            deltaY: Float(value.translation.height - lastDrag.height))
+                        let deltaX = Float(value.translation.width - lastDrag.width)
+                        let deltaY = Float(value.translation.height - lastDrag.height)
+                        // Option-drag slides the view; a plain drag turns it.
+                        if NSEvent.modifierFlags.contains(.option) {
+                            controller.pan(deltaX: deltaX, deltaY: deltaY)
+                        } else {
+                            controller.orbit(deltaX: deltaX, deltaY: deltaY)
+                        }
                         lastDrag = value.translation
                     }
                     .onEnded { _ in lastDrag = .zero }
@@ -120,7 +131,15 @@ private struct OfficeSceneView: View {
                     }
                     .onEnded { _ in lastMagnification = 1 }
             )
-            .background(ScrollZoom { controller.zoom(by: $0) })
+            .background(
+                ScrollControl { dx, dy, precise, command in
+                    if precise && !command {
+                        // Two fingers on a trackpad slide the view.
+                        controller.pan(deltaX: dx, deltaY: dy)
+                    } else {
+                        controller.zoom(by: 1 + dy * (precise ? 0.01 : 0.05))
+                    }
+                })
         }
     }
 }
@@ -158,20 +177,21 @@ private struct WindowVisibility: NSViewRepresentable {
     }
 }
 
-/// Mouse wheel and two-finger scroll over the scene zoom it.
-private struct ScrollZoom: NSViewRepresentable {
-    let onZoom: (Float) -> Void
+/// Scroll over the scene: two fingers slide it, the mouse wheel and ⌘-scroll zoom it.
+private struct ScrollControl: NSViewRepresentable {
+    /// Scroll deltas in points, whether the device is precise (a trackpad) and ⌘ is held.
+    let onScroll: (Float, Float, Bool, Bool) -> Void
 
     func makeNSView(context: Context) -> CatcherView {
         let view = CatcherView()
-        view.onZoom = onZoom
+        view.onScroll = onScroll
         return view
     }
 
-    func updateNSView(_ view: CatcherView, context: Context) { view.onZoom = onZoom }
+    func updateNSView(_ view: CatcherView, context: Context) { view.onScroll = onScroll }
 
     final class CatcherView: NSView {
-        var onZoom: ((Float) -> Void)?
+        var onScroll: ((Float, Float, Bool, Bool) -> Void)?
         private var monitor: Any?
 
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
@@ -184,8 +204,9 @@ private struct ScrollZoom: NSViewRepresentable {
                 guard let self, self.window != nil, event.window === self.window else { return event }
                 let point = self.convert(event.locationInWindow, from: nil)
                 guard self.bounds.contains(point) else { return event }
-                let delta = Float(event.scrollingDeltaY) * (event.hasPreciseScrollingDeltas ? 0.01 : 0.05)
-                self.onZoom?(1 + delta)
+                self.onScroll?(
+                    Float(event.scrollingDeltaX), Float(event.scrollingDeltaY), event.hasPreciseScrollingDeltas,
+                    event.modifierFlags.contains(.command))
                 return nil
             }
         }

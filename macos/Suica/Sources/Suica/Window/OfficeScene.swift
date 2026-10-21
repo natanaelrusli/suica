@@ -83,6 +83,8 @@ final class OfficeSceneController {
     private(set) var yaw = OfficeSceneController.defaultYaw
     private(set) var pitch = OfficeSceneController.defaultPitch
     private var zoom: Float = 1
+    /// The floor point the camera looks at.
+    private var focus = SIMD3<Float>.zero
     private var aspect: Float = 1.6
     /// The Owner moved the camera: stop refitting it when the office changes.
     private(set) var adjusted = false
@@ -129,7 +131,7 @@ final class OfficeSceneController {
         let height = sin(pitch) * distance
         let ground = cos(pitch) * distance
         let eye = SIMD3<Float>(sin(yaw) * ground, height, cos(yaw) * ground)
-        camera.look(at: .zero, from: eye, relativeTo: nil)
+        camera.look(at: focus, from: focus + eye, relativeTo: nil)
     }
 
     func setAspect(_ value: Float) {
@@ -145,6 +147,20 @@ final class OfficeSceneController {
         applyCamera()
     }
 
+    /// Slides the view over the floor, by screen points: the scene follows the pointer.
+    func pan(deltaX: Float, deltaY: Float) {
+        adjusted = true
+        let scale = max(3, fitDistance * zoom) * 0.0011
+        let right = SIMD3<Float>(cos(yaw), 0, -sin(yaw))
+        let away = SIMD3<Float>(-sin(yaw), 0, -cos(yaw))
+        focus -= right * deltaX * scale
+        focus += away * deltaY * scale
+        // Not further than the floor's edge, so the office cannot be lost off screen.
+        focus.x = min(layoutExtent.x / 2 + 2, max(-layoutExtent.x / 2 - 2, focus.x))
+        focus.z = min(layoutExtent.y / 2 + 2, max(-layoutExtent.y / 2 - 2, focus.z))
+        applyCamera()
+    }
+
     func zoom(by factor: Float) {
         adjusted = true
         zoom = min(2.2, max(0.25, zoom / factor))
@@ -156,6 +172,7 @@ final class OfficeSceneController {
         yaw = Self.defaultYaw
         pitch = Self.defaultPitch
         zoom = 1
+        focus = .zero
         applyCamera()
     }
 
@@ -360,7 +377,8 @@ final class OfficeSceneController {
             if session.status != .working { node.figure.position.y = 0 }
         }
         if force || node.bubbleText != text || node.status != session.status {
-            for child in node.bubble.children { child.removeFromParent() }
+            // A copy: removing while walking `children` skips every other one and the old text stays.
+            for child in Array(node.bubble.children) { child.removeFromParent() }
             let mesh = textMesh(text, size: 0.15)
             let bounds = mesh.bounds
             let width = max(0.7, bounds.extents.x + 0.3)
