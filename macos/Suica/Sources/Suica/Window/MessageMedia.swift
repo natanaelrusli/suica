@@ -275,9 +275,7 @@ struct NotificationBannerPreview: View {
         }
         .padding(12)
         .frame(width: 360, alignment: .leading)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
-        .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(.separator.opacity(0.5)))
-        .shadow(color: .black.opacity(0.12), radius: 8, y: 3)
+        .glass(in: RoundedRectangle(cornerRadius: 16))
         .accessibilityElement(children: .combine)
         .accessibilityLabel(Copy.alertPreviewHeading)
     }
