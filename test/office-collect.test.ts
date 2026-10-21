@@ -17,6 +17,7 @@ afterEach(() => {
 const raw = (over: Partial<RawSession>): RawSession => ({
   agent: "claude",
   sessionId: "s",
+  title: null,
   cwd: "/work/suica",
   status: "working",
   activity: "Thinking",
@@ -149,6 +150,7 @@ describe("collectOffice", () => {
     const adapter: Adapter = () => [
       raw({
         sessionId: "c1",
+        title: "Office chat window",
         cwd: "/work/suica/macos",
         pid: 4001,
         activity: "Editing OfficeView.swift",
@@ -168,6 +170,7 @@ describe("collectOffice", () => {
       }),
       raw({
         sessionId: "g1",
+        title: "Probe the CLI",
         agent: "gemini",
         cwd: "/work/cli-probe",
         status: "idle",

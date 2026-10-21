@@ -12,6 +12,8 @@ export interface RawSession {
   /** claude, codex, gemini, or the name of a generic adapter. */
   readonly agent: string;
   readonly sessionId: string;
+  /** What the Session is about: the agent's own name for it, else its first prompt; at most 60 characters. */
+  readonly title: string | null;
   readonly cwd: string;
   readonly status: OfficeStatus;
   /** One line naming the current action and its target, never conversation text. */

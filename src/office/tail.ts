@@ -54,3 +54,33 @@ export function readHead(path: string, bytes: number): string | undefined {
     closeSync(fd);
   }
 }
+
+/**
+ * The complete lines in the first `bytes` of a file, oldest first. A file longer than the window
+ * loses its last, partial line. A missing or unreadable file has no lines.
+ */
+export function readHeadLines(path: string, bytes: number): string[] {
+  let fd: number;
+  try {
+    fd = openSync(path, "r");
+  } catch {
+    return [];
+  }
+  try {
+    const size = fstatSync(fd).size;
+    const buffer = Buffer.alloc(Math.min(size, bytes));
+    let read = 0;
+    while (read < buffer.length) {
+      const n = readSync(fd, buffer, read, buffer.length - read, read);
+      if (n === 0) break;
+      read += n;
+    }
+    const lines = buffer.subarray(0, read).toString("utf8").split("\n");
+    if (size > bytes) lines.pop();
+    return lines.filter((line) => line !== "");
+  } catch {
+    return [];
+  } finally {
+    closeSync(fd);
+  }
+}

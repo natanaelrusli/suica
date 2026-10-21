@@ -5,6 +5,7 @@
     {
       "agent": "gemini",
       "sessionId": "g1",
+      "title": "Probe the CLI",
       "cwd": "/work/cli-probe",
       "status": "idle",
       "activity": "",
@@ -19,6 +20,7 @@
     {
       "agent": "codex",
       "sessionId": "x1",
+      "title": null,
       "cwd": "/work/kinsen",
       "status": "waiting",
       "activity": "Running rm -rf build",
@@ -33,6 +35,7 @@
     {
       "agent": "claude",
       "sessionId": "c1",
+      "title": "Office chat window",
       "cwd": "/work/suica/macos",
       "status": "working",
       "activity": "Editing OfficeView.swift",

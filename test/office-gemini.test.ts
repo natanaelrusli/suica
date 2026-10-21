@@ -51,7 +51,40 @@ describe("geminiAdapter", () => {
       status: "working",
       activity: "Editing a.py",
     });
-    expect(JSON.stringify(one)).not.toContain("private");
+    expect(JSON.stringify([one?.activity, one?.recentActions])).not.toContain("private");
+  });
+
+  it("titles a chat by its first prompt, skipping the session context", () => {
+    mapping({ "/work/cli-probe": "cli-probe" });
+    chat(
+      "cli-probe",
+      "t",
+      [
+        {
+          $set: {
+            messages: [
+              {
+                type: "user",
+                timestamp: iso(NOW - 40_000),
+                content: [{ text: "<session_context>\nThe Gemini CLI.\n</session_context>" }],
+              },
+              { type: "user", timestamp: iso(NOW - 30_000), content: "<other_tag>\nnot it" },
+            ],
+          },
+        },
+        { type: "info", timestamp: iso(NOW - 20_000), content: "Opening a browser" },
+        {
+          type: "user",
+          timestamp: iso(NOW - 9_000),
+          content: [{ text: "  Probe the CLI\nplease" }],
+        },
+        { type: "gemini", timestamp: iso(NOW - 2_000), content: "a" },
+      ],
+      NOW - 2_000,
+    );
+    expect(geminiAdapter(fakeProbe({ home }))[0]?.title).toBe("Probe the CLI");
+    chat("cli-probe", "u", [{ type: "gemini", timestamp: iso(NOW - 1_000), content: "a" }], NOW);
+    expect(geminiAdapter(fakeProbe({ home })).find((s) => s.sessionId === "u")?.title).toBeNull();
   });
 
   it("is idle once the model answered without a tool call", () => {

@@ -880,6 +880,16 @@ public enum Copy {
     public static let officeLastActions = "Last actions"
     public static let officeNoActions = "No actions seen yet."
     public static let closeDetails = "Close"
+    public static let officeStyleMenu = "Style"
+    public static let officeBuildingPicker = "Building"
+    public static let officeEnvironmentPicker = "Environment"
+    public static let officeHeading = "Office"
+    public static let officeStyleHint = "What the building is made of and what lies outside it. The Office page's Style menu has the same choices."
+    public static let officeConversation = "Conversation"
+    public static let officeNoChat = "No conversation to show."
+    public static let officeChatLoading = "Reading the conversation…"
+    public static let officeYou = "You"
+    public static let officeEntranceSign = "Office"
     public static func officeSummary(sessions: Int, rooms: Int) -> String {
         "\(sessions) \(sessions == 1 ? "agent" : "agents") in \(rooms) \(rooms == 1 ? "room" : "rooms")"
     }
@@ -1119,6 +1129,23 @@ public enum Copy {
     public static let previewHeading = "Preview"
     public static let previewSample = "A sample tile in the chosen colour"
     public static func openSection(_ title: String) -> String { "Open \(title)" }
+
+    public static func title(_ value: OfficeStyle) -> String {
+        switch value {
+        case .modern: "Modern"
+        case .brick: "Brick"
+        case .glass: "Glass"
+        case .timber: "Timber"
+        }
+    }
+
+    public static func title(_ value: OfficeEnvironment) -> String {
+        switch value {
+        case .city: "City"
+        case .park: "Park"
+        case .snow: "Snow"
+        }
+    }
 
     public static func title(_ value: MenuBarIcon) -> String {
         switch value {

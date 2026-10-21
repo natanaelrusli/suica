@@ -47,6 +47,20 @@ struct AppearanceView: View {
             }
 
             Section {
+                Picker(Copy.officeBuildingPicker, selection: $settings.officeStyle) {
+                    ForEach(OfficeStyle.allCases) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                Picker(Copy.officeEnvironmentPicker, selection: $settings.officeEnvironment) {
+                    ForEach(OfficeEnvironment.allCases) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                Text(Copy.officeStyleHint).font(.caption).foregroundStyle(.secondary)
+            } header: {
+                heading(Copy.officeHeading, "building.2")
+            }
+
+            Section {
                 Picker(Copy.motionHeading, selection: $settings.motion) {
                     ForEach(MotionLevel.allCases) { Text($0.title).tag($0) }
                 }

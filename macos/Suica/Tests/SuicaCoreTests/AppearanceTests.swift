@@ -26,6 +26,7 @@ private final class MemoryStore: PreferenceStore {
         #expect(settings.startPage == .overview)
         #expect(settings.menuBarIcon == .penguin && settings.menuBarEmoji == "🍉")
         #expect(settings.backdrop == .wash && settings.celebrations && settings.sound == .off)
+        #expect(settings.officeStyle == .modern && settings.officeEnvironment == .city)
         #expect(settings.isDefault)
     }
 }
@@ -40,6 +41,8 @@ private final class MemoryStore: PreferenceStore {
         first.menuBarBadge = .dot
         first.showsPopoverCounters = false
         first.startPage = .messages
+        first.officeStyle = .brick
+        first.officeEnvironment = .snow
 
         let second = AppearanceSettings(defaults: defaults)
         #expect(second.theme == .watermelon)
@@ -49,6 +52,7 @@ private final class MemoryStore: PreferenceStore {
         #expect(second.menuBarBadge == .dot)
         #expect(!second.showsPopoverCounters)
         #expect(second.startPage == .messages)
+        #expect(second.officeStyle == .brick && second.officeEnvironment == .snow)
         #expect(!second.isDefault)
     }
 }
@@ -57,9 +61,12 @@ private final class MemoryStore: PreferenceStore {
     withFreshStore { defaults in
         defaults.set("neon", forKey: "appearance.theme")
         defaults.set("sideways", forKey: "appearance.motion")
+        defaults.set("castle", forKey: "appearance.officeStyle")
+        defaults.set("moon", forKey: "appearance.officeEnvironment")
         let settings = AppearanceSettings(defaults: defaults)
         #expect(settings.theme == .glacier)
         #expect(settings.motion == .full)
+        #expect(settings.officeStyle == .modern && settings.officeEnvironment == .city)
     }
 }
 
@@ -69,9 +76,11 @@ private final class MemoryStore: PreferenceStore {
         settings.theme = .grape
         settings.showsPopoverCounters = false
         settings.startPage = .reviews
+        settings.officeEnvironment = .park
         settings.reset()
         #expect(settings.isDefault)
         #expect(defaults.string(forKey: "appearance.theme") == nil)
+        #expect(defaults.string(forKey: "appearance.officeEnvironment") == nil)
         #expect(defaults.object(forKey: "appearance.popoverCounters") == nil)
         #expect(AppearanceSettings(defaults: defaults).isDefault)
     }

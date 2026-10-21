@@ -50,6 +50,9 @@ extension UnconfiguredClient: FixesClient {
 
 extension UnconfiguredClient: OfficeClient {
     func office() async throws(AgentError) -> OfficeDocument { throw AgentError.launchFailed }
+    func chat(agent: String, sessionId: String) async throws(AgentError) -> OfficeChatDocument {
+        throw AgentError.launchFailed
+    }
 }
 
 extension UnconfiguredClient: TemplatesClient {

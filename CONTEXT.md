@@ -91,3 +91,11 @@ _Avoid_: Lobby, hallway
 **Desk**:
 One Session's place in its Room.
 _Avoid_: Seat, slot
+
+**Session Title**:
+The name of a Session as its Coding Agent knows it (Claude Code's session name) or, failing that, the first line of its first prompt.
+_Avoid_: Session name, label
+
+**Chat Panel**:
+The read-only view of a Session's conversation that opens when its figure is clicked in the Office.
+_Avoid_: Chat window, transcript view

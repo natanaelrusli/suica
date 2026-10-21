@@ -113,6 +113,7 @@ export function genericAdapter(agent: CustomAgent): Adapter {
       sessions.push({
         agent: agent.name,
         sessionId: file,
+        title: null,
         cwd,
         status,
         activity: activityFor(status, recentActions, probe.now),

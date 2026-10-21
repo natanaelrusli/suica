@@ -66,7 +66,7 @@ describe("claudeAdapter", () => {
       "Editing f5.ts",
       "Editing f6.ts",
     ]);
-    expect(JSON.stringify(one)).not.toContain("private prompt");
+    expect(JSON.stringify([one?.activity, one?.recentActions])).not.toContain("private prompt");
   });
 
   it("says Thinking when the last tool call is no longer fresh", () => {
@@ -165,6 +165,59 @@ describe("claudeAdapter", () => {
     });
     const [one] = claudeAdapter(probe);
     expect(one).toMatchObject({ sessionId: "lonely", status: "idle", pid: 60 });
+  });
+
+  it("titles a session by its name, else its last custom title, else its first prompt", () => {
+    put(join(home, ".claude", "sessions", "1.json"), session(1, { name: "  Named   session " }));
+    put(join(home, ".claude", "sessions", "2.json"), session(2));
+    put(join(home, ".claude", "sessions", "3.json"), session(3, { name: "" }));
+    put(join(home, ".claude", "sessions", "4.json"), session(4));
+    const prompt = (text: unknown, extra: Record<string, unknown> = {}) => ({
+      type: "user",
+      timestamp: new Date(NOW - 50_000).toISOString(),
+      message: { role: "user", content: text },
+      ...extra,
+    });
+    const renamed = (title: string) => ({ type: "custom-title", customTitle: title });
+    transcript("sid-1", lines(prompt("ignored"), renamed("Also ignored")));
+    transcript("sid-2", lines(prompt("ignored"), renamed("First name"), renamed("Final name")));
+    transcript(
+      "sid-3",
+      lines(
+        prompt([{ type: "tool_result", tool_use_id: "t", content: "ok" }]),
+        prompt("skipped", { isMeta: true }),
+        prompt("skipped too", { isSidechain: true }),
+        prompt([
+          { type: "tool_result", tool_use_id: "t", content: "ok" },
+          { type: "text", text: "  Fix the   flaky\ntest in the office page " },
+        ]),
+      ),
+    );
+    transcript("sid-4", lines(prompt(`${"a".repeat(70)}\nmore`)));
+    const found = claudeAdapter(fakeProbe({ home, alive: [1, 2, 3, 4] }));
+    expect(Object.fromEntries(found.map((s) => [s.pid, s.title]))).toEqual({
+      1: "Named session",
+      2: "Final name",
+      3: "Fix the flaky",
+      4: `${"a".repeat(59)}…`,
+    });
+    expect(found.find((s) => s.pid === 4)?.title).toHaveLength(60);
+  });
+
+  it("has a null title with no transcript, and reads the title of a process-found session", () => {
+    put(join(home, ".claude", "sessions", "5.json"), session(5));
+    expect(claudeAdapter(fakeProbe({ home, alive: [5] }))[0]?.title).toBeNull();
+    transcript(
+      "lonely",
+      lines({ type: "user", message: { role: "user", content: "Probe the CLI" } }),
+      NOW - 1_000,
+    );
+    const probe = fakeProbe({
+      home,
+      procs: [{ pid: 60, ppid: 1, command: "/Users/x/.local/bin/claude" }],
+      cwds: { 60: CWD },
+    });
+    expect(claudeAdapter(probe).find((s) => s.sessionId === "lonely")?.title).toBe("Probe the CLI");
   });
 
   it("has no sessions when there is no ~/.claude", () => {

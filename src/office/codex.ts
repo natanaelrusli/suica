@@ -4,6 +4,7 @@ import { describeCommand, describeTool } from "./describe.ts";
 import { processesRunning } from "./proc.ts";
 import { activityFor, classifyByActivity } from "./status.ts";
 import { readHead, readTail } from "./tail.ts";
+import { asRecord, codexTitle, parseLine as parse } from "./transcript.ts";
 import {
   LIVE_WINDOW_MS,
   type Adapter,
@@ -32,19 +33,6 @@ const STARTS_TURN = new Set([
   "mcp_tool_call_begin",
   "mcp_tool_call_end",
 ]);
-
-const asRecord = (value: unknown): Record<string, unknown> | undefined =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
-
-const parse = (line: string): Record<string, unknown> | undefined => {
-  try {
-    return asRecord(JSON.parse(line));
-  } catch {
-    return undefined;
-  }
-};
 
 /** `["bash", "-lc", "npm test"]` is the command `npm test`. */
 function commandText(command: unknown): string | undefined {
@@ -250,6 +238,7 @@ export const codexAdapter: Adapter = (probe) => {
     sessions.push({
       agent: "codex",
       sessionId: meta.id,
+      title: codexTitle(rollout.path),
       cwd: meta.cwd,
       status,
       activity: activityFor(status, reading.actions, probe.now),
