@@ -207,3 +207,12 @@ Bodies, replies and diffs are never logged.
 ## Left to the builder
 
 The prompt wording, the exact Copy strings, the layout of the Fix tab and Merge sheet, the store schema and migration, and how the fix worker shares the scheduler with the review worker.
+
+## Built differently from the above (decided while building)
+
+- The Reviews page had no list of the Owner's MRs, so it gained a **Your MRs** group; the Owner's MR page shows the **Agent fix** tab, **Merge…** and **Fix findings now** in place of the Agent review tab, Approve and Review with agent.
+- The menu bar panel and Overview show no ready fixes: they show no ready Agent Reviews either. The `alert.fix-ready` notification and the Reviews page carry it.
+- Squash comes from GitLab's `squashReadOnly` (locks the toggle) and `squashOnMerge` (its start), not a `squashOption` enum.
+- A `fix_watch` table remembers when each MR was last read, so an MR without threads is not read on every poll, and an MR blocked by the daily limit or a failed read is read again later.
+- `fix confirm` also answers `bad-request` when the edits name a thread the fix does not have. `pushedSha` is stored right after the push, so a confirm cut off for 15 minutes becomes `pushed` (replies missing) or `push-failed`.
+- The app shows a git diff per file without git's header lines (`splitGitDiff`).
