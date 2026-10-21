@@ -177,7 +177,7 @@ private func rooms(_ counts: [Int]) -> [OfficeRoom] {
 }
 
 @Test func aRoomGrowsWithItsDesks() {
-    let widths = [1, 3, 4, 7].map { OfficeLayout.make(rooms(Array(repeating: 0, count: 0) + [$0])).rooms[0] }
+    let widths = [1, 3, 4, 7].map { OfficeLayout.make(rooms([$0])).rooms[0] }
     #expect(widths[0].depth == widths[1].depth)
     #expect(widths[1].width > widths[0].width)
     #expect(widths[2].depth > widths[1].depth)
@@ -197,23 +197,52 @@ private func rooms(_ counts: [Int]) -> [OfficeRoom] {
     }
 }
 
-@Test func roomsDoNotOverlapAndTheOfficeIsCentred() {
+@Test func roomsDoNotOverlapAndTheBuildingIsCentred() {
     let layout = OfficeLayout.make(rooms([3, 1, 6, 2, 2]))
-    let placed = layout.rooms
+    let placed = layout.all
     for (index, one) in placed.enumerated() {
         for other in placed[(index + 1)...] {
-            let apartX = abs(one.center.x - other.center.x) >= (one.width + other.width) / 2
-            let apartZ = abs(one.center.z - other.center.z) >= (one.depth + other.depth) / 2
+            let apartX = abs(one.center.x - other.center.x) >= (one.width + other.width) / 2 - 0.001
+            let apartZ = abs(one.center.z - other.center.z) >= (one.depth + other.depth) / 2 - 0.001
             #expect(apartX || apartZ)
         }
     }
     let minX = placed.map { $0.center.x - $0.width / 2 }.min() ?? 0
     let maxX = placed.map { $0.center.x + $0.width / 2 }.max() ?? 0
-    #expect(abs(minX + maxX) < 0.001)
-    #expect(layout.width >= maxX - minX - 0.001)
+    let minZ = placed.map { $0.center.z - $0.depth / 2 }.min() ?? 0
+    let maxZ = placed.map { $0.center.z + $0.depth / 2 }.max() ?? 0
+    #expect(abs(minX + maxX) < 0.001 && abs(minZ + maxZ) < 0.001)
+    #expect(abs(layout.width - (maxX - minX)) < 0.001 && abs(layout.depth - (maxZ - minZ)) < 0.001)
 }
 
-@Test func anEmptyOfficeHasNoRooms() {
+@Test func theCenterRoomRunsBetweenTwoRowsOfRoomsThatOpenOntoIt() {
+    let layout = OfficeLayout.make(rooms([2, 5, 1, 3]))
+    let center = layout.center
+    #expect(center.isCenter && center.name == Copy.officeCenterRoom && center.desks.isEmpty)
+    #expect(abs(center.width - layout.width) < 0.001)
+    let far = layout.rooms.filter { $0.center.z < center.center.z }
+    let near = layout.rooms.filter { $0.center.z > center.center.z }
+    #expect(far.map(\.name) == ["room0", "room2"] && near.map(\.name) == ["room1", "room3"])
+    // Each row fills the building's width and touches the Center Room, so it is connected.
+    for (row, side) in [(far, OfficeSide.south), (near, OfficeSide.north)] {
+        #expect(abs(row.map(\.width).reduce(0, +) - layout.width) < 0.001)
+        for room in row {
+            #expect(room.door == side && !room.isCenter)
+            let gap = abs(room.center.z - center.center.z) - (room.depth + center.depth) / 2
+            #expect(abs(gap) < 0.001)
+        }
+    }
+}
+
+@Test func aSingleRoomLeavesTheNearSideOfTheCenterRoomOpen() {
+    let layout = OfficeLayout.make(rooms([2]))
+    #expect(layout.rooms.count == 1 && layout.rooms[0].center.z < layout.center.center.z)
+    #expect(layout.center.walls == [.west, .east])
+    #expect(abs(layout.depth - (layout.rooms[0].depth + layout.center.depth)) < 0.001)
+}
+
+@Test func anEmptyOfficeIsJustTheCenterRoom() {
     let layout = OfficeLayout.make([])
     #expect(layout.rooms.isEmpty && layout.width > 0 && layout.depth > 0)
+    #expect(layout.center.isCenter && layout.center.width == layout.width && layout.center.depth == layout.depth)
 }

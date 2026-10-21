@@ -151,6 +151,11 @@ public struct OfficePoint: Equatable, Sendable {
     public let z: Double
 }
 
+/// A side of a room: north is the far side of the scene, south the near side.
+public enum OfficeSide: String, Equatable, Sendable {
+    case north, south, west, east
+}
+
 public struct PlacedDesk: Equatable, Sendable, Identifiable {
     public let sessionId: String
     public let position: OfficePoint
@@ -158,6 +163,7 @@ public struct PlacedDesk: Equatable, Sendable, Identifiable {
     public var id: String { sessionId }
 }
 
+/// A room of the building: a project Room, or the Center Room they all open onto.
 public struct PlacedRoom: Equatable, Sendable, Identifiable {
     public let path: String
     public let name: String
@@ -165,32 +171,44 @@ public struct PlacedRoom: Equatable, Sendable, Identifiable {
     public let width: Double
     public let depth: Double
     public let desks: [PlacedDesk]
+    /// The sides that have a wall.
+    public let walls: Set<OfficeSide>
+    /// The side with a doorway; the one facing the Center Room.
+    public let door: OfficeSide?
+    public let isCenter: Bool
 
     public var id: String { path }
-
-    /// The floor of an office with nobody in it.
-    public static func bare(width: Double, depth: Double) -> PlacedRoom {
-        PlacedRoom(path: "", name: "", center: OfficePoint(x: 0, z: 0), width: width, depth: depth, desks: [])
-    }
 }
 
-/// Where each Room and Desk stands: Rooms in a grid, three to a row, each sized by its Desks.
+/// Where each room and Desk stands. The building is one rectangle: the Center Room runs across its
+/// middle, with a row of project Rooms on its far side and one on its near side, each opening onto
+/// it through a doorway. Each Room is sized by its Desks and stretched so a row fills the width.
 public struct OfficeLayout: Equatable, Sendable {
+    /// The project Rooms.
     public let rooms: [PlacedRoom]
-    /// The floor's extent, for fitting the camera.
+    public let center: PlacedRoom
+    /// The building's extent, for fitting the camera.
     public let width: Double
     public let depth: Double
 
     static let deskSpacingX = 1.8
     static let deskSpacingZ = 2.0
     static let desksPerRow = 3
-    static let roomsPerRow = 3
-    static let roomGap = 1.4
+    static let hallDepth = 2.6
     static let emptyWidth = 5.4
     static let emptyDepth = 3.6
 
+    /// Every room, the Center Room last.
+    public var all: [PlacedRoom] { rooms + [center] }
+
     public static func make(_ rooms: [OfficeRoom]) -> OfficeLayout {
-        guard !rooms.isEmpty else { return OfficeLayout(rooms: [], width: emptyWidth, depth: emptyDepth) }
+        let centerName = Copy.officeCenterRoom
+        guard !rooms.isEmpty else {
+            let center = PlacedRoom(
+                path: "", name: centerName, center: OfficePoint(x: 0, z: 0), width: emptyWidth, depth: emptyDepth,
+                desks: [], walls: [.north, .west, .east], door: nil, isCenter: true)
+            return OfficeLayout(rooms: [], center: center, width: emptyWidth, depth: emptyDepth)
+        }
         struct Size {
             let room: OfficeRoom
             let columns: Int
@@ -202,38 +220,46 @@ public struct OfficeLayout: Equatable, Sendable {
             let columns = max(1, min(room.sessions.count, desksPerRow))
             return Size(room: room, columns: columns, rows: max(1, (room.sessions.count + columns - 1) / columns))
         }
-        let lines = stride(from: 0, to: sizes.count, by: roomsPerRow).map {
-            Array(sizes[$0..<min($0 + roomsPerRow, sizes.count)])
-        }
-        let lineDepths = lines.map { $0.map(\.depth).max() ?? 0 }
-        let lineWidths = lines.map { line in line.map(\.width).reduce(0, +) + roomGap * Double(line.count - 1) }
-        let totalDepth = lineDepths.reduce(0, +) + roomGap * Double(lines.count - 1)
+        // Alternate sides, so a new Room never leaves one side empty while the other grows.
+        let far = sizes.enumerated().filter { $0.offset % 2 == 0 }.map(\.element)
+        let near = sizes.enumerated().filter { $0.offset % 2 == 1 }.map(\.element)
+        func natural(_ row: [Size]) -> Double { row.map(\.width).reduce(0, +) }
+        func rowDepth(_ row: [Size]) -> Double { row.map(\.depth).max() ?? 0 }
+        let width = max(emptyWidth, natural(far), natural(near))
+        let farDepth = rowDepth(far)
+        let nearDepth = rowDepth(near)
+        let depth = farDepth + hallDepth + nearDepth
+        let top = -depth / 2
 
-        var placed: [PlacedRoom] = []
-        var z = -totalDepth / 2
-        for (index, line) in lines.enumerated() {
-            let centreZ = z + lineDepths[index] / 2
-            var x = -lineWidths[index] / 2
-            for size in line {
-                let centre = OfficePoint(x: x + size.width / 2, z: centreZ)
+        func place(_ row: [Size], centreZ: Double, rowDepth: Double, door: OfficeSide) -> [PlacedRoom] {
+            let extra = (width - natural(row)) / Double(max(row.count, 1))
+            var x = -width / 2
+            return row.map { size in
+                let roomWidth = size.width + extra
+                let centre = OfficePoint(x: x + roomWidth / 2, z: centreZ)
+                x += roomWidth
                 let desks = size.room.sessions.enumerated().map { offset, session in
                     let column = offset % size.columns
-                    let row = offset / size.columns
+                    let line = offset / size.columns
                     return PlacedDesk(
                         sessionId: session.id,
                         position: OfficePoint(
                             x: centre.x + (Double(column) - Double(size.columns - 1) / 2) * deskSpacingX,
-                            z: centre.z + (Double(row) - Double(size.rows - 1) / 2) * deskSpacingZ))
+                            z: centre.z + (Double(line) - Double(size.rows - 1) / 2) * deskSpacingZ))
                 }
-                placed.append(
-                    PlacedRoom(
-                        path: size.room.path, name: size.room.name, center: centre, width: size.width,
-                        depth: size.depth, desks: desks))
-                x += size.width + roomGap
+                return PlacedRoom(
+                    path: size.room.path, name: size.room.name, center: centre, width: roomWidth, depth: rowDepth,
+                    desks: desks, walls: [.north, .south, .west, .east], door: door, isCenter: false)
             }
-            z += lineDepths[index] + roomGap
         }
-        return OfficeLayout(rooms: placed, width: lineWidths.max() ?? emptyWidth, depth: totalDepth)
+        let placed =
+            place(far, centreZ: top + farDepth / 2, rowDepth: farDepth, door: .south)
+            + place(near, centreZ: top + farDepth + hallDepth + nearDepth / 2, rowDepth: nearDepth, door: .north)
+        // The near side of the Center Room is open when no Room stands there.
+        let center = PlacedRoom(
+            path: "", name: centerName, center: OfficePoint(x: 0, z: top + farDepth + hallDepth / 2), width: width,
+            depth: hallDepth, desks: [], walls: [.west, .east], door: nil, isCenter: true)
+        return OfficeLayout(rooms: placed, center: center, width: width, depth: depth)
     }
 }
 
