@@ -15,7 +15,8 @@ struct OfficeView: View {
 
     var body: some View {
         ZStack {
-            (scheme == .dark ? Color(white: 0.11) : Color(white: 0.96))
+            // The sky above the street.
+            (scheme == .dark ? Color(red: 0.06, green: 0.08, blue: 0.14) : Color(red: 0.8, green: 0.9, blue: 0.98))
             OfficeSceneView(model: model, controller: controller)
             if model.loaded && model.sessions.isEmpty { emptyState }
             VStack(alignment: .leading, spacing: 8) {

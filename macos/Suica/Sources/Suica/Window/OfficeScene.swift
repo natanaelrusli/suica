@@ -18,19 +18,31 @@ private struct Palette {
     let bubble: NSColor
     let bubbleText: NSColor
     let background: NSColor
+    let grass: NSColor
+    let pavement: NSColor
+    let road: NSColor
+    /// The sun by day, the moon by night.
+    let sun: NSColor
+    let lampGlow: NSColor
 
     static let light = Palette(
         floor: NSColor(white: 0.88, alpha: 1), hallFloor: NSColor(red: 0.8, green: 0.84, blue: 0.9, alpha: 1),
         wall: NSColor(white: 0.78, alpha: 1),
         desk: NSColor(red: 0.78, green: 0.66, blue: 0.5, alpha: 1), label: NSColor(white: 0.25, alpha: 1),
         bubble: .white, bubbleText: NSColor(white: 0.12, alpha: 1),
-        background: NSColor(white: 0.96, alpha: 1))
+        background: NSColor(white: 0.96, alpha: 1),
+        grass: NSColor(red: 0.55, green: 0.75, blue: 0.42, alpha: 1), pavement: NSColor(white: 0.8, alpha: 1),
+        road: NSColor(white: 0.36, alpha: 1), sun: NSColor(red: 1, green: 0.9, blue: 0.45, alpha: 1),
+        lampGlow: NSColor(white: 0.92, alpha: 1))
     static let dark = Palette(
         floor: NSColor(white: 0.2, alpha: 1), hallFloor: NSColor(red: 0.16, green: 0.19, blue: 0.25, alpha: 1),
         wall: NSColor(white: 0.3, alpha: 1),
         desk: NSColor(red: 0.45, green: 0.37, blue: 0.28, alpha: 1), label: NSColor(white: 0.85, alpha: 1),
         bubble: NSColor(white: 0.32, alpha: 1), bubbleText: .white,
-        background: NSColor(white: 0.11, alpha: 1))
+        background: NSColor(white: 0.11, alpha: 1),
+        grass: NSColor(red: 0.17, green: 0.27, blue: 0.17, alpha: 1), pavement: NSColor(white: 0.32, alpha: 1),
+        road: NSColor(white: 0.15, alpha: 1), sun: NSColor(red: 0.9, green: 0.92, blue: 0.98, alpha: 1),
+        lampGlow: NSColor(red: 1, green: 0.85, blue: 0.5, alpha: 1))
 }
 
 private func material(_ colour: NSColor, roughness: Float = 0.7) -> SimpleMaterial {
@@ -70,14 +82,29 @@ private struct DeskNode {
     var target: SIMD3<Float>
 }
 
+/// One traveller on the street, with the limbs that swing and the wheels that turn as it goes.
+private struct TravellerNode {
+    let entity: Entity
+    let traveller: OfficeTraveller
+    let limbs: [Entity]
+    let wheels: [Entity]
+}
+
 /// Builds and updates the RealityKit scene from the model: a Room per project, a Desk per
 /// Session. It owns the camera, so the page can orbit, zoom and reset it.
 @MainActor
 final class OfficeSceneController {
     let root = Entity()
     let camera = PerspectiveCamera()
+    /// The sun by day, the moon by night: carried by the camera, so it stays at the top of the view
+    /// however the view is turned.
+    private let sun = ModelEntity(mesh: .generateSphere(radius: 1.65), materials: [])
     private var rooms: [String: RoomNode] = [:]
     private var desks: [String: DeskNode] = [:]
+    private var street: OfficeStreet?
+    private var streetEntity: Entity?
+    private var streetSignature = ""
+    private var travellers: [TravellerNode] = []
     private var clock: Float = 0
     private var updates: EventSubscription?
     private var animate = true
@@ -102,6 +129,8 @@ final class OfficeSceneController {
         camera.camera.near = 0.1
         camera.camera.far = 200
         root.addChild(camera)
+        camera.addChild(sun)
+        sun.addChild(ModelEntity(mesh: .generateSphere(radius: 2.55), materials: []))
         let key = DirectionalLight()
         key.light.intensity = 3_500
         key.look(at: .zero, from: [-4, 8, 6], relativeTo: nil)
@@ -140,6 +169,11 @@ final class OfficeSceneController {
         let ground = cos(pitch) * distance
         let eye = SIMD3<Float>(sin(yaw) * ground, height, cos(yaw) * ground)
         camera.look(at: focus, from: focus + eye, relativeTo: nil)
+        // In the strip of sky along the top of the view, behind the whole scene: when the view is
+        // turned so ground fills the top, the ground hides it.
+        let depth: Float = 60
+        let up = depth * tan(camera.camera.fieldOfViewInDegrees * .pi / 360)
+        sun.position = [0.3 * up * aspect, 0.84 * up, -depth]
     }
 
     func setAspect(_ value: Float) {
@@ -165,7 +199,8 @@ final class OfficeSceneController {
         focus += away * deltaY * scale
         // Not further than the floor's edge, so the office cannot be lost off screen.
         focus.x = min(layoutExtent.x / 2 + 2, max(-layoutExtent.x / 2 - 2, focus.x))
-        focus.z = min(layoutExtent.y / 2 + 2, max(-layoutExtent.y / 2 - 2, focus.z))
+        let front = street.map { Float($0.pavements[1]) } ?? layoutExtent.y / 2
+        focus.z = min(front + 1, max(-layoutExtent.y / 2 - 2, focus.z))
         applyCamera()
     }
 
@@ -211,6 +246,19 @@ final class OfficeSceneController {
         for (path, node) in rooms where !liveRooms.contains(path) {
             node.entity.removeFromParent()
             rooms[path] = nil
+        }
+
+        // The street outside, laid out again only when the building's size or the appearance changes.
+        let streetSignature = "\(layout.width)|\(layout.depth)|\(dark)"
+        if streetSignature != self.streetSignature {
+            self.streetSignature = streetSignature
+            streetEntity?.removeFromParent()
+            let street = OfficeStreet(layout: layout)
+            let entity = makeStreet(street, layout: layout, palette)
+            root.addChild(entity)
+            self.street = street
+            streetEntity = entity
+            moveTravellers()
         }
 
         // Desks
@@ -276,6 +324,7 @@ final class OfficeSceneController {
     private func tick(_ delta: Float) {
         clock += delta
         guard animate else { return }
+        moveTravellers()
         for node in desks.values where node.status == .working {
             node.figure.position.y = sin(clock * 5 + Float(abs(node.target.x))) * 0.025
         }
@@ -539,6 +588,214 @@ final class OfficeSceneController {
             }
         }
         return parts
+    }
+
+    // MARK: Street
+
+    /// Puts every traveller where the street says it is now, swinging its limbs and turning its wheels.
+    private func moveTravellers() {
+        guard let street else { return }
+        let time = Double(clock)
+        for node in travellers {
+            let speed = Float(abs(node.traveller.speed))
+            node.entity.position.x = Float(street.x(of: node.traveller, at: time))
+            // Walkers stride, cyclists pedal: each limb swings opposite the one before it.
+            let stride: Float = node.traveller.kind == .walker ? 5 : 2.6
+            for (index, limb) in node.limbs.enumerated() {
+                let swing = sin(clock * speed * stride) * (index.isMultiple(of: 2) ? 0.4 : -0.4)
+                limb.orientation = simd_quatf(angle: swing, axis: [0, 0, 1])
+            }
+            for wheel in node.wheels {
+                let radius: Float = node.traveller.kind == .car ? 0.2 : 0.32
+                wheel.orientation = simd_quatf(angle: -clock * speed / radius, axis: [0, 0, 1])
+            }
+        }
+    }
+
+    /// The ground around the building, the street in front of it, the sun (or the moon) behind it,
+    /// and the people, bicycles and cars passing by.
+    private func makeStreet(_ street: OfficeStreet, layout: OfficeLayout, _ palette: Palette) -> Entity {
+        let entity = Entity()
+        let length = Float(street.length)
+        let width = Float(layout.width)
+        let back = -Float(layout.depth) / 2
+        let front = Float(street.pavements[1]) + Float(OfficeStreet.pavementWidth) / 2
+        let grassEnd = front + 3
+        let grassStart = back - 3.5
+        // The lawn sits just under the office floor; the road just above the lawn.
+        entity.addChild(
+            box(
+                [length + 6, 0.04, grassEnd - grassStart], palette.grass,
+                at: [0, -0.08, (grassEnd + grassStart) / 2]))
+        for z in street.pavements {
+            entity.addChild(
+                box([length + 6, 0.08, Float(OfficeStreet.pavementWidth)], palette.pavement, at: [0, -0.04, Float(z)]))
+        }
+        let road = Float(street.road)
+        let roadWidth = Float(OfficeStreet.roadWidth)
+        entity.addChild(box([length + 6, 0.04, roadWidth], palette.road, at: [0, -0.05, road]))
+        // A dashed centre line, and a solid line marking off each bike lane.
+        let marking = NSColor(white: 0.95, alpha: 1)
+        var x = -length / 2 - 3
+        while x < length / 2 + 3 {
+            entity.addChild(box([1, 0.005, 0.1], marking, at: [x + 0.5, -0.028, road]))
+            x += 2.5
+        }
+        for side: Float in [-1, 1] {
+            let z = road + side * (roadWidth / 2 - Float(OfficeStreet.bikeLaneWidth))
+            entity.addChild(box([length + 6, 0.005, 0.05], marking, at: [0, -0.028, z]))
+        }
+        // A path from the door to the pavement.
+        entity.addChild(box([1.4, 0.06, 0.42], palette.pavement, at: [0, -0.05, Float(layout.depth) / 2 + 0.21]))
+
+        // Trees behind the building and along the far pavement, street lamps between them. Nothing
+        // tall stands between the building and the road, so the Desks stay in view.
+        let leaf = NSColor(red: 0.3, green: 0.58, blue: 0.3, alpha: 1)
+        let leafDark = NSColor(red: 0.2, green: 0.45, blue: 0.25, alpha: 1)
+        let bark = NSColor(red: 0.42, green: 0.3, blue: 0.2, alpha: 1)
+        func tree(at position: SIMD3<Float>, size: Float) {
+            let tree = Entity()
+            tree.position = position
+            tree.addChild(box([0.16 * size, 1.1 * size, 0.16 * size], bark, at: [0, 0.55 * size, 0]))
+            for (offset, radius, colour) in [
+                (SIMD3<Float>(0, 1.4, 0), Float(0.55), leafDark), ([0.25, 1.75, 0.1], 0.4, leaf),
+                ([-0.22, 1.65, -0.12], 0.38, leaf),
+            ] {
+                let crown = ModelEntity(mesh: .generateSphere(radius: radius * size), materials: [material(colour)])
+                crown.position = offset * size
+                tree.addChild(crown)
+            }
+            entity.addChild(tree)
+        }
+        var step: Float = 0
+        x = -width / 2 - 1
+        while x <= width / 2 + 1 {
+            tree(at: [x, -0.06, back - 1.6 - (step.truncatingRemainder(dividingBy: 2)) * 0.8], size: 1.1)
+            x += 2.6
+            step += 1
+        }
+        let edge = Float(street.pavements[1]) + Float(OfficeStreet.pavementWidth) / 2 - 0.3
+        x = -length / 2 + 2
+        step = 0
+        let metal = NSColor(white: 0.3, alpha: 1)
+        while x < length / 2 - 1 {
+            if step.truncatingRemainder(dividingBy: 2) == 0 {
+                tree(at: [x, 0, edge], size: 1)
+            } else {
+                entity.addChild(box([0.08, 2.6, 0.08], metal, at: [x, 1.3, edge]))
+                entity.addChild(box([0.08, 0.06, 0.6], metal, at: [x, 2.6, edge - 0.27]))
+                let lamp = ModelEntity(
+                    mesh: .generateBox(size: [0.24, 0.1, 0.3]), materials: [UnlitMaterial(color: palette.lampGlow)])
+                lamp.position = [x, 2.55, edge - 0.55]
+                entity.addChild(lamp)
+            }
+            x += 4
+            step += 1
+        }
+
+        sun.model?.materials = [UnlitMaterial(color: palette.sun)]
+        var halo = UnlitMaterial(color: palette.sun)
+        halo.blending = .transparent(opacity: 0.3)
+        sun.children.first?.components[ModelComponent.self]?.materials = [halo]
+
+        travellers = street.travellers.map { traveller in
+            let node = makeTraveller(traveller)
+            entity.addChild(node.entity)
+            return node
+        }
+        return entity
+    }
+
+    /// A walker, a cyclist or a car, built facing east and turned round when it heads west.
+    private func makeTraveller(_ traveller: OfficeTraveller) -> TravellerNode {
+        let entity = Entity()
+        entity.position = [0, 0, Float(traveller.z)]
+        if traveller.speed < 0 { entity.orientation = simd_quatf(angle: .pi, axis: [0, 1, 0]) }
+        let body = nsColour(traveller.body)
+        let skin = nsColour(traveller.skin)
+        let legs = nsColour(traveller.legs)
+        let dark = NSColor(white: 0.12, alpha: 1)
+        var limbs: [Entity] = []
+        var wheels: [Entity] = []
+        func add(_ mesh: MeshResource, _ colour: NSColor, at position: SIMD3<Float>, to parent: Entity? = nil) {
+            let model = ModelEntity(mesh: mesh, materials: [material(colour)])
+            model.position = position
+            (parent ?? entity).addChild(model)
+        }
+        /// A limb hanging from `joint`, swinging about it.
+        func limb(_ size: SIMD3<Float>, _ colour: NSColor, joint: SIMD3<Float>, turn: Float = 0) {
+            let pivot = Entity()
+            pivot.position = joint
+            let piece = box(size, colour, at: [0, -size.y / 2, 0])
+            if turn != 0 {
+                // Bent forward from the joint (a cyclist's arm reaching to the bars).
+                piece.orientation = simd_quatf(angle: turn, axis: [0, 0, 1])
+                piece.position = [sin(turn) * size.y / 2, -cos(turn) * size.y / 2, 0]
+            }
+            pivot.addChild(piece)
+            entity.addChild(pivot)
+            limbs.append(pivot)
+        }
+        func wheel(at position: SIMD3<Float>, radius: Float, thickness: Float) {
+            let pivot = Entity()
+            pivot.position = position
+            let tyre = ModelEntity(
+                mesh: .generateCylinder(height: thickness, radius: radius), materials: [material(dark)])
+            tyre.orientation = simd_quatf(angle: .pi / 2, axis: [1, 0, 0])
+            pivot.addChild(tyre)
+            // A spoke across the tyre's face shows it turning.
+            let spoke = box([radius * 1.8, 0.03, thickness + 0.01], NSColor(white: 0.7, alpha: 1), at: .zero)
+            pivot.addChild(spoke)
+            entity.addChild(pivot)
+            wheels.append(pivot)
+        }
+        func head(at position: SIMD3<Float>) {
+            add(.generateSphere(radius: 0.13), skin, at: position)
+            add(.generateSphere(radius: 0.132), nsColour(traveller.hair), at: position + [-0.02, 0.035, 0])
+        }
+
+        switch traveller.kind {
+        case .walker:
+            for z: Float in [-0.07, 0.07] { limb([0.1, 0.78, 0.11], legs, joint: [0, 0.78, z]) }
+            add(.generateCylinder(height: 0.55, radius: 0.15), body, at: [0, 1.06, 0])
+            for z: Float in [0.19, -0.19] { limb([0.08, 0.5, 0.08], body, joint: [0, 1.3, z]) }
+            head(at: [0, 1.48, 0])
+        case .bicycle:
+            for x: Float in [-0.5, 0.5] { wheel(at: [x, 0.32, 0], radius: 0.32, thickness: 0.04) }
+            add(.generateBox(size: [0.9, 0.05, 0.05]), body, at: [0, 0.62, 0])
+            add(.generateBox(size: [0.05, 0.4, 0.05]), body, at: [-0.22, 0.6, 0])
+            add(.generateBox(size: [0.05, 0.5, 0.05]), body, at: [0.42, 0.7, 0])
+            add(.generateBox(size: [0.06, 0.03, 0.46]), dark, at: [0.42, 0.95, 0])
+            add(.generateBox(size: [0.22, 0.04, 0.12]), dark, at: [-0.24, 0.82, 0])
+            for z: Float in [-0.08, 0.08] { limb([0.1, 0.62, 0.1], legs, joint: [-0.2, 0.86, z]) }
+            let torso = box([0.22, 0.55, 0.3], body, at: [-0.08, 1.1, 0])
+            torso.orientation = simd_quatf(angle: -0.4, axis: [0, 0, 1])
+            entity.addChild(torso)
+            for z: Float in [-0.17, 0.17] {
+                let arm = box([0.07, 0.5, 0.07], body, at: [0.2, 1.12, z])
+                arm.orientation = simd_quatf(angle: 1.0, axis: [0, 0, 1])
+                entity.addChild(arm)
+            }
+            head(at: [0.08, 1.48, 0])
+        case .car:
+            add(.generateBox(size: [1.8, 0.42, 0.9], cornerRadius: 0.08), body, at: [0, 0.42, 0])
+            add(
+                .generateBox(size: [1.0, 0.32, 0.84], cornerRadius: 0.06), NSColor(red: 0.22, green: 0.3, blue: 0.4, alpha: 1),
+                at: [-0.12, 0.78, 0])
+            add(.generateBox(size: [0.94, 0.06, 0.8]), body, at: [-0.12, 0.96, 0])
+            for x: Float in [-0.58, 0.58] {
+                for z: Float in [-0.42, 0.42] { wheel(at: [x, 0.2, z], radius: 0.2, thickness: 0.12) }
+            }
+            for (x, colour) in [(Float(0.9), NSColor(red: 1, green: 0.96, blue: 0.8, alpha: 1)), (-0.9, NSColor.systemRed)] {
+                for z: Float in [-0.3, 0.3] {
+                    let light = ModelEntity(
+                        mesh: .generateBox(size: [0.02, 0.08, 0.16]), materials: [UnlitMaterial(color: colour)])
+                    light.position = [x, 0.48, z]
+                    entity.addChild(light)
+                }
+            }
+        }
+        return TravellerNode(entity: entity, traveller: traveller, limbs: limbs, wheels: wheels)
     }
 
     // MARK: Furniture
