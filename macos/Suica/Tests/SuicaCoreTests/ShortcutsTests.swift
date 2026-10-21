@@ -115,3 +115,40 @@ private func stats(days: [DayStats], ok: Int, failed: Int) -> StatsDocument {
     await slow.value
     #expect(window.status?.agent.running == true)
 }
+
+@Test func theTallyCountsWaitingReviewedAndDraftMrs() {
+    let list = ReviewListDocument(
+        version: 1, me: me,
+        mergeRequests: [
+            mr("w1"), mr("a", mine: "APPROVED"), mr("c", mine: "REQUESTED_CHANGES"), mr("d", draft: true),
+        ])
+    #expect(list.tally == ReviewTally(waiting: 1, reviewed: 2, drafts: 1))
+    #expect(Copy.reviewTally(list.tally) == "1 waiting · 2 reviewed · 1 draft")
+    #expect(Copy.reviewTally(ReviewTally(waiting: 0, reviewed: 0, drafts: 0)) == "No open review requests")
+    let older = ReviewListDocument(version: 1, mergeRequests: [mr("a", mine: nil), mr("d", draft: true, mine: nil)])
+    #expect(older.tally == ReviewTally(waiting: 1, reviewed: 0, drafts: 1))
+}
+
+private func yours(_ key: String, approvedByAll: Bool = false, fix: String? = nil) -> YourMergeRequest {
+    YourMergeRequest(
+        key: key, title: key, url: "https://x/\(key)", draft: false, createdAt: nil, reviewers: [],
+        approvedByAll: approvedByAll, fix: fix.map { FixSummary(id: 1, status: $0, threads: 1, changed: 1, detail: "") })
+}
+
+@Test func yourTallyCountsApprovedAndReadyFixes() {
+    let list = ReviewListDocument(
+        version: 1, me: me, mergeRequests: [],
+        yourMergeRequests: [yours("a", approvedByAll: true), yours("b", fix: "ready"), yours("c", fix: "cancelled")])
+    #expect(list.yourTally == YourTally(open: 3, approved: 1, fixesReady: 1))
+    #expect(Copy.yourTally(list.yourTally) == "1 of 3 approved · 1 fix ready")
+    #expect(Copy.yourTally(YourTally(open: 2, approved: 0, fixesReady: 0)) == "0 of 2 approved")
+}
+
+@Test func healthPutsAStoppedAgentFirstThenPauseThenAFailedPoll() {
+    #expect(AgentHealth(running: true, loaded: true, paused: false, lastPollOK: true) == .ok)
+    #expect(AgentHealth(running: true, loaded: true, paused: false, lastPollOK: nil) == .ok)
+    #expect(AgentHealth(running: true, loaded: true, paused: false, lastPollOK: false) == .pollFailed)
+    #expect(AgentHealth(running: true, loaded: true, paused: true, lastPollOK: false) == .paused)
+    #expect(AgentHealth(running: false, loaded: true, paused: true, lastPollOK: true) == .stopped)
+    #expect(AgentHealth(running: false, loaded: false, paused: false, lastPollOK: true) == .missing)
+}

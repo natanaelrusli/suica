@@ -55,6 +55,8 @@ struct Card<Content: View>: View {
     let symbol: String
     /// A link in the heading's corner to the page with the rest, as "Statistics →".
     var link: CardLink?
+    /// Stretches to the height it is offered, so cards side by side end on one line.
+    var fillsHeight = false
     @ViewBuilder let content: Content
     @Environment(\.metrics) private var metrics
 
@@ -74,7 +76,7 @@ struct Card<Content: View>: View {
             content
         }
         .padding(metrics.padding)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: fillsHeight ? .infinity : nil, alignment: .topLeading)
         .background(.background.secondary, in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.separator.opacity(0.5)))
     }

@@ -29,7 +29,7 @@ struct OverviewView: View {
                     if let error = status.configError {
                         NoticeBox(text: DisplayText.clean(error, max: 400), tint: .red)
                     }
-                    quickActions(status)
+                    statusBar(status)
                     tiles(status)
                     widgets(status)
                     system(status)
@@ -90,18 +90,74 @@ struct OverviewView: View {
         show(.reviews)
     }
 
-    // MARK: Quick actions and tiles
+    // MARK: Status bar and tiles
 
-    /// Labelled buttons when they fit, the icons alone (named on hover) in a narrow window.
-    private func quickActions(_ status: StatusDocument) -> some View {
-        ViewThatFits(in: .horizontal) {
-            quickActionRow(status).labelStyle(.titleAndIcon)
-            quickActionRow(status).labelStyle(.iconOnly)
+    /// The agent's health in one line, with the quick actions at its end.
+    private func statusBar(_ status: StatusDocument) -> some View {
+        let paused = menu.state == nil ? (status.paused ?? false) : menu.isPaused
+        let health = AgentHealth(
+            running: status.agent.running, loaded: status.agent.loaded, paused: paused,
+            lastPollOK: status.lastPoll.map { $0.status == "ok" })
+        return ViewThatFits(in: .horizontal) {
+            HStack(spacing: 12) {
+                healthSummary(health, status)
+                Spacer(minLength: 8)
+                quickActionRow
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                healthSummary(health, status)
+                quickActionRow
+            }
+        }
+        .padding(.horizontal, metrics.padding)
+        .padding(.vertical, metrics.padding - 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Self.tint(health).opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Self.tint(health).opacity(0.25)))
+    }
+
+    private static func tint(_ health: AgentHealth) -> Color {
+        switch health {
+        case .ok: .green
+        case .paused, .stopped, .missing: .orange
+        case .pollFailed: .red
         }
     }
 
-    private func quickActionRow(_ status: StatusDocument) -> some View {
-        HStack(spacing: 8) {
+    private func healthSummary(_ health: AgentHealth, _ status: StatusDocument) -> some View {
+        HStack(spacing: 10) {
+            Circle()
+                .fill(Self.tint(health))
+                .frame(width: 9, height: 9)
+                .shadow(color: Self.tint(health).opacity(0.6), radius: 3)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(Copy.health(health)).font(.headline)
+                Text(healthDetail(status))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .help(status.lastPoll?.failure.map { DisplayText.clean($0, max: 300) } ?? "")
+            }
+        }
+        .fixedSize()
+        .accessibilityElement(children: .combine)
+    }
+
+    /// "Last poll 2 minutes ago · every 60 s · pid 123", leaving out what is not known.
+    private func healthDetail(_ status: StatusDocument) -> String {
+        let lastPoll = status.lastPoll.map {
+            Copy.lastPollAgo(Date(timeIntervalSince1970: TimeInterval($0.at) / 1000).formatted(.relative(presentation: .named)))
+        }
+        let parts = [
+            lastPoll ?? Copy.noPollYet, status.polling.map { Copy.pollEvery($0.activeSeconds) },
+            status.agent.pid.map(Copy.pid), status.teamsEnabled == false ? Copy.teamsOff : nil,
+        ]
+        return parts.compactMap { $0 }.joined(separator: " · ")
+    }
+
+    private var quickActionRow: some View {
+        HStack(spacing: 6) {
             Button {
                 Task {
                     await menu.togglePause()
@@ -143,105 +199,82 @@ struct OverviewView: View {
             }
             .help(Copy.editConfig)
         }
+        .labelStyle(.iconOnly)
         .buttonStyle(.bordered)
         .controlSize(.regular)
     }
 
-    /// Six figures at a glance; those with a page behind them open it.
+    /// What waits for you, four figures in a row (two by two in a narrow window); each opens its page.
     private func tiles(_ status: StatusDocument) -> some View {
-        let agent = status.agent
-        let paused = menu.state == nil ? (status.paused ?? false) : menu.isPaused
-        let lastPoll = status.lastPoll.map {
-            Date(timeIntervalSince1970: TimeInterval($0.at) / 1000).formatted(.relative(presentation: .named))
-        }
+        let list = reviews.list
         return LazyVGrid(
-            // Three by two, or two by three in a narrow window, so the six never wrap unevenly.
             columns: Array(
-                repeating: GridItem(.flexible(), spacing: metrics.gap * 0.75, alignment: .top), count: wide ? 3 : 2),
+                repeating: GridItem(.flexible(), spacing: metrics.gap * 0.75, alignment: .top), count: wide ? 4 : 2),
             spacing: metrics.gap * 0.75
         ) {
             StatTile(
-                title: Copy.agentHeading,
-                value: agent.running
-                    ? Copy.agentRunningShort : (agent.loaded ? Copy.agentStoppedShort : Copy.agentMissingShort),
-                symbol: "cpu", tint: agent.running ? .green : .orange,
-                caption: agent.pid.map(Copy.pid)
-            )
-            .staggeredEntrance(0)
-            StatTile(
-                title: Copy.pollingHeading, value: paused ? Copy.paused : Copy.running,
-                symbol: paused ? "pause.fill" : "arrow.triangle.2.circlepath",
-                tint: paused ? .orange : (status.lastPoll?.status == "failed" ? .red : .blue),
-                caption: lastPoll.map { Copy.lastPoll($0, ok: status.lastPoll?.status == "ok") }
-            )
-            .staggeredEntrance(1)
-            StatTile(
-                title: Copy.reviewRequests, value: menu.state.map { "\($0.reviewRequested)" } ?? "–",
+                title: Copy.waitingForReviewShort,
+                value: list.map { "\($0.tally.waiting)" } ?? menu.state.map { "\($0.reviewRequested)" } ?? "–",
                 symbol: "person.crop.circle.badge.questionmark", tint: .purple,
-                caption: menu.state.map { Copy.tracked($0.trackedAuthored) },
+                caption: list.map { Copy.reviewTally($0.tally) },
                 action: { show(.reviews) }
             )
             .help(Copy.openSection(WindowSection.reviews.title))
-            .staggeredEntrance(2)
+            .staggeredEntrance(0)
             StatTile(
-                title: Copy.readyToApproveShort, value: reviews.list.map { "\($0.readyToApproveCount)" } ?? "–",
+                title: Copy.readyToApproveShort, value: list.map { "\($0.readyToApproveCount)" } ?? "–",
                 symbol: "checkmark.seal", tint: .green, caption: Copy.readyToApproveCaption,
                 action: { show(.reviews) }
             )
             .help(Copy.openSection(WindowSection.reviews.title))
-            .staggeredEntrance(3)
+            .staggeredEntrance(1)
             StatTile(
                 title: Copy.attentionHeading,
                 value: status.teamsEnabled == false ? Copy.teamsOffShort : "\(menu.badgeCount)",
                 symbol: "tray.full", tint: menu.badgeCount > 0 ? .red : .teal,
-                caption: status.teamsEnabled == true ? Copy.teamsOn : nil,
+                caption: status.teamsEnabled == false ? Copy.teamsOff : Copy.attentionCaption,
                 action: status.teamsEnabled == false ? nil : { show(.messages) }
             )
             .help(status.teamsEnabled == false ? Copy.teamsOff : Copy.openSection(WindowSection.messages.title))
-            .staggeredEntrance(4)
+            .staggeredEntrance(2)
             StatTile(
-                title: Copy.tokensToday, value: window.usage.map { Copy.tokens($0.last24h.allTokens) } ?? "–",
-                symbol: "gauge.with.dots.needle.33percent", tint: .pink, caption: Copy.last24Hours,
-                action: { show(.usage) }
+                title: Copy.yourMRs, value: list.map { "\($0.yourTally.open)" } ?? "–",
+                symbol: "arrow.triangle.pull", tint: list.map { $0.yourTally.fixesReady > 0 } == true ? .orange : .blue,
+                caption: list.map { Copy.yourTally($0.yourTally) },
+                action: { show(.reviews) }
             )
-            .help(Copy.openSection(WindowSection.usage.title))
-            .staggeredEntrance(5)
+            .help(Copy.openSection(WindowSection.reviews.title))
+            .staggeredEntrance(3)
         }
     }
 
     // MARK: Widgets
 
-    /// Two columns when there is room: reviews and messages on the left, the agent and the week on
-    /// the right; one column otherwise.
+    /// Your reviews beside the agent's, the messages waiting for you, then the week across the page;
+    /// one column in a narrow window. Cards side by side share a height.
     @ViewBuilder private func widgets(_ status: StatusDocument) -> some View {
-        let waiting = reviewWidget
         let agent = status.agentReview.map(agentWidget)
-        let messages = menu.state?.teams.map(messagesWidget)
-        let week = weekWidget
+        // The tile already says nothing waits; the card earns its room only with something in it.
+        let messages = menu.state?.teams.flatMap { $0.attention.isEmpty ? nil : messagesWidget($0) }
         if wide {
             HStack(alignment: .top, spacing: metrics.gap) {
-                VStack(spacing: metrics.gap) {
-                    waiting
-                    messages
-                }
-                VStack(spacing: metrics.gap) {
-                    agent
-                    week
-                }
+                reviewWidget
+                agent
             }
+            .fixedSize(horizontal: false, vertical: true)
         } else {
-            waiting
+            reviewWidget
             agent
-            messages
-            week
         }
+        messages
+        weekWidget
     }
 
     private var reviewWidget: some View {
         let link = reviews.list.map { list in
             CardLink(title: Copy.allItems(list.mergeRequests.count)) { show(.reviews) }
         }
-        return Card(title: Copy.waitingForReviewHeading, symbol: "checklist", link: link) {
+        return Card(title: Copy.waitingForReviewHeading, symbol: "checklist", link: link, fillsHeight: wide) {
             if let list = reviews.list {
                 let rows = list.shortcuts()
                 if rows.isEmpty {
@@ -310,7 +343,7 @@ struct OverviewView: View {
     }
 
     private func agentWidget(_ review: StatusAgentReview) -> some View {
-        Card(title: Copy.agentReviewHeading, symbol: "checkmark.bubble") {
+        Card(title: Copy.agentReviewHeading, symbol: "checkmark.bubble", fillsHeight: wide) {
             VStack(alignment: .leading, spacing: 8) {
                 if let text = reviewNotice { NoticeBox(text: text, tint: .secondary) { reviewNotice = nil } }
                 if !review.allRunning.isEmpty {
@@ -398,6 +431,7 @@ struct OverviewView: View {
         }
     }
 
+    /// The chart beside the week's figures; the figures go under the chart in a narrow window.
     private var weekWidget: some View {
         Card(
             title: Copy.weekHeading, symbol: "chart.bar",
@@ -405,41 +439,86 @@ struct OverviewView: View {
         ) {
             if let stats = window.stats {
                 let week = stats.week
-                Chart(week.days, id: \.day) { day in
-                    BarMark(
-                        x: .value(Copy.chartDay, Self.weekday(day.day)),
-                        y: .value(Copy.chartCount, day.reviewRequests)
-                    )
-                    .foregroundStyle(.tint)
-                    .cornerRadius(3)
+                if wide {
+                    HStack(alignment: .top, spacing: metrics.gap * 1.5) {
+                        weekChart(week)
+                        weekFigures(week)
+                    }
+                } else {
+                    weekChart(week)
+                    weekFigures(week)
                 }
-                .chartYAxis(.hidden)
-                .frame(height: 80)
-                .accessibilityLabel(Copy.weekHeading)
-                Text(Copy.weekSummary(requests: week.reviewRequests, nudges: week.nudgesSent, pollSuccess: week.pollSuccess))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             } else {
                 ProgressView().controlSize(.small)
             }
-            if let usage = window.usage {
-                Divider()
-                HStack {
-                    Label(Copy.tokensHeading, systemImage: "gauge.with.dots.needle.33percent")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    Spacer(minLength: 8)
+        }
+    }
+
+    private func weekChart(_ week: WeekSummary) -> some View {
+        Chart(week.days, id: \.day) { day in
+            BarMark(
+                x: .value(Copy.chartDay, Self.weekday(day.day)),
+                y: .value(Copy.chartCount, day.reviewRequests)
+            )
+            .foregroundStyle(.tint)
+            .cornerRadius(3)
+            .annotation(position: .top, spacing: 2) {
+                if day.reviewRequests > 0 {
+                    Text("\(day.reviewRequests)").font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+                }
+            }
+        }
+        .chartYAxis(.hidden)
+        .frame(height: 110)
+        .frame(maxWidth: .infinity)
+        .accessibilityLabel(Copy.weekHeading)
+    }
+
+    /// The week's review requests, nudges and polls beside the tokens spent, as label and figure:
+    /// stacked next to the chart, side by side under it.
+    @ViewBuilder private func weekFigures(_ week: WeekSummary) -> some View {
+        let activity = Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 6) {
+            figureRow(Copy.reviewRequests, "\(week.reviewRequests)")
+            figureRow(Copy.nudgesSent, "\(week.nudgesSent)")
+            if let rate = week.pollSuccess {
+                figureRow(Copy.pollsOk, "\(Int((rate * 100).rounded()))%")
+            }
+        }
+        let tokens = window.usage.map { usage in
+            Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 6) {
+                figureRow(Copy.tokensFor("24 h"), Copy.tokens(usage.last24h.allTokens))
+                figureRow(Copy.tokensFor("7 d"), Copy.tokens(usage.last7d.allTokens))
+                figureRow(Copy.tokensFor("30 d"), Copy.tokens(usage.last30d.allTokens))
+                GridRow {
                     Button(Copy.linkTo(Copy.tokenUsage)) { show(.usage) }
                         .buttonStyle(.link)
                         .font(.caption)
+                        .gridCellColumns(2)
                 }
-                Text(
-                    Copy.tokenTotals(
-                        day: Copy.tokens(usage.last24h.allTokens), week: Copy.tokens(usage.last7d.allTokens),
-                        month: Copy.tokens(usage.last30d.allTokens))
-                )
-                .font(.callout.monospacedDigit())
             }
+        }
+        Group {
+            if wide {
+                VStack(alignment: .leading, spacing: 10) {
+                    activity
+                    if tokens != nil { Divider() }
+                    tokens
+                }
+            } else {
+                HStack(alignment: .top, spacing: metrics.gap * 2) {
+                    activity
+                    tokens
+                }
+            }
+        }
+        .font(.callout)
+        .fixedSize()
+    }
+
+    private func figureRow(_ label: String, _ value: String) -> some View {
+        GridRow {
+            Text(label).foregroundStyle(.secondary)
+            Text(value).fontWeight(.semibold).monospacedDigit().gridColumnAlignment(.trailing)
         }
     }
 
