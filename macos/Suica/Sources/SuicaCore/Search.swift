@@ -25,6 +25,15 @@ extension ReviewSummary {
 }
 
 extension ReviewListDocument {
+    /// Your MRs whose title or key holds the search text; all of them without one.
+    public func yourMergeRequests(matching query: String) -> [YourMergeRequest] {
+        let text = query.trimmingCharacters(in: .whitespaces)
+        guard !text.isEmpty else { return yourMergeRequests }
+        return yourMergeRequests.filter {
+            $0.title.localizedCaseInsensitiveContains(text) || $0.key.localizedCaseInsensitiveContains(text)
+        }
+    }
+
     /// `sections` with only the MRs that match, dropping groups left empty.
     public func sections(matching query: String) -> [ReviewSection] {
         sections.compactMap { section in

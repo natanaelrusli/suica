@@ -556,3 +556,47 @@ private func withAgent(_ status: String?) -> ReviewListDocument {
         """.utf8)
     #expect(try JSONDecoder().decode(ReviewSummary.self, from: older).rereviewWaiting == nil)
 }
+
+// MARK: - Tabs
+
+private func tabbedList(me: Bool = true) throws -> ReviewListDocument {
+    let mine = #"{"key":"g/p!8","title":"Mine: login","url":"https://x","draft":false,"reviewers":[],"approvedByAll":false}"#
+    let json = """
+        {"version":1,"mergeRequests":[],"yourMergeRequests":[\(mine)]}
+        """
+    let yours = try decodeDocument(ReviewListDocument.self, from: Data(json.utf8)).yourMergeRequests
+    return ReviewListDocument(
+        version: 1, me: me ? Person(username: "me", name: "Me") : nil,
+        mergeRequests: [
+            review("g/p!1", me: "APPROVED"), review("g/p!2", me: "UNREVIEWED"), review("g/p!3", draft: true),
+        ],
+        yourMergeRequests: yours)
+}
+
+@Test func eachCategoryOfTheListIsItsOwnTab() throws {
+    let list = try tabbedList()
+    #expect(list.tabs == [.yours, .group(.waiting), .group(.reviewed), .group(.drafts)])
+    #expect(list.keys(in: .yours) == ["g/p!8"])
+    #expect(list.keys(in: .group(.waiting)) == ["g/p!2"])
+    #expect(list.keys(in: .group(.reviewed)) == ["g/p!1"])
+    #expect(list.keys(in: .group(.drafts)) == ["g/p!3"])
+    #expect(list.tab(containing: "g/p!1") == .group(.reviewed))
+    #expect(list.tab(containing: "g/p!8") == .yours)
+    #expect(list.tab(containing: "g/p!99") == nil)
+}
+
+@Test func searchNarrowsEveryTabAndTabsStayEvenWhenEmpty() throws {
+    let list = try tabbedList()
+    #expect(list.keys(in: .yours, matching: "login") == ["g/p!8"])
+    #expect(list.keys(in: .yours, matching: "p!2").isEmpty)
+    #expect(list.keys(in: .group(.waiting), matching: "p!2") == ["g/p!2"])
+    #expect(list.keys(in: .group(.waiting), matching: "p!1").isEmpty)
+    // Search does not move an MR to another tab.
+    #expect(list.tab(containing: "g/p!2") == .group(.waiting))
+}
+
+@Test func aListWithoutMeHasYoursAndOneTabForTheRest() throws {
+    let list = try tabbedList(me: false)
+    #expect(list.tabs == [.yours, .group(.all)])
+    #expect(list.keys(in: .group(.all)) == ["g/p!1", "g/p!2", "g/p!3"])
+}

@@ -282,12 +282,33 @@ public enum Copy {
     public static let searchSettings = "Search settings"
     public static func noSettingsMatch(_ query: String) -> String { "No settings match “\(query)”" }
     public static let noSettingsMatchHint = "Search looks at each setting's name, help and key."
-    public static func reviewGroup(_ group: ReviewGroup) -> String {
-        switch group {
-        case .waiting: "Waiting for you"
-        case .reviewed: "You reviewed"
-        case .drafts: "Drafts"
-        case .all: "All"
+    public static func reviewTab(_ tab: ReviewTab) -> String {
+        switch tab {
+        case .yours: "Yours"
+        case .group(.waiting): "Waiting"
+        case .group(.reviewed): "Reviewed"
+        case .group(.drafts): "Drafts"
+        case .group(.all): "All"
+        }
+    }
+    /// The longer name of a tab, for its help text and accessibility.
+    public static func reviewTabHelp(_ tab: ReviewTab) -> String {
+        switch tab {
+        case .yours: "Your open merge requests"
+        case .group(.waiting): "Waiting for you"
+        case .group(.reviewed): "You reviewed"
+        case .group(.drafts): "Drafts"
+        case .group(.all): "All merge requests"
+        }
+    }
+    /// What an empty tab says when nothing is searched.
+    public static func nothingInReviewTab(_ tab: ReviewTab) -> String {
+        switch tab {
+        case .yours: "You have no open merge requests."
+        case .group(.waiting): nothingWaiting
+        case .group(.reviewed): "You have not reviewed any open merge request."
+        case .group(.drafts): "No draft merge requests."
+        case .group(.all): noReviewRequests
         }
     }
     public static let nothingWaiting = "Nothing is waiting for your review."
@@ -417,7 +438,6 @@ public enum Copy {
         }
     }
     // Agent Fix, comments and merging (your own MRs)
-    public static let yourMergeRequests = "Your MRs"
     public static let fixTab = "Agent fix"
     public static let fixFindingsNow = "Fix findings now"
     public static let fixNone =
