@@ -426,6 +426,8 @@ export async function cloneSourceBranch(
   deps: Pick<ReviewDeps, "rest" | "exec" | "signal">,
   detail: MrDetailJson,
   repoDir: string,
+  /** Keeps the git folder here instead of inside `repoDir`. */
+  gitDir?: string,
 ): Promise<string> {
   const parts = parseMrKey(detail.key);
   if (parts === undefined) throw new RunFailure("malformed merge request key");
@@ -451,6 +453,7 @@ export async function cloneSourceBranch(
         "--single-branch",
         "--no-tags",
         `--branch=${detail.sourceBranch}`,
+        ...(gitDir === undefined ? [] : [`--separate-git-dir=${gitDir}`]),
         "--",
         project.data.ssh_url_to_repo,
         repoDir,

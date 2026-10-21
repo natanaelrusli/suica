@@ -90,6 +90,8 @@ export function buildInvocation(
       "exec",
       "--sandbox",
       mode === "fix" ? "workspace-write" : "read-only",
+      // A fix may write in its folder but never reach the network, whatever the Owner's codex config says.
+      ...(mode === "fix" ? ["-c", "sandbox_workspace_write.network_access=false"] : []),
       "--skip-git-repo-check",
       "--ephemeral",
       "--json",

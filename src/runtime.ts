@@ -8,6 +8,7 @@ import type { ReviewWorker } from "./agent-review.ts";
 import { defaultExec } from "./exec.ts";
 import { createFailureTracker } from "./failures.ts";
 import {
+  fetchCurrentUsername,
   fetchPerson,
   fetchSnapshot,
   glabPost,
@@ -97,7 +98,17 @@ export function createRuntime(configPath: string, signal?: AbortSignal): Runtime
     ...(signal === undefined ? {} : { signal }),
   });
 
+  // Asked once per run of the agent; a failed lookup is asked again by the next fix.
+  let owner: Promise<string> | undefined;
+  const ownerName = (): Promise<string> => {
+    owner ??= fetchCurrentUsername(glabRest(config.gitlab)).catch((error: unknown) => {
+      owner = undefined;
+      throw error;
+    });
+    return owner;
+  };
   const fixes = createFixWorker({
+    owner: ownerName,
     store,
     config,
     exec: defaultExec,

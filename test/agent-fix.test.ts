@@ -309,13 +309,21 @@ describe("queueManualFix", () => {
       "g/p!7": detail([discussion("d1", [gitlabNote("n1")])]),
       "g/p!8": detail([discussion("d1", [gitlabNote("n1", ME)])], "g/p!8"),
     });
-    expect(await queueManualFix(run, "g/p!7")).toBe("queued");
+    expect(await queueManualFix(run, "g/p!7", ME.username)).toBe("queued");
     expect(store.fixes.open("g/p!7")?.trigger).toBe("manual");
-    expect(await queueManualFix(run, "g/p!7")).toBe("added");
-    expect(await queueManualFix(run, "g/p!8")).toBe("nothing-to-fix");
-    expect(await queueManualFix(run, "nope")).toBe("bad-key");
+    expect(await queueManualFix(run, "g/p!7", ME.username)).toBe("added");
+    expect(await queueManualFix(run, "g/p!8", ME.username)).toBe("nothing-to-fix");
+    expect(await queueManualFix(run, "nope", ME.username)).toBe("bad-key");
     const id = store.fixes.open("g/p!7")?.id ?? 0;
     store.fixes.transition(id, ["queued"], "ready", {}, 2000);
-    expect(await queueManualFix(run, "g/p!7")).toBe("busy");
+    expect(await queueManualFix(run, "g/p!7", ME.username)).toBe("busy");
+  });
+
+  it("refuses an MR someone else wrote", async () => {
+    const store = openStore(":memory:");
+    const theirs = { ...detail([discussion("d1", [gitlabNote("n1")])]), author: bob };
+    const run = deps(store, { "g/p!7": theirs });
+    expect(await queueManualFix(run, "g/p!7", ME.username)).toBe("not-yours");
+    expect(store.fixes.open("g/p!7")).toBeUndefined();
   });
 });

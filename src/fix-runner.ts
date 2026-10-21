@@ -1,4 +1,13 @@
-import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 import { cloneSourceBranch, renderMrFile, runCli } from "./agent-review.ts";
@@ -20,7 +29,11 @@ export interface FixDeps extends Omit<ReviewDeps, "store" | "config" | "post" | 
   readonly config: Pick<Config, "gitlab" | "model" | "fix">;
   /** The state database's path; checkouts live in a `fixes` folder beside it. */
   readonly statePath: string;
+  /** The Owner's GitLab username; a fix only ever changes an MR the Owner wrote. May throw. */
+  readonly owner: () => Promise<string>;
 }
+
+export const NOT_YOURS = "the MR is not yours: Agent Fix only changes your own MRs";
 
 /** Larger diffs fail the fix: the app could not show them, and the Owner could not check them. */
 const MAX_DIFF_CHARS = 500_000;
@@ -31,9 +44,42 @@ const ALERT_REASON_MAX = 120;
 const FALLBACK_COMMIT_MESSAGE = "Address review comments";
 const KEPT_DIRS = new Set(["running", "ready", "confirming"]);
 
-/** The folder of one fix: its checkout in `repo/` and the files the model reads beside it. */
+/** The folder of one fix. */
 export function fixDir(statePath: string, id: number): string {
   return join(dirname(statePath), "fixes", String(id));
+}
+
+/**
+ * Where a fix keeps its files. The model works in `work/` (the checkout in `work/repo` and the
+ * files it reads beside it) and can write only there; the git folder is `git/`, outside its
+ * reach, so it can plant no hook or config that git would run later.
+ */
+export function fixPaths(
+  statePath: string,
+  id: number,
+): { work: string; repo: string; git: string } {
+  const dir = fixDir(statePath, id);
+  return { work: join(dir, "work"), repo: join(dir, "work", "repo"), git: join(dir, "git") };
+}
+
+/** The options every git command after the clone starts with: never the `.git` file in the work tree. */
+export function gitAt(paths: { repo: string; git: string }): string[] {
+  return ["--git-dir", paths.git, "--work-tree", paths.repo];
+}
+
+/** A hash of the git folder's settings and hooks, to tell whether anything changed them. */
+export function gitSettingsFingerprint(gitDir: string): string {
+  const hash = createHash("sha256");
+  const add = (path: string): void => {
+    if (!existsSync(path)) return;
+    if (statSync(path).isDirectory()) {
+      for (const name of readdirSync(path).sort()) add(join(path, name));
+      return;
+    }
+    hash.update(path).update("\0").update(readFileSync(path)).update("\0");
+  };
+  for (const name of ["config", "hooks", "info", "commondir"]) add(join(gitDir, name));
+  return hash.digest("hex");
 }
 
 export function buildFixPrompt(
@@ -143,8 +189,12 @@ async function notifyQuietly(
   }
 }
 
-async function git(deps: FixDeps, repo: string, args: readonly string[]): Promise<string> {
-  const { stdout } = await deps.exec("git", ["-C", repo, ...args], {
+async function git(
+  deps: FixDeps,
+  paths: { repo: string; git: string },
+  args: readonly string[],
+): Promise<string> {
+  const { stdout } = await deps.exec("git", [...gitAt(paths), ...args], {
     timeoutMs: GIT_TIMEOUT_MS,
     ...(deps.signal === undefined ? {} : { signal: deps.signal }),
   });
@@ -195,16 +245,18 @@ export async function runAgentFix(baseDeps: FixDeps, row: FixRow): Promise<void>
 
     const detail = await fetchMrDetail(deps.graphql, deps.rest, row.mrKey);
     mrTitle = detail.title;
+    if (detail.author.username !== (await deps.owner())) throw new RunFailure(NOT_YOURS);
     store.fixes.transition(row.id, ["running"], "running", { mrTitle }, deps.now());
     rmSync(dir, { recursive: true, force: true });
-    mkdirSync(dir, { recursive: true, mode: 0o700 });
-    const repo = join(dir, "repo");
+    const paths = fixPaths(deps.statePath, row.id);
+    mkdirSync(paths.work, { recursive: true, mode: 0o700 });
     store.fixes.appendActivity(row.id, deps.now(), "Cloning the source branch");
-    const baseSha = await cloneSourceBranch(deps, detail, repo);
+    const baseSha = await cloneSourceBranch(deps, detail, paths.repo, paths.git);
     store.fixes.transition(row.id, ["running"], "running", { baseSha }, deps.now());
-    writeFileSync(join(dir, "mr.md"), renderMrFile(detail));
-    writeFileSync(join(dir, "threads.md"), renderThreads(row.threads));
-    if (row.note !== "") writeFileSync(join(dir, "notes.md"), row.note);
+    writeFileSync(join(paths.work, "mr.md"), renderMrFile(detail));
+    writeFileSync(join(paths.work, "threads.md"), renderThreads(row.threads));
+    if (row.note !== "") writeFileSync(join(paths.work, "notes.md"), row.note);
+    const settings = gitSettingsFingerprint(paths.git);
 
     log.info("agent fix started", {
       id: row.id,
@@ -219,7 +271,7 @@ export async function runAgentFix(baseDeps: FixDeps, row: FixRow): Promise<void>
       cliId,
       path,
       buildFixPrompt(row.mrKey, detail.sourceBranch, baseSha, row.note !== ""),
-      dir,
+      paths.work,
       (text) => {
         store.fixes.appendActivity(row.id, deps.now(), text);
       },
@@ -235,8 +287,12 @@ export async function runAgentFix(baseDeps: FixDeps, row: FixRow): Promise<void>
     }
     const answer = parseFixAnswer(result.body, row.threads);
     if (answer === undefined) throw new RunFailure("the model gave no answer block");
-    await git(deps, repo, ["add", "-A"]);
-    const diff = await git(deps, repo, ["diff", "--cached", "--binary"]);
+    // Belt and braces: the model cannot reach the git folder, and git runs only if nothing did.
+    if (gitSettingsFingerprint(paths.git) !== settings) {
+      throw new RunFailure("the checkout's git settings changed during the run");
+    }
+    await git(deps, paths, ["add", "-A"]);
+    const diff = await git(deps, paths, ["diff", "--cached"]);
     if (diff.length > MAX_DIFF_CHARS) throw new RunFailure("the change is too large to show");
     const threads =
       diff === ""

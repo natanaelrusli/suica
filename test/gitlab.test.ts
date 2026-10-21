@@ -4,6 +4,7 @@ import {
   FetchFailure,
   SNAPSHOT_QUERY,
   descriptionSha,
+  fetchCurrentUsername,
   fetchPerson,
   glabPost,
   glabPut,
@@ -331,5 +332,18 @@ describe("fetchPerson", () => {
     await expect(fetchPerson(() => Promise.resolve({ message: "x" }), "x")).rejects.toThrow(
       FetchFailure,
     );
+  });
+});
+
+describe("fetchCurrentUsername", () => {
+  it("reads the signed-in user's username", async () => {
+    const paths: string[] = [];
+    const name = await fetchCurrentUsername((path) => {
+      paths.push(path);
+      return Promise.resolve({ id: 1, username: "nata", name: "Nata" });
+    });
+    expect(name).toBe("nata");
+    expect(paths).toEqual(["user"]);
+    await expect(fetchCurrentUsername(() => Promise.resolve({}))).rejects.toThrow(FetchFailure);
   });
 });

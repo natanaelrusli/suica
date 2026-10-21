@@ -172,19 +172,22 @@ export async function queueAutomaticFixes(
   }
 }
 
-export type ManualFixOutcome = "queued" | "added" | "busy" | "nothing-to-fix" | "bad-key";
+export type ManualFixOutcome =
+  "queued" | "added" | "busy" | "nothing-to-fix" | "not-yours" | "bad-key";
 
 /**
  * Queues a fix the Owner asked for, of every open thread whose newest note is someone else's,
- * handled before or not. The MR is the Owner's own, so its Author is the Owner.
+ * handled before or not. Only on an MR the Owner (`me`) wrote.
  */
 export async function queueManualFix(
   deps: Pick<FixQueueDeps, "store" | "log" | "now" | "detail">,
   key: string,
+  me: string,
 ): Promise<ManualFixOutcome> {
   if (parseMrKey(key) === undefined) return "bad-key";
   const detail = await deps.detail(key);
-  const threads = findingThreads(detail, detail.author.username, "manual");
+  if (detail.author.username !== me) return "not-yours";
+  const threads = findingThreads(detail, me, "manual");
   if (threads.length === 0) return "nothing-to-fix";
   const open = deps.store.fixes.open(key);
   const id = deps.store.fixes.queue(key, "manual", threads, deps.now(), detail.title);

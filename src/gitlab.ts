@@ -300,6 +300,15 @@ export async function fetchPerson(rest: RestRunner, username: string): Promise<P
   return users.data.find((user) => user.username === username);
 }
 
+const currentUserSchema = z.object({ username: z.string() });
+
+/** The username of the account glab is signed in as: the Owner. */
+export async function fetchCurrentUsername(rest: RestRunner): Promise<string> {
+  const user = currentUserSchema.safeParse(await rest("user"));
+  if (!user.success) throw new FetchFailure("gitlab-error", "unexpected user response shape");
+  return user.data.username;
+}
+
 export async function fetchSnapshot(run: GraphqlRunner): Promise<Snapshot> {
   return parseSnapshot(await run(SNAPSHOT_QUERY));
 }

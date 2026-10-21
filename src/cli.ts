@@ -7,7 +7,15 @@ import { defaultConfigPath, defaultStatePath, loadConfig } from "./config.ts";
 import { applyConfigEdits, parseSaveRequest, showConfig } from "./config-edit.ts";
 import type { SaveResultJson } from "./config-edit.ts";
 import { defaultExec } from "./exec.ts";
-import { fetchSnapshot, glabPost, glabPostJson, glabPut, glabRest, glabRunner } from "./gitlab.ts";
+import {
+  fetchCurrentUsername,
+  fetchSnapshot,
+  glabPost,
+  glabPostJson,
+  glabPut,
+  glabRest,
+  glabRunner,
+} from "./gitlab.ts";
 import { detectModelClis } from "./model-cli.ts";
 import { commentOnMergeRequest, mergeMergeRequest } from "./mr-actions.ts";
 import {
@@ -328,11 +336,14 @@ async function fixCommand(argv: readonly string[]): Promise<number> {
     }
     const graphql = glabRunner(config.gitlab);
     const rest = glabRest(config.gitlab);
+    // A fix only ever changes an MR the signed-in GitLab user wrote.
+    const owner = (): Promise<string> => fetchCurrentUsername(rest);
     if (action === "queue") {
       if (target === undefined || parseMrKey(target) === undefined) return reply("bad-key", false);
       const outcome = await queueManualFix(
         { store, log, now: Date.now, detail: (key) => fetchMrDetail(graphql, rest, key) },
         target,
+        await owner(),
       );
       return reply(outcome, outcome === "queued" || outcome === "added");
     }
@@ -356,6 +367,7 @@ async function fixCommand(argv: readonly string[]): Promise<number> {
       log,
       now: Date.now,
       statePath,
+      owner,
     };
     switch (action) {
       case "confirm": {

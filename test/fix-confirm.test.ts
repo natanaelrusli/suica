@@ -73,6 +73,7 @@ function harness(
     pushFails?: string;
     postFails?: (path: string) => boolean;
     diff?: string;
+    owner?: string;
   } = {},
 ) {
   const folder = mkdtempSync(join(tmpdir(), "suica-fix-confirm-"));
@@ -114,6 +115,7 @@ function harness(
     log: createLogger({ write: () => undefined }),
     now: () => NOW,
     statePath,
+    owner: () => Promise.resolve(options.owner ?? "me"),
   };
   const ready = (): FixRow => {
     const id =
@@ -140,7 +142,7 @@ function harness(
       },
       NOW - 800,
     );
-    mkdirSync(join(fixDir(statePath, id), "repo"), { recursive: true });
+    mkdirSync(join(fixDir(statePath, id), "work", "repo"), { recursive: true });
     const row = db.fixes.get(id);
     if (row === undefined) throw new Error("no row");
     return row;
@@ -174,11 +176,12 @@ describe("confirmFix", () => {
     edits.commitMessage = "Rename total to sum";
     edits.threads[1] = { id: D2, reply: "Kept on purpose: see the spec.", post: true };
     expect(await confirmFix(h.deps, row.id, edits)).toBe("pushed");
-    const repo = join(fixDir(h.statePath, row.id), "repo");
+    const dir = fixDir(h.statePath, row.id);
+    const at = ["--git-dir", join(dir, "git"), "--work-tree", join(dir, "work", "repo")];
     expect(h.git).toEqual([
-      ["git", "-C", repo, "commit", "-q", "-m", "Rename total to sum"],
-      ["git", "-C", repo, "push", "origin", "HEAD:refs/heads/feat/thing"],
-      ["git", "-C", repo, "rev-parse", "HEAD"],
+      ["git", ...at, "commit", "-q", "-m", "Rename total to sum"],
+      ["git", ...at, "push", "origin", "HEAD:refs/heads/feat/thing"],
+      ["git", ...at, "rev-parse", "HEAD"],
     ]);
     for (const call of h.git) {
       expect(
@@ -268,6 +271,17 @@ describe("confirmFix", () => {
     ).toBe("bad-request");
     expect(await confirmFix(h.deps, row.id, edits)).toBe("pushed");
     expect(await confirmFix(h.deps, row.id, edits)).toBe("nothing");
+  });
+});
+
+describe("confirmFix on someone else's MR", () => {
+  it("refuses before any git command or reply", async () => {
+    const h = harness({ owner: "somebody-else" });
+    const row = h.ready();
+    expect(await confirmFix(h.deps, row.id, KEEP(row))).toBe("not-yours");
+    expect(h.git).toEqual([]);
+    expect(h.posts).toEqual([]);
+    expect(h.db.fixes.get(row.id)?.status).toBe("push-failed");
   });
 });
 

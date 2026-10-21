@@ -1,4 +1,12 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -86,6 +94,7 @@ function harness(
     cliFails?: boolean;
     clis?: DetectedCli[];
     beforeCli?: () => void;
+    owner?: string;
   } = {},
 ) {
   const folder = mkdtempSync(join(tmpdir(), "suica-fix-runner-"));
@@ -100,6 +109,11 @@ function harness(
     calls.push({ file, args, options: execOptions });
     if (file === "git" && args.includes("clone")) {
       mkdirSync(args.at(-1) ?? "", { recursive: true });
+      const gitDir = args.find((arg) => arg.startsWith("--separate-git-dir="))?.slice(19);
+      if (gitDir !== undefined) {
+        mkdirSync(join(gitDir, "hooks"), { recursive: true });
+        writeFileSync(join(gitDir, "config"), "[core]\n\tbare = false\n");
+      }
       return Promise.resolve({ stdout: "", stderr: "" });
     }
     if (file === "git" && args.includes("rev-parse"))
@@ -149,6 +163,7 @@ function harness(
     now: () => NOW,
     detectClis: () => options.clis ?? [CLAUDE],
     statePath,
+    owner: () => Promise.resolve(options.owner ?? "me"),
     signal: controller.signal,
     cancelCheckMs: 5,
   };
@@ -218,6 +233,8 @@ describe("buildInvocation for a fix", () => {
     expect(claude).not.toContain("Bash");
     const codex = buildInvocation("codex", "p", "/w", undefined, "medium", "fix").args;
     expect(codex[codex.indexOf("--sandbox") + 1]).toBe("workspace-write");
+    // The Owner's own codex config may allow the network; a fix run never gets it.
+    expect(codex.join(" ")).toContain("-c sandbox_workspace_write.network_access=false");
   });
 });
 
@@ -252,17 +269,62 @@ describe("runAgentFix", () => {
       ["d1", "changed"],
       ["d2", "reply"],
     ]);
+    const dir = fixDir(h.statePath, row.id);
     const clone = h.calls.find((call) => call.args.includes("clone"));
     expect(clone?.args).toContain("--branch=feat/thing");
-    expect(clone?.args.at(-1)).toBe(join(fixDir(h.statePath, row.id), "repo"));
+    // The git folder lives outside the folder the model works in, so it cannot plant hooks or config.
+    expect(clone?.args).toContain(`--separate-git-dir=${join(dir, "git")}`);
+    expect(clone?.args.at(-1)).toBe(join(dir, "work", "repo"));
     const cli = h.calls.find((call) => call.file === "/bin/claude");
     expect(cli?.args).toContain("Edit");
+    expect(cli?.options.cwd).toBe(join(dir, "work"));
+    const after = h.calls.filter(
+      (call) =>
+        call.file === "git" && !call.args.includes("clone") && !call.args.includes("rev-parse"),
+    );
+    expect(after.map((call) => call.args.slice(0, 4))).toEqual([
+      ["--git-dir", join(dir, "git"), "--work-tree", join(dir, "work", "repo")],
+      ["--git-dir", join(dir, "git"), "--work-tree", join(dir, "work", "repo")],
+    ]);
+    // The stored diff is for reading: binary files show as "Binary files … differ", not base85.
+    expect(after[1]?.args.slice(4)).toEqual(["diff", "--cached"]);
     expect(cli?.options.timeoutMs).toBe(20 * 60_000);
     expect(h.seenFiles.get("threads.md")).toContain("Rename this");
     expect(h.seenFiles.get("notes.md")).toBe("keep it small");
-    expect(existsSync(join(fixDir(h.statePath, row.id), "repo"))).toBe(true);
+    expect(existsSync(join(fixDir(h.statePath, row.id), "work", "repo"))).toBe(true);
     expect(h.db.loadTokenUsage(0)[0]?.purpose).toBe("fix");
     expect(h.notifications.map((n) => n.title)).toEqual(["Perbaikan agen siap"]);
+  });
+
+  it("fails without running git when the git settings changed during the run", async () => {
+    let h = harness();
+    h = harness({
+      beforeCli: () => {
+        const id = h.db.fixes.nextQueued()?.id ?? h.db.fixes.list(0)[0]?.id ?? 1;
+        appendFileSync(
+          join(fixDir(h.statePath, id), "git", "config"),
+          "[core]\n\tfsmonitor = touch /tmp/pwned\n",
+        );
+      },
+    });
+    const row = h.queue();
+    await runAgentFix(h.deps, row);
+    expect(h.db.fixes.get(row.id)).toMatchObject({
+      status: "failed",
+      detail: "the checkout's git settings changed during the run",
+    });
+    expect(h.calls.some((call) => call.file === "git" && call.args.includes("add"))).toBe(false);
+  });
+
+  it("refuses an MR someone else wrote before cloning anything", async () => {
+    const h = harness({ owner: "somebody-else" });
+    const row = h.queue();
+    await runAgentFix(h.deps, row);
+    expect(h.db.fixes.get(row.id)).toMatchObject({
+      status: "failed",
+      detail: "the MR is not yours: Agent Fix only changes your own MRs",
+    });
+    expect(h.calls.some((call) => call.args.includes("clone"))).toBe(false);
   });
 
   it("turns changed into reply when the code did not change", async () => {

@@ -1,9 +1,8 @@
 import { rmSync } from "node:fs";
-import { join } from "node:path";
 import { z } from "zod";
 import { DEFAULT_ALERTS } from "./alerts.ts";
 import { execFailure } from "./exec.ts";
-import { fixDir } from "./fix-runner.ts";
+import { NOT_YOURS, fixDir, fixPaths, gitAt } from "./fix-runner.ts";
 import type { FixDeps } from "./fix-runner.ts";
 import type { FixRow, FixThread } from "./fix-store.ts";
 import { clean, renderAlert } from "./format.ts";
@@ -14,7 +13,16 @@ import type { Store } from "./store.ts";
 
 export interface ConfirmDeps extends Pick<
   FixDeps,
-  "store" | "exec" | "graphql" | "rest" | "notifier" | "log" | "now" | "statePath" | "alerts"
+  | "store"
+  | "exec"
+  | "graphql"
+  | "rest"
+  | "notifier"
+  | "log"
+  | "now"
+  | "statePath"
+  | "alerts"
+  | "owner"
 > {
   readonly config: Pick<FixDeps["config"], "gitlab">;
   readonly post: PostRunner;
@@ -27,7 +35,7 @@ export interface ConfirmEdits {
 }
 
 export type ConfirmOutcome =
-  "pushed" | "partial" | "branch-moved" | "push-failed" | "bad-request" | "nothing";
+  "pushed" | "partial" | "branch-moved" | "push-failed" | "not-yours" | "bad-request" | "nothing";
 
 const PUSH_TIMEOUT_MS = 5 * 60_000;
 const GIT_TIMEOUT_MS = 60_000;
@@ -159,6 +167,11 @@ export async function confirmFix(
   };
   try {
     const detail = await fetchMrDetail(deps.graphql, deps.rest, row.mrKey);
+    if (detail.author.username !== (await deps.owner())) {
+      fail(NOT_YOURS);
+      log.warn("fix push failed", { id, mr_key: row.mrKey, reason: "not-yours" });
+      return "not-yours";
+    }
     if (detail.headSha !== row.baseSha) {
       fail(BRANCH_MOVED);
       log.info("fix push failed", { id, mr_key: row.mrKey, reason: "branch-moved" });
@@ -166,9 +179,9 @@ export async function confirmFix(
     }
     let sha: string | null = null;
     if ((row.diff ?? "") !== "") {
-      const repo = join(fixDir(deps.statePath, id), "repo");
+      const at = gitAt(fixPaths(deps.statePath, id));
       try {
-        await deps.exec("git", ["-C", repo, "commit", "-q", "-m", commitMessage], {
+        await deps.exec("git", [...at, "commit", "-q", "-m", commitMessage], {
           timeoutMs: GIT_TIMEOUT_MS,
         });
       } catch (error) {
@@ -181,7 +194,7 @@ export async function confirmFix(
         // The branch name comes from GitLab and travels inside one refspec argument.
         await deps.exec(
           "git",
-          ["-C", repo, "push", "origin", `HEAD:refs/heads/${detail.sourceBranch}`],
+          [...at, "push", "origin", `HEAD:refs/heads/${detail.sourceBranch}`],
           {
             timeoutMs: PUSH_TIMEOUT_MS,
           },
@@ -192,7 +205,7 @@ export async function confirmFix(
         log.warn("fix push failed", { id, mr_key: row.mrKey, reason: "push" });
         return "push-failed";
       }
-      const { stdout } = await deps.exec("git", ["-C", repo, "rev-parse", "HEAD"], {
+      const { stdout } = await deps.exec("git", [...at, "rev-parse", "HEAD"], {
         timeoutMs: GIT_TIMEOUT_MS,
       });
       sha = stdout.trim();
