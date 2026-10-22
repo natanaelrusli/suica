@@ -16,6 +16,8 @@ function base(status: AgentReviewStatus, headSha: string | null, mrKey = "g/p!1"
     status,
     mrTitle: null,
     model: null,
+    skill: null,
+    modelChoice: null,
     startedAt: null,
     cli: null,
     headSha,

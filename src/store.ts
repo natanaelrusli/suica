@@ -109,6 +109,13 @@ export interface AgentReviewRow {
   readonly mrTitle: string | null;
   /** The model that wrote it, as the CLI reported it; null until it ran or when not reported. */
   readonly model: string | null;
+  /**
+   * The skill it follows: the Owner's choice while queued, the one used once it started; null for
+   * the default (`review.skill` when it runs) and on rows from before schema 18.
+   */
+  readonly skill: string | null;
+  /** The model the Owner chose for this review; null for `review.model`. */
+  readonly modelChoice: string | null;
   /** When the run started; null while queued. */
   readonly startedAt: number | null;
   /** The CLI that ran it; null until it starts. */
@@ -135,6 +142,7 @@ export interface AgentReviewRow {
 
 export interface AgentReviewFields {
   readonly mrTitle?: string;
+  readonly skill?: string;
   readonly model?: string;
   readonly startedAt?: number;
   readonly cli?: string;
@@ -145,6 +153,12 @@ export interface AgentReviewFields {
   readonly approval?: ApprovalVerdict;
   readonly body?: string;
   readonly detail?: string;
+}
+
+/** A skill or model the Owner picked for one review; left out means the config's. */
+export interface ReviewChoice {
+  readonly skill?: string;
+  readonly model?: string;
 }
 
 /** What the poll loop knows about the head of one MR waiting for the Owner's review. */
@@ -220,11 +234,16 @@ export interface Store {
     now: number,
   ): boolean;
   /** Undefined when a review of this MR is already queued or running. */
+  /**
+   * Undefined when the MR already has an open review; with a `choice`, a queued one takes it and
+   * keeps its place (the id is returned), while a running one is left alone.
+   */
   queueAgentReview(
     mrKey: string,
     trigger: AgentReviewTrigger,
     now: number,
     mrTitle?: string,
+    choice?: ReviewChoice,
   ): number | undefined;
   /** Every MR that has a review row of any status. */
   agentReviewedKeys(): Set<string>;
@@ -249,9 +268,16 @@ export interface Store {
   saveReviewHeads(heads: ReadonlyMap<string, ReviewHead>): void;
   /**
    * True when this commit already has a review that is ready, being posted or posted, of the same
-   * description (a row without a description hash, from an older version, counts as the same).
+   * description (a row without a description hash, from an older version, counts as the same) and
+   * the same skill (a row without one counts as following `defaultSkill`).
    */
-  hasAgentReviewAt(mrKey: string, headSha: string, descriptionSha: string): boolean;
+  hasAgentReviewAt(
+    mrKey: string,
+    headSha: string,
+    descriptionSha: string,
+    skill: string,
+    defaultSkill: string,
+  ): boolean;
   /** Only from one of `from`; false when the row was elsewhere, so two callers never both win. */
   transitionAgentReview(
     id: number,
@@ -272,7 +298,12 @@ export interface Store {
   close(): void;
 }
 
-const SCHEMA_VERSION = 17;
+const SCHEMA_VERSION = 18;
+/** The skill and model the Owner picked for one review. */
+const SCHEMA_V18_COLUMNS: readonly (readonly [string, string])[] = [
+  ["skill", "TEXT"],
+  ["model_choice", "TEXT"],
+];
 /** The Owner's watch choice per MR; no row follows `fix.watch`. */
 const SCHEMA_V17 = `
 CREATE TABLE IF NOT EXISTS mr_watch (mr_key TEXT PRIMARY KEY, watched INTEGER NOT NULL);
@@ -552,6 +583,8 @@ function toAgentReview(row: Row): AgentReviewRow {
     status,
     mrTitle: nullableText(row, "mr_title"),
     model: nullableText(row, "model"),
+    skill: nullableText(row, "skill"),
+    modelChoice: nullableText(row, "model_choice"),
     startedAt: typeof row["started_at"] === "number" ? row["started_at"] : null,
     cli: nullableText(row, "cli"),
     headSha: nullableText(row, "head_sha"),
@@ -636,6 +669,13 @@ function initSchema(db: DatabaseSync): void {
     db.exec(SCHEMA_V16);
   }
   if (version < 17) db.exec(SCHEMA_V17);
+  if (version < 18) {
+    for (const [column, type] of SCHEMA_V18_COLUMNS) {
+      if (!hasColumn(db, "agent_review", column)) {
+        db.exec(`ALTER TABLE agent_review ADD COLUMN ${column} ${type}`);
+      }
+    }
+  }
   if (version !== SCHEMA_VERSION) db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 }
 
@@ -863,24 +903,37 @@ export function openStore(path: string): Store {
       restrictPermissions(path);
     },
 
-    queueAgentReview(mrKey, trigger, now, mrTitle) {
+    queueAgentReview(mrKey, trigger, now, mrTitle, choice) {
       const marks = (statuses: readonly string[]): string => statuses.map(() => "?").join(", ");
       db.exec("BEGIN IMMEDIATE");
       try {
         const open = db
           .prepare(
-            `SELECT 1 FROM agent_review WHERE mr_key = ? AND status IN (${marks(OPEN_REVIEW_STATUSES)})`,
+            `SELECT id, status FROM agent_review WHERE mr_key = ? AND status IN (${marks(OPEN_REVIEW_STATUSES)})`,
           )
           .get(mrKey, ...OPEN_REVIEW_STATUSES);
         let id: number | undefined;
         if (open === undefined) {
           const result = db
             .prepare(
-              `INSERT INTO agent_review (mr_key, trigger, status, mr_title, created_at, updated_at)
-               VALUES (?, ?, 'queued', ?, ?, ?)`,
+              `INSERT INTO agent_review (mr_key, trigger, status, mr_title, skill, model_choice, created_at, updated_at)
+               VALUES (?, ?, 'queued', ?, ?, ?, ?, ?)`,
             )
-            .run(mrKey, trigger, mrTitle ?? null, now, now);
+            .run(
+              mrKey,
+              trigger,
+              mrTitle ?? null,
+              choice?.skill ?? null,
+              choice?.model ?? null,
+              now,
+              now,
+            );
           id = Number(result.lastInsertRowid);
+        } else if (choice !== undefined && open["status"] === "queued") {
+          id = integer(open, "id");
+          db.prepare(
+            "UPDATE agent_review SET skill = ?, model_choice = ?, updated_at = ? WHERE id = ?",
+          ).run(choice.skill ?? null, choice.model ?? null, now, id);
         }
         db.prepare(
           `DELETE FROM agent_review WHERE updated_at < ? AND status IN (${marks(DONE_REVIEW_STATUSES)})`,
@@ -1016,22 +1069,22 @@ export function openStore(path: string): Store {
       restrictPermissions(path);
     },
 
-    hasAgentReviewAt(mrKey, headSha, descriptionSha) {
+    hasAgentReviewAt(mrKey, headSha, descriptionSha, skill, defaultSkill) {
       return (
         db
           .prepare(
             `SELECT 1 FROM agent_review WHERE mr_key = ? AND head_sha = ?
-               AND (description_sha IS NULL OR description_sha = ?)
+               AND (description_sha IS NULL OR description_sha = ?) AND COALESCE(skill, ?) = ?
                AND status IN ('ready', 'posting', 'posted')`,
           )
-          .get(mrKey, headSha, descriptionSha) !== undefined
+          .get(mrKey, headSha, descriptionSha, defaultSkill, skill) !== undefined
       );
     },
 
     transitionAgentReview(id, from, to, fields, now) {
       const result = db
         .prepare(
-          `UPDATE agent_review SET status = ?, cli = COALESCE(?, cli), head_sha = COALESCE(?, head_sha),
+          `UPDATE agent_review SET status = ?, skill = COALESCE(?, skill), cli = COALESCE(?, cli), head_sha = COALESCE(?, head_sha),
              previous_sha = COALESCE(?, previous_sha), description_sha = COALESCE(?, description_sha),
              approved = COALESCE(?, approved), approval = COALESCE(?, approval), body = COALESCE(?, body), detail = COALESCE(?, detail), mr_title = COALESCE(?, mr_title),
              model = COALESCE(?, model), started_at = COALESCE(?, started_at), updated_at = ?
@@ -1039,6 +1092,7 @@ export function openStore(path: string): Store {
         )
         .run(
           to,
+          fields.skill ?? null,
           fields.cli ?? null,
           fields.headSha ?? null,
           fields.previousSha ?? null,

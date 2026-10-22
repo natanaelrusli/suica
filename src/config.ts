@@ -18,10 +18,14 @@ const positiveInt = z.number().int().positive();
 const APPROVE_RULES_MAX = 20;
 const APPROVE_RULE_MAX = 500;
 
-// Passed as one argument after --model / -m; a leading letter or digit keeps it from being a flag.
+/** Passed as one argument after --model / -m; a leading letter or digit keeps it from being a flag. */
+export const MODEL_NAME = /^[A-Za-z0-9][\w.:[\]/-]*$/;
+/** A skill name only, as typed after the slash: it ends up in a prompt and a file path. */
+export const SKILL_NAME = /^[\w-]+(:[\w-]+)?$/;
+
 const modelSchema = z
   .string()
-  .regex(/^[A-Za-z0-9][\w.:[\]/-]*$/, "must be a model name such as sonnet, opus or haiku");
+  .regex(MODEL_NAME, "must be a model name such as sonnet, opus or haiku");
 
 const sendModeSchema = z.enum(["auto", "approval", "dry-run"]);
 const clockSchema = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "must be HH:MM (24 hours)");
@@ -114,10 +118,9 @@ export const configSchema = z
         approveBy: z.enum(APPROVE_BY).default("agent"),
         // The Owner's own rules for the agent, one per line; they win over approveWhen.
         approveRules: z.array(z.string().max(APPROVE_RULE_MAX)).max(APPROVE_RULES_MAX).default([]),
-        // A skill name only, as typed after the slash: it ends up in a prompt and a file path.
         skill: z
           .string()
-          .regex(/^[\w-]+(:[\w-]+)?$/, "must be a skill name such as plugin:skill")
+          .regex(SKILL_NAME, "must be a skill name such as plugin:skill")
           .default("madhani:madhani-code-review"),
         model: modelSchema.optional(),
         // How hard the CLI thinks: claude --effort, codex model_reasoning_effort (max is xhigh there).

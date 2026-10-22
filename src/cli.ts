@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { installAgent, plistPath, uninstallAgent } from "./agent-install.ts";
 import { buildStatus, loadStatusInput, readServiceStatus, restartService } from "./agent-status.ts";
 import { actionJson, buildAgentState } from "./agent-state.ts";
-import { defaultConfigPath, defaultStatePath, loadConfig } from "./config.ts";
+import { MODEL_NAME, defaultConfigPath, defaultStatePath, loadConfig } from "./config.ts";
 import { applyConfigEdits, parseSaveRequest, showConfig } from "./config-edit.ts";
 import type { SaveResultJson } from "./config-edit.ts";
 import { defaultExec } from "./exec.ts";
@@ -16,7 +16,8 @@ import {
   glabRest,
   glabRunner,
 } from "./gitlab.ts";
-import { detectModelClis } from "./model-cli.ts";
+import { MODEL_CLI_CHOICES, detectModelClis, resolveModelCli } from "./model-cli.ts";
+import { buildReviewOptions, listSkills } from "./review-options.ts";
 import { closeMergeRequest, commentOnMergeRequest, mergeMergeRequest } from "./mr-actions.ts";
 import {
   approveMergeRequest,
@@ -65,7 +66,7 @@ import { realProbe } from "./office/probe.ts";
 import { buildUsage } from "./usage.ts";
 
 const USAGE =
-  "usage: suica <once|status|state|stats|usage|office --json|office chat <agent> <sessionId> --json|office send <agent> <sessionId> --json (message on stdin)|pause|resume|pending [--all]|send <id> [--json]|skip <id> [--json]|retry <id> [--json]|selftest|message <key> --json (request on stdin)|reviews --json|mr <key> --json|mr approve <key> <sha> --json|mr comment <key> --json (body on stdin)|mr close <key> --json|mr merge <key> <sha> [--squash] [--remove-source-branch] [--when-pipeline-succeeds] --json (message on stdin)|review queue <key> --json|review post <id> [--inline|--comment] --json|review discard <id> --json|review cancel <id> --json|fix list --json|fix queue <key> [--pipeline] --json|fix watch <key> --json|fix unwatch <key> --json|fix confirm <id> --json (edits on stdin)|fix retry <id> --json (note on stdin)|fix discard <id> --json|fix cancel <id> --json|fix replies <id> --json|config show --json|config set --json|templates show --json|templates set --json|agent install|agent uninstall|agent restart --json>\n";
+  "usage: suica <once|status|state|stats|usage|office --json|office chat <agent> <sessionId> --json|office send <agent> <sessionId> --json (message on stdin)|pause|resume|pending [--all]|send <id> [--json]|skip <id> [--json]|retry <id> [--json]|selftest|message <key> --json (request on stdin)|reviews --json|mr <key> --json|mr approve <key> <sha> --json|mr comment <key> --json (body on stdin)|mr close <key> --json|mr merge <key> <sha> [--squash] [--remove-source-branch] [--when-pipeline-succeeds] --json (message on stdin)|review options [--cli <id>] --json|review queue <key> [--skill <name>] [--model <name>] --json|review post <id> [--inline|--comment] --json|review discard <id> --json|review cancel <id> --json|fix list --json|fix queue <key> [--pipeline] --json|fix watch <key> --json|fix unwatch <key> --json|fix confirm <id> --json (edits on stdin)|fix retry <id> --json (note on stdin)|fix discard <id> --json|fix cancel <id> --json|fix replies <id> --json|config show --json|config set --json|templates show --json|templates set --json|agent install|agent uninstall|agent restart --json>\n";
 const TEAMS_DISABLED = "teams is disabled: set teams.enabled to true in the config\n";
 const SHOWN_WITH_ALL = 50;
 
@@ -307,14 +308,34 @@ async function reviewsJson(): Promise<number> {
   }
 }
 
+/** The argument after `flag`; undefined when the flag is not given, "" when nothing follows it. */
+function flagValue(argv: readonly string[], flag: string): string | undefined {
+  const at = argv.indexOf(flag);
+  return at === -1 ? undefined : (argv[at + 1] ?? "");
+}
+
+/**
+ * `suica review options [--cli <id>]`: the skills and models a review can use, for the CLI that
+ * reviews or the one named; see contracts/review-options.v1.json.
+ */
+function reviewOptions(argv: readonly string[]): number {
+  const config = loadConfig(defaultConfigPath());
+  const named = flagValue(argv, "--cli");
+  const choice = MODEL_CLI_CHOICES.find((id) => id === named) ?? config.model.cli;
+  const cli = resolveModelCli(choice, detectModelClis());
+  process.stdout.write(`${JSON.stringify(buildReviewOptions(config.review, cli))}\n`);
+  return 0;
+}
+
 /**
  * `suica review queue|post|discard|cancel`: the background agent starts a queued review within a few
  * seconds; post and discard act on a review that waits for the Owner, and cancel stops a queued or
- * running one. `post` takes `--inline` or `--comment`, else `review.postAs`. Each prints
- * `{"status": …}`.
+ * running one. `queue` takes `--skill` (an installed skill) and `--model` for that review only.
+ * `post` takes `--inline` or `--comment`, else `review.postAs`. Each prints `{"status": …}`.
  */
 async function reviewCommand(argv: readonly string[]): Promise<number> {
   const [action, target] = [argv[1], argv[2]];
+  if (action === "options") return reviewOptions(argv);
   const config = loadConfig(defaultConfigPath());
   const store = openStore(config.statePath ?? defaultStatePath());
   const reply = (status: string, ok: boolean): number => {
@@ -324,7 +345,21 @@ async function reviewCommand(argv: readonly string[]): Promise<number> {
   try {
     if (action === "queue") {
       if (target === undefined || parseMrKey(target) === undefined) return reply("bad-key", false);
-      const id = store.queueAgentReview(target, "manual", Date.now());
+      const skill = flagValue(argv, "--skill");
+      const model = flagValue(argv, "--model");
+      const installed = listSkills(config.review.skill).filter((item) => !item.missing);
+      if (skill !== undefined && !installed.some((item) => item.name === skill)) {
+        return reply("bad-skill", false);
+      }
+      if (model !== undefined && !MODEL_NAME.test(model)) return reply("bad-model", false);
+      const choice =
+        skill === undefined && model === undefined
+          ? undefined
+          : {
+              ...(skill === undefined ? {} : { skill }),
+              ...(model === undefined ? {} : { model }),
+            };
+      const id = store.queueAgentReview(target, "manual", Date.now(), undefined, choice);
       return id === undefined ? reply("already-queued", true) : reply("queued", true);
     }
     const id = parseId(target);
