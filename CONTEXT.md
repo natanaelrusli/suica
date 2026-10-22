@@ -97,5 +97,9 @@ The name of a Session as its Coding Agent knows it (Claude Code's session name) 
 _Avoid_: Session name, label
 
 **Chat Panel**:
-The read-only view of a Session's conversation that opens when its figure is clicked in the Office.
+The view of a Session's conversation that opens when its figure is clicked in the Office, with a field to send its agent a message.
 _Avoid_: Chat window, transcript view
+
+**Boss**:
+The figure that walks to a worker's Desk while the Owner writes to that Session's agent from the Chat Panel, and says the message sent.
+_Avoid_: Manager, owner figure

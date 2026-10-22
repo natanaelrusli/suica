@@ -55,6 +55,17 @@ struct AppearanceView: View {
                     ForEach(OfficeEnvironment.allCases) { Text($0.title).tag($0) }
                 }
                 .pickerStyle(.segmented)
+                Picker(Copy.officeTimeOfDayPicker, selection: $settings.officeTimeOfDay) {
+                    ForEach(OfficeTimeOfDay.allCases) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                Picker(Copy.officeBubblesPicker, selection: $settings.officeBubbles) {
+                    ForEach(OfficeBubbles.allCases) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                Toggle(Copy.officeStreetLifeToggle, isOn: $settings.officeStreetLife)
+                Toggle(Copy.officeSlowTurnToggle, isOn: $settings.officeSlowTurn)
+                Toggle(Copy.officeBossToggle, isOn: $settings.officeBoss)
                 Text(Copy.officeStyleHint).font(.caption).foregroundStyle(.secondary)
             } header: {
                 heading(Copy.officeHeading, "building.2")

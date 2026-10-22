@@ -175,3 +175,41 @@ private final class MemoryStore: PreferenceStore {
         }
     }
 }
+
+@MainActor @Test func officeOptionsStartFromTheirDefaultsAreKeptAndReset() {
+    withFreshStore { defaults in
+        let settings = AppearanceSettings(defaults: defaults)
+        #expect(settings.officeTimeOfDay == .system && settings.officeBubbles == .all)
+        #expect(settings.officeStreetLife && !settings.officeSlowTurn && settings.officeBoss)
+        settings.officeTimeOfDay = .night
+        settings.officeBubbles = .selected
+        settings.officeStreetLife = false
+        settings.officeSlowTurn = true
+        settings.officeBoss = false
+        #expect(!settings.isDefault)
+        let again = AppearanceSettings(defaults: defaults)
+        #expect(again.officeTimeOfDay == .night && again.officeBubbles == .selected)
+        #expect(!again.officeStreetLife && again.officeSlowTurn && !again.officeBoss)
+        again.reset()
+        #expect(again.isDefault && defaults.values.isEmpty)
+    }
+}
+
+@MainActor @Test func anUnknownStoredTimeOfDayFallsBackToFollowingTheAppearance() {
+    withFreshStore { defaults in
+        defaults.set("dusk", forKey: "appearance.officeTimeOfDay")
+        defaults.set("some", forKey: "appearance.officeBubbles")
+        let settings = AppearanceSettings(defaults: defaults)
+        #expect(settings.officeTimeOfDay == .system && settings.officeBubbles == .all)
+    }
+}
+
+@Test func timeOfDayFollowsTheModeUnlessPinned() {
+    #expect(OfficeTimeOfDay.system.isNight(darkMode: true) && !OfficeTimeOfDay.system.isNight(darkMode: false))
+    #expect(!OfficeTimeOfDay.day.isNight(darkMode: true) && OfficeTimeOfDay.night.isNight(darkMode: false))
+}
+
+@Test func bubblesShowForEveryoneTheSelectedOrNobody() {
+    #expect(OfficeBubbles.all.shows(selected: false) && OfficeBubbles.selected.shows(selected: true))
+    #expect(!OfficeBubbles.selected.shows(selected: false) && !OfficeBubbles.off.shows(selected: true))
+}

@@ -42,6 +42,14 @@ private actor FakeOfficeClient: OfficeClient {
         guard !chats.isEmpty else { throw AgentError.launchFailed }
         return try chats.removeFirst().get()
     }
+    private var sends: [Result<ActionResult, AgentError>] = []
+    private(set) var sent: [String] = []
+    func script(sends: [Result<ActionResult, AgentError>]) { self.sends = sends }
+    func send(agent: String, sessionId: String, message: String) async throws(AgentError) -> ActionResult {
+        sent.append("\(agent)/\(sessionId): \(message)")
+        guard !sends.isEmpty else { throw AgentError.launchFailed }
+        return try sends.removeFirst().get()
+    }
 }
 
 private func chat(_ messages: [OfficeChatMessage], title: String? = "A title") -> OfficeChatDocument {
@@ -471,4 +479,56 @@ private func rooms(_ counts: [Int]) -> [OfficeRoom] {
     #expect(trackpad > 1)
     #expect(trackpad < wheel)
     #expect(OfficeCamera.zoomFactor(scrollDelta: 100, precise: true) == OfficeCamera.zoomFactor(scrollDelta: 40, precise: true))
+}
+
+// MARK: - Model: writing to an agent
+
+@MainActor @Test func aMessageGoesToTheSelectedSessionAndTheConversationIsReadAgain() async {
+    let client = FakeOfficeClient([], chats: [.success(chat([OfficeChatMessage(at: 1, role: .assistant, text: "Done")]))])
+    await client.script(sends: [.success(ActionResult(code: "sent"))])
+    let model = OfficeModel(client: client)
+    model.apply(document([session("a", status: .waiting)]), now: at(0))
+    model.select("claude/a")
+    #expect(await model.send("  Fix the test \n"))
+    #expect(await client.sent == ["claude/a: Fix the test"])
+    #expect(model.sendingTo == nil && model.sendNotice == nil)
+    #expect(model.chat?.messages.first?.text == "Done")
+}
+
+@MainActor @Test func aMessageThatDidNotGoSaysWhy() async {
+    let client = FakeOfficeClient([])
+    await client.script(sends: [.success(ActionResult(code: "busy")), .failure(.timedOut)])
+    let model = OfficeModel(client: client)
+    model.apply(document([session("a")]), now: at(0))
+    model.select("claude/a")
+    #expect(await model.send("hi") == false)
+    #expect(model.sendNotice == Copy.officeBusyHint)
+    #expect(await model.send("hi") == false)
+    #expect(model.sendNotice == Copy.agentTimedOut)
+    model.dismissSendNotice()
+    #expect(model.sendNotice == nil)
+}
+
+@MainActor @Test func nothingIsSentWithoutASelectionOrWithABlankMessage() async {
+    let client = FakeOfficeClient([])
+    let model = OfficeModel(client: client)
+    model.apply(document([session("a")]), now: at(0))
+    #expect(await model.send("hi") == false)
+    model.select("claude/a")
+    #expect(await model.send(" \n ") == false)
+    #expect(await client.sent.isEmpty && model.sendingTo == nil)
+}
+
+@Test func theBossLooksLikeNoAgentsFigure() {
+    #expect(OfficeLook.boss.shirt == .collar && OfficeLook.boss.extra == .glasses)
+    for agent in ["claude", "codex", "gemini", "aider"] {
+        #expect(OfficeLook.boss.shirtColour != OfficeAgent(kind: agent).colour)
+    }
+}
+
+@Test func theBossSaysTheFirstLineOfAMessageAtMostSixtyCharacters() {
+    #expect(OfficeLook.bossLine("Fix the test\nThen push") == "Fix the test")
+    let long = OfficeLook.bossLine(String(repeating: "a", count: 80))
+    #expect(long.count == 60 && long.hasSuffix("…"))
+    #expect(OfficeLook.bossLine(String(repeating: "b", count: 60)).count == 60)
 }
