@@ -5,6 +5,7 @@ import SwiftUI
 struct ConfigurationView: View {
     let window: WindowModel
     let editor: ConfigEditorModel
+    let onboarding: OnboardingModel
     let navigator: Navigator
     /// One category from the sidebar, or nil for the overview of all of them. A search looks
     /// through every setting.
@@ -73,7 +74,11 @@ struct ConfigurationView: View {
         }
         if let text = window.banner { NoticeBox(text: text, tint: .secondary, onClose: window.dismissBanner) }
         if !document.exists {
-            Label(Copy.configMissing, systemImage: "doc.badge.plus").foregroundStyle(.secondary)
+            HStack {
+                Label(Copy.configMissing, systemImage: "doc.badge.plus").foregroundStyle(.secondary)
+                Spacer()
+                Button(Copy.setupOpen) { Task { await onboarding.open() } }
+            }
         }
         if !document.issues.isEmpty { issues(document.issues) }
     }

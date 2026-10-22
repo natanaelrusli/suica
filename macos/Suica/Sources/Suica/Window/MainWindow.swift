@@ -194,6 +194,7 @@ struct MainWindow: View {
     let fixes: FixesModel
     let templates: TemplateEditorModel
     let office: OfficeModel
+    @Bindable var onboarding: OnboardingModel
     let settings: AppearanceSettings
     @Bindable var navigator: Navigator
     @State private var columns: NavigationSplitViewVisibility = .all
@@ -269,6 +270,17 @@ struct MainWindow: View {
         }
         // Cancelled when the window closes.
         .task { await window.runRefreshLoop(every: .seconds(30)) }
+        // A first run: no config file yet.
+        .task { await onboarding.showIfNeeded() }
+        .sheet(isPresented: $onboarding.presented) {
+            OnboardingView(model: onboarding) {
+                Task {
+                    await window.refresh()
+                    await editor.load()
+                }
+            }
+            .interactiveDismissDisabled(onboarding.finishing)
+        }
     }
 
     /// The row the sidebar marks: Configuration for its own pages, which have no row.
@@ -384,7 +396,9 @@ struct MainWindow: View {
             }
         case .usage: UsageView(window: window)
         case .logs: LogsView(window: window)
-        case .configuration: ConfigurationView(window: window, editor: editor, navigator: navigator, category: item.category)
+        case .configuration: ConfigurationView(
+                window: window, editor: editor, onboarding: onboarding, navigator: navigator,
+                category: item.category)
         case .appearance: AppearanceView(settings: settings)
         case .office: OfficeView(model: office, settings: settings)
         case .system: SystemView()

@@ -152,3 +152,15 @@ private let edits = [
         try await client([output("", exit: 1)]).0.restartAgent()
     }
 }
+
+@Test func setupRunsGitlabCheckAndAgentInstallReadingTheirJsonOnExitOne() async throws {
+    let (client, runner) = client([
+        output(#"{"status":"gitlab-auth","username":null}"#, exit: 1),
+        output(#"{"status":"no-config"}"#, exit: 1),
+    ])
+    #expect(try await client.checkGitlab(host: "-x") == GitlabCheck(status: "gitlab-auth", username: nil))
+    #expect(try await client.installAgent().code == "no-config")
+    let calls = await runner.invocations
+    #expect(calls.map { $0.arguments } == [["gitlab", "check", "--json", "--", "-x"], ["agent", "install", "--json"]])
+    #expect(calls.map { $0.timeout } == [90, 30])
+}
