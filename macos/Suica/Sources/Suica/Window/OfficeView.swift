@@ -164,8 +164,8 @@ struct OfficeView: View {
     }
 }
 
-/// The RealityKit view with its camera controls: drag to orbit, pinch or scroll to zoom, click a
-/// figure to select it.
+/// The RealityKit view with its camera controls: drag to orbit, right-drag, ⌥-drag or two-finger
+/// scroll to pan, the wheel, a pinch or ⌘-scroll to zoom, click a figure to select it.
 private struct OfficeSceneView: View {
     let model: OfficeModel
     let controller: OfficeSceneController
@@ -218,13 +218,17 @@ private struct OfficeSceneView: View {
                     .onEnded { _ in lastMagnification = 1 }
             )
             .background(
-                ScrollControl { dx, dy, precise, command in
+                PointerControl { dx, dy, precise, command in
                     if precise && !command {
                         // Two fingers on a trackpad slide the view.
                         controller.pan(deltaX: dx, deltaY: dy)
                     } else {
-                        controller.zoom(by: 1 + dy * (precise ? 0.01 : 0.05))
+                        // The mouse wheel, or ⌘ and two fingers, zooms.
+                        controller.zoom(by: Float(OfficeCamera.zoomFactor(scrollDelta: Double(dy), precise: precise)))
                     }
+                } onSecondaryDrag: { dx, dy in
+                    // The mouse's right or middle button slides the view, as ⌥-drag does.
+                    controller.pan(deltaX: dx, deltaY: dy)
                 })
         }
     }
@@ -264,46 +268,88 @@ struct WindowVisibility: NSViewRepresentable {
     }
 }
 
-/// Scroll over the scene: two fingers slide it, the mouse wheel and ⌘-scroll zoom it.
-private struct ScrollControl: NSViewRepresentable {
+/// The pointer events SwiftUI's gestures do not see, over the scene: the scroll wheel (two
+/// fingers slide the view, the mouse wheel and ⌘-scroll zoom it) and a drag with the mouse's right
+/// or middle button (slides the view).
+private struct PointerControl: NSViewRepresentable {
     /// Scroll deltas in points, whether the device is precise (a trackpad) and ⌘ is held.
     let onScroll: (Float, Float, Bool, Bool) -> Void
+    /// How far the pointer moved since the last call, in points, right and down positive.
+    let onSecondaryDrag: (Float, Float) -> Void
 
     func makeNSView(context: Context) -> CatcherView {
         let view = CatcherView()
         view.onScroll = onScroll
+        view.onSecondaryDrag = onSecondaryDrag
         return view
     }
 
-    func updateNSView(_ view: CatcherView, context: Context) { view.onScroll = onScroll }
+    func updateNSView(_ view: CatcherView, context: Context) {
+        view.onScroll = onScroll
+        view.onSecondaryDrag = onSecondaryDrag
+    }
 
     final class CatcherView: NSView {
         var onScroll: ((Float, Float, Bool, Bool) -> Void)?
+        var onSecondaryDrag: ((Float, Float) -> Void)?
         private var monitor: Any?
+        /// Where the pointer was, in the window, while a right or middle button drag runs.
+        private var dragPoint: NSPoint?
 
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
         override func viewWillMove(toWindow newWindow: NSWindow?) {
             if let monitor { NSEvent.removeMonitor(monitor) }
             monitor = nil
+            dragPoint = nil
             guard newWindow != nil else { return }
-            monitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+            let events: NSEvent.EventTypeMask = [
+                .scrollWheel, .rightMouseDown, .rightMouseDragged, .rightMouseUp, .otherMouseDown,
+                .otherMouseDragged, .otherMouseUp,
+            ]
+            monitor = NSEvent.addLocalMonitorForEvents(matching: events) { [weak self] event in
                 guard let self, self.window != nil, event.window === self.window else { return event }
-                let point = self.convert(event.locationInWindow, from: nil)
-                guard self.bounds.contains(point) else { return event }
-                // A scroll view of its own under the pointer (the Chat Panel's conversation, a
-                // notice) keeps its scroll: only the page's own scroll view, which this catcher
-                // shares, hands the wheel to the camera.
-                if let hit = self.window?.contentView?.hitTest(event.locationInWindow),
-                    let scroller = hit.enclosingScrollView, scroller !== self.enclosingScrollView
-                {
-                    return event
+                switch event.type {
+                case .scrollWheel:
+                    return self.scroll(event)
+                case .rightMouseDown, .otherMouseDown:
+                    // The drag starts over the scene and follows the pointer wherever it goes.
+                    guard self.covers(event) else { return event }
+                    self.dragPoint = event.locationInWindow
+                    return nil
+                case .rightMouseDragged, .otherMouseDragged:
+                    guard let from = self.dragPoint else { return event }
+                    let to = event.locationInWindow
+                    // Window coordinates grow upwards; the pan wants screen deltas, down positive.
+                    self.onSecondaryDrag?(Float(to.x - from.x), Float(from.y - to.y))
+                    self.dragPoint = to
+                    return nil
+                default:
+                    guard self.dragPoint != nil else { return event }
+                    self.dragPoint = nil
+                    return nil
                 }
-                self.onScroll?(
-                    Float(event.scrollingDeltaX), Float(event.scrollingDeltaY), event.hasPreciseScrollingDeltas,
-                    event.modifierFlags.contains(.command))
-                return nil
             }
+        }
+
+        private func covers(_ event: NSEvent) -> Bool {
+            bounds.contains(convert(event.locationInWindow, from: nil))
+        }
+
+        private func scroll(_ event: NSEvent) -> NSEvent? {
+            guard covers(event) else { return event }
+            // A scroll view of its own under the pointer (the Chat Panel's conversation, a
+            // notice) keeps its scroll: only the page's own scroll view, which this catcher
+            // shares, hands the wheel to the camera.
+            if let hit = window?.contentView?.hitTest(event.locationInWindow),
+                let scroller = hit.enclosingScrollView, scroller !== enclosingScrollView
+            {
+                return event
+            }
+            onScroll?(
+                Float(event.scrollingDeltaX), Float(event.scrollingDeltaY), event.hasPreciseScrollingDeltas,
+                event.modifierFlags.contains(.command))
+            return nil
         }
     }
 }
