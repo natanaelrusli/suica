@@ -494,6 +494,23 @@ public final class ReviewsModel {
         list?.yourMergeRequests.contains { $0.key == key } ?? false
     }
 
+    /// Whether automatic fixes reach your MR.
+    public func isWatched(_ key: String) -> Bool {
+        list?.yourMergeRequests.first { $0.key == key }?.isWatched ?? true
+    }
+
+    /// Shows a watch choice the agent took at once; the next refresh reads it back.
+    public func showWatched(_ key: String, _ watched: Bool) {
+        guard let list else { return }
+        self.list = ReviewListDocument(
+            version: list.version, me: list.me, mergeRequests: list.mergeRequests,
+            yourMergeRequests: list.yourMergeRequests.map { mr in
+                var mr = mr
+                if mr.key == key { mr.watched = watched }
+                return mr
+            })
+    }
+
     /// The MR page offers Review with agent or Review again; see `ReviewSummary.offersReview`.
     public func offersReview(for key: String) -> Bool {
         list?.mergeRequests.first { $0.key == key }?.offersReview ?? true

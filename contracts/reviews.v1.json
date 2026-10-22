@@ -102,7 +102,8 @@
         "iid": "41",
         "status": "FAILED",
         "url": "https://gitlab.example/g/p/-/pipelines/2921"
-      }
+      },
+      "watched": true
     },
     {
       "key": "g/p!10",
@@ -113,7 +114,8 @@
       "reviewers": [],
       "approvedByAll": false,
       "fix": null,
-      "pipeline": null
+      "pipeline": null,
+      "watched": false
     }
   ]
 }

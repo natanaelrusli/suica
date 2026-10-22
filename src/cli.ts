@@ -36,7 +36,7 @@ import {
 import { parseTemplateRequest, saveTemplate, showTemplates } from "./template-edit.ts";
 import { defaultTemplatesPath } from "./teams/templates.ts";
 import type { TemplateSaveJson } from "./template-edit.ts";
-import { queueManualFix } from "./agent-fix.ts";
+import { isWatched, queueManualFix, setWatch } from "./agent-fix.ts";
 import { queuePipelineFix } from "./pipeline-watch.ts";
 import { fetchHeadPipeline } from "./pipelines.ts";
 import {
@@ -64,7 +64,7 @@ import { realProbe } from "./office/probe.ts";
 import { buildUsage } from "./usage.ts";
 
 const USAGE =
-  "usage: suica <once|status|state|stats|usage|office --json|office chat <agent> <sessionId> --json|office send <agent> <sessionId> --json (message on stdin)|pause|resume|pending [--all]|send <id> [--json]|skip <id> [--json]|retry <id> [--json]|selftest|reviews --json|mr <key> --json|mr approve <key> <sha> --json|mr comment <key> --json (body on stdin)|mr close <key> --json|mr merge <key> <sha> [--squash] [--remove-source-branch] [--when-pipeline-succeeds] --json (message on stdin)|review queue <key> --json|review post <id> [--inline|--comment] --json|review discard <id> --json|review cancel <id> --json|fix list --json|fix queue <key> [--pipeline] --json|fix confirm <id> --json (edits on stdin)|fix retry <id> --json (note on stdin)|fix discard <id> --json|fix cancel <id> --json|fix replies <id> --json|config show --json|config set --json|templates show --json|templates set --json|agent install|agent uninstall|agent restart --json>\n";
+  "usage: suica <once|status|state|stats|usage|office --json|office chat <agent> <sessionId> --json|office send <agent> <sessionId> --json (message on stdin)|pause|resume|pending [--all]|send <id> [--json]|skip <id> [--json]|retry <id> [--json]|selftest|reviews --json|mr <key> --json|mr approve <key> <sha> --json|mr comment <key> --json (body on stdin)|mr close <key> --json|mr merge <key> <sha> [--squash] [--remove-source-branch] [--when-pipeline-succeeds] --json (message on stdin)|review queue <key> --json|review post <id> [--inline|--comment] --json|review discard <id> --json|review cancel <id> --json|fix list --json|fix queue <key> [--pipeline] --json|fix watch <key> --json|fix unwatch <key> --json|fix confirm <id> --json (edits on stdin)|fix retry <id> --json (note on stdin)|fix discard <id> --json|fix cancel <id> --json|fix replies <id> --json|config show --json|config set --json|templates show --json|templates set --json|agent install|agent uninstall|agent restart --json>\n";
 const TEAMS_DISABLED = "teams is disabled: set teams.enabled to true in the config\n";
 const SHOWN_WITH_ALL = 50;
 
@@ -289,6 +289,7 @@ async function reviewsJson(): Promise<number> {
   const store = openStore(config.statePath ?? defaultStatePath());
   try {
     store.recoverStalePostings(Date.now());
+    const choices = store.fixes.watchChoices();
     const document = buildReviewList(
       snapshot,
       store.latestAgentReviews(),
@@ -296,6 +297,7 @@ async function reviewsJson(): Promise<number> {
       rereviewWaitingReasons(store, config, snapshot, Date.now()),
       store.fixes.latestByMr(),
       config.review.approveWhen,
+      (key) => isWatched(key, choices, config),
     );
     process.stdout.write(`${JSON.stringify(document)}\n`);
     return 0;
@@ -366,9 +368,10 @@ async function reviewCommand(argv: readonly string[]): Promise<number> {
 const FIX_LIST_DAYS_MS = 7 * 86_400_000;
 
 /**
- * `suica fix list|queue|confirm|retry|discard|cancel|replies`: the background agent runs a queued
- * fix within a few seconds; confirm commits, pushes and replies as the Owner. `queue --pipeline`
- * queues a fix of the MR's failed head pipeline instead of its threads. Each action prints
+ * `suica fix list|queue|watch|unwatch|confirm|retry|discard|cancel|replies`: the background agent
+ * runs a queued fix within a few seconds; confirm commits, pushes and replies as the Owner.
+ * `queue --pipeline` queues a fix of the MR's failed head pipeline instead of its threads; `watch`
+ * and `unwatch` choose whether automatic fixes reach the MR. Each action prints
  * `{"status": …}`.
  */
 async function fixCommand(argv: readonly string[]): Promise<number> {
@@ -387,6 +390,10 @@ async function fixCommand(argv: readonly string[]): Promise<number> {
         `${JSON.stringify(buildFixList(store.fixes.list(Date.now() - FIX_LIST_DAYS_MS)))}\n`,
       );
       return 0;
+    }
+    if (action === "watch" || action === "unwatch") {
+      const outcome = setWatch({ store, log, now: Date.now }, target ?? "", action === "watch");
+      return reply(outcome, outcome !== "bad-key");
     }
     const graphql = glabRunner(config.gitlab);
     const rest = glabRest(config.gitlab);

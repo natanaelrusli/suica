@@ -491,6 +491,10 @@ extension CLIAgentClient: FixesClient {
         try await action(["fix", "queue", key, "--pipeline", "--json"], timeout: Self.gitlabTimeout)
     }
 
+    public func setWatched(key: String, watched: Bool) async throws(AgentError) -> ActionResult {
+        try await action(["fix", watched ? "watch" : "unwatch", key, "--json"], timeout: Self.gitlabTimeout)
+    }
+
     public func confirmFix(id: Int, edits: ConfirmEdits) async throws(AgentError) -> ActionResult {
         let body: Data
         do {

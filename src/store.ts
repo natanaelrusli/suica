@@ -269,7 +269,11 @@ export interface Store {
   close(): void;
 }
 
-const SCHEMA_VERSION = 16;
+const SCHEMA_VERSION = 17;
+/** The Owner's watch choice per MR; no row follows `fix.watch`. */
+const SCHEMA_V17 = `
+CREATE TABLE IF NOT EXISTS mr_watch (mr_key TEXT PRIMARY KEY, watched INTEGER NOT NULL);
+`;
 /** The failed pipeline a Pipeline Fix works on, as JSON; and the head pipeline each of the Owner's MRs had at the last poll. */
 const SCHEMA_V16 = `
 CREATE TABLE IF NOT EXISTS pipeline_watch (
@@ -628,6 +632,7 @@ function initSchema(db: DatabaseSync): void {
       db.exec("ALTER TABLE fix_run ADD COLUMN pipeline TEXT");
     db.exec(SCHEMA_V16);
   }
+  if (version < 17) db.exec(SCHEMA_V17);
   if (version !== SCHEMA_VERSION) db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 }
 

@@ -159,6 +159,11 @@ export interface FixStore {
   pipelineMarks(): Map<string, PipelineMark>;
   /** Records each MR's head pipeline and forgets the MRs left out. */
   savePipelineMarks(marks: ReadonlyMap<string, PipelineMark>): void;
+  /** The Owner's own watch choice of each MR that has one. */
+  watchChoices(): Map<string, boolean>;
+  setWatchChoice(mrKey: string, watched: boolean): void;
+  /** Forgets the watch choices of MRs left out of `open`. */
+  keepWatchChoices(open: ReadonlySet<string>): void;
 }
 
 const OPEN: readonly FixStatus[] = ["queued", "running", "ready", "confirming"];
@@ -484,6 +489,30 @@ export function createFixStore(db: DatabaseSync): FixStore {
       } catch (error) {
         db.exec("ROLLBACK");
         throw error;
+      }
+    },
+
+    watchChoices() {
+      return new Map(
+        db
+          .prepare("SELECT mr_key, watched FROM mr_watch")
+          .all()
+          .map((row) => [text(row, "mr_key"), integer(row, "watched") === 1] as const),
+      );
+    },
+
+    setWatchChoice(mrKey, watched) {
+      db.prepare("INSERT OR REPLACE INTO mr_watch (mr_key, watched) VALUES (?, ?)").run(
+        mrKey,
+        watched ? 1 : 0,
+      );
+    },
+
+    keepWatchChoices(open) {
+      const remove = db.prepare("DELETE FROM mr_watch WHERE mr_key = ?");
+      for (const row of db.prepare("SELECT mr_key FROM mr_watch").all()) {
+        const key = text(row, "mr_key");
+        if (!open.has(key)) remove.run(key);
       }
     },
   };

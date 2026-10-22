@@ -57,7 +57,7 @@ An unresolved, resolvable discussion on the Owner's own MR whose newest note was
 _Avoid_: comment, finding (alone)
 
 **Watched MR**:
-An open MR the Owner authored that is not yet approved (it has Reviewers and not all of them approved). Only Watched MRs get automatic Agent Fixes of threads; a Pipeline Fix needs no Watched MR.
+An open MR the Owner authored that is not yet approved (it has Reviewers and not all of them approved) and that the Owner watches: by its own Watch or Unwatch choice, else by `fix.watch`. Only Watched MRs get automatic Agent Fixes of threads; an automatic Pipeline Fix needs a watched MR too, but not an unapproved one.
 _Avoid_: tracked MR
 
 **Agent Fix**:

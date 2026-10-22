@@ -611,6 +611,16 @@ private struct MergeRequestDetailView: View {
                     Label(Copy.fixFindingsNow, systemImage: "wand.and.stars")
                 }
                 .disabled(fixes.busyKeys.contains(detail.key) || fixes.fix(for: detail.key).map { $0.isActive || $0.isReady } == true)
+                let watched = model.isWatched(detail.key)
+                Button {
+                    Task {
+                        if await fixes.setWatched(detail.key, !watched) { model.showWatched(detail.key, !watched) }
+                    }
+                } label: {
+                    Label(watched ? Copy.unwatch : Copy.watch, systemImage: watched ? "eye.slash" : "eye")
+                }
+                .help(watched ? Copy.unwatchHelp : Copy.watchHelp)
+                .disabled(fixes.busyKeys.contains(detail.key))
                 if detail.pipelineStatus == "FAILED" {
                     Button {
                         tab = .fix

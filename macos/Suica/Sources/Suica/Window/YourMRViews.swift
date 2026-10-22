@@ -21,6 +21,11 @@ struct YourMRRow: View {
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(ReviewTint.agent(fix.status == "pushed" ? "posted" : fix.status))
             }
+            if mr.isWatched && !mr.approvedByAll {
+                Label(Copy.watching, systemImage: "eye")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
             if let pipeline = mr.pipeline, let mark = PipelineMark(pipeline) {
                 Label(mark.text, systemImage: mark.symbol)
                     .font(.caption2.weight(.semibold))

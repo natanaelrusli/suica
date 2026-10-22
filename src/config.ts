@@ -10,6 +10,9 @@ import { BUILT_IN_AGENTS, parseCustomAgent } from "./office/generic.ts";
 import { REVIEW_EFFORTS } from "./review-runner.ts";
 import { errorMessage } from "./util.ts";
 
+/** `fix.watch`: which of the Owner's MRs are watched when the Owner chose nothing for one. */
+export const FIX_WATCH = ["all", "chosen"] as const;
+
 const positiveInt = z.number().int().positive();
 /** review.approveRules end up in a prompt: a few short lines. */
 const APPROVE_RULES_MAX = 20;
@@ -133,6 +136,8 @@ export const configSchema = z
       .object({
         // Watch the Owner's MRs and queue fixes by themselves.
         auto: z.boolean().default(true),
+        // all: every MR is watched unless the Owner unwatches it; chosen: only MRs the Owner watches.
+        watch: z.enum(FIX_WATCH).default("all"),
         // With auto: also queue a Pipeline Fix when an MR's head pipeline fails.
         pipelines: z.boolean().default(true),
         model: modelSchema.optional(),
