@@ -48,6 +48,8 @@ export interface PollDeps {
   readonly alerts?: AlertTemplates;
   /** Queues Agent Reviews after the commit; `newRequests` just asked for the Owner's review. May throw. */
   readonly queueReviews?: (snapshot: Snapshot, newRequests: readonly string[]) => void;
+  /** Starts the approval recheck of reviewed MRs beside the poll loop (not awaited). May throw. */
+  readonly recheckApprovals?: (snapshot: Snapshot) => void;
   /** Queues Agent Fixes for the Owner's MRs after the commit; `previous` is from before the poll. May throw. */
   readonly queueFixes?: (snapshot: Snapshot, previous: PreviousState) => Promise<void>;
   /** Tells the Owner about failed pipelines of their MRs and queues Pipeline Fixes. Never throws. */
@@ -135,6 +137,16 @@ async function reportStateFailure(deps: PollDeps, error: unknown): Promise<void>
 }
 
 /** Runs after the state commit, on every poll; a problem never fails the poll. */
+function recheckApprovals(deps: PollDeps, snapshot: Snapshot): void {
+  try {
+    deps.recheckApprovals?.(snapshot);
+  } catch (error) {
+    deps.log.warn("approval recheck not started", {
+      reason: error instanceof Error ? error.name : "unknown",
+    });
+  }
+}
+
 function queueReviews(deps: PollDeps, snapshot: Snapshot, events: readonly ActivityEvent[]): void {
   if (deps.queueReviews === undefined) return;
   const keys = events.flatMap((event) => (event.kind === "review-requested" ? [event.mr.key] : []));
@@ -288,6 +300,7 @@ async function runPoll(deps: PollDeps, start: number): Promise<PollOutcome> {
     });
   }
   queueReviews(deps, snapshot, previous.baselineDone ? events : []);
+  recheckApprovals(deps, snapshot);
   await queueFixes(deps, snapshot, previous);
   await deps.watchPipelines?.(snapshot);
   await runTeams(deps, snapshot, previous);
