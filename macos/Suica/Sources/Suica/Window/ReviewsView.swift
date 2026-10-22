@@ -467,6 +467,11 @@ private struct MergeRequestDetailView: View {
     /// Who the last Teams message from this page went to.
     @State private var messageNotice: String?
     @State private var collapsed = false
+    /// Review with…: the drawer, its options and the picks; a pick left nil is the config's.
+    @State private var choosing = false
+    @State private var options: ReviewOptionsLoader?
+    @State private var pickedSkill: String?
+    @State private var pickedModel: String?
     @Environment(\.openURL) private var openURL
 
     private var agentReview: AgentReviewInfo? { model.agentReview(for: detail.key) }
@@ -528,12 +533,65 @@ private struct MergeRequestDetailView: View {
         .sheet(isPresented: $messaging) {
             TeamsMessageSheet(detail: detail, model: model) { name in messageNotice = Copy.messageSent(name) }
         }
+        .inspector(isPresented: $choosing) {
+            if let options { reviewPicker(options) }
+        }
+        .onChange(of: detail.key) { choosing = false }
         .sheet(isPresented: $merging) {
             MergeSheet(detail: detail, fixes: fixes) {
                 tab = .description
                 onReload()
                 Task { await model.refresh() }
             }
+        }
+    }
+
+    // MARK: Review with…
+
+    private func openPicker() {
+        pickedSkill = nil
+        pickedModel = nil
+        if options == nil { options = model.optionsLoader() }
+        choosing = true
+    }
+
+    private var reviewBusy: Bool {
+        agentReview?.isActive == true || model.agentBusyKeys.contains(detail.key)
+    }
+
+    private func reviewPicker(_ loader: ReviewOptionsLoader) -> some View {
+        let defaults = loader.options?.defaults
+        let skill = Binding<String>(
+            get: { pickedSkill ?? defaults?.skill ?? "" }, set: { pickedSkill = $0 })
+        let pickModel = Binding<String?>(
+            get: { pickedModel ?? defaults?.model }, set: { pickedModel = $0 })
+        return ReviewPicker(
+            loader: loader, parts: [.skill, .model], skill: skill, model: pickModel, offersCliDefault: false
+        ) {
+            VStack(alignment: .leading, spacing: 8) {
+                if let options = loader.options {
+                    Text(Copy.reviewWithSummary(
+                        skill: options.skill(named: skill.wrappedValue)?.shortName ?? skill.wrappedValue,
+                        model: pickModel.wrappedValue.map { options.model(named: $0)?.label ?? $0 }))
+                        .font(.callout)
+                        .lineLimit(2)
+                }
+                if reviewBusy { Text(Copy.reviewBusy).font(.caption).foregroundStyle(.secondary) }
+                Button {
+                    guard let defaults else { return }
+                    let choice = ReviewChoice(skill: skill.wrappedValue, model: pickModel.wrappedValue)
+                    choosing = false
+                    tab = .agent
+                    Task { await model.queueAgentReview(detail.key, choice: choice.relative(to: defaults)) }
+                } label: {
+                    Label(Copy.startReview, systemImage: "sparkles").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .disabled(reviewBusy || defaults == nil)
+            }
+            .padding(12)
+            .background(.bar)
         }
     }
 
@@ -677,12 +735,16 @@ private struct MergeRequestDetailView: View {
                 .disabled(model.approvingKeys.contains(detail.key) || loading)
             }
             if !yours && model.offersReview(for: detail.key) {
-                Button {
-                    tab = .agent
-                    Task { await model.queueAgentReview(detail.key) }
+                // One click reviews with the defaults; the arrow picks a skill and model for this review.
+                Menu {
+                    Button(Copy.reviewWith, action: openPicker).help(Copy.reviewWithHelp)
                 } label: {
                     Label(agentReview == nil ? Copy.reviewWithAgent : Copy.reviewAgain, systemImage: "sparkles")
+                } primaryAction: {
+                    tab = .agent
+                    Task { await model.queueAgentReview(detail.key) }
                 }
+                .fixedSize()
                 .disabled(model.agentBusyKeys.contains(detail.key))
             }
             Button { messaging = true } label: {
@@ -1142,7 +1204,8 @@ private struct AgentReviewTab: View {
                     }
                     HStack(spacing: 6) {
                         if review.previousSha != nil { Badge(text: Copy.agentRereviewLabel, tint: .purple) }
-                        Text(Copy.agentReviewMeta(cli: review.cli, model: review.model, sha: review.headSha))
+                        Text(Copy.agentReviewMeta(
+                            cli: review.cli, model: review.model, sha: review.headSha, skill: review.skill))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }

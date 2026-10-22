@@ -492,12 +492,15 @@ async function prepareRereview(
   row: AgentReviewRow,
   headSha: string,
   descriptionHash: string,
+  skill: string,
   workDir: string,
 ): Promise<PromptInput["rereview"]> {
   const previous = deps.store.rereviewBase(row.mrKey, row.id);
   if (previous?.status !== "posted" || previous.headSha === null || previous.body === null) {
     return undefined;
   }
+  // Findings written to another skill's checklist are no base: this is a first review again.
+  if ((previous.skill ?? deps.config.review.skill) !== skill) return undefined;
   const descriptionChanged =
     previous.descriptionSha !== null && previous.descriptionSha !== descriptionHash;
   if (previous.headSha === headSha && !descriptionChanged) return undefined;
@@ -568,7 +571,9 @@ export async function runAgentReview(baseDeps: ReviewDeps, row: AgentReviewRow):
       );
     const path = clis.find((cli) => cli.id === cliId)?.path;
     if (path === null || path === undefined) throw new RunFailure(`${cliId} is not installed`);
-    store.transitionAgentReview(row.id, ["running"], "running", { cli: cliId }, deps.now());
+    const skill = row.skill ?? deps.config.review.skill;
+    const chosenModel = row.modelChoice ?? deps.config.review.model;
+    store.transitionAgentReview(row.id, ["running"], "running", { cli: cliId, skill }, deps.now());
 
     const detail = await fetchMrDetail(deps.graphql, deps.rest, row.mrKey);
     mrTitle = detail.title;
@@ -582,9 +587,8 @@ export async function runAgentReview(baseDeps: ReviewDeps, row: AgentReviewRow):
     }
     let skillText: string | undefined;
     if (cliId !== "claude") {
-      const dir = findSkillDir(deps.config.review.skill, deps.home);
-      if (dir === undefined)
-        throw new RunFailure(`skill ${deps.config.review.skill} is not installed`);
+      const dir = findSkillDir(skill, deps.home);
+      if (dir === undefined) throw new RunFailure(`skill ${skill} is not installed`);
       skillText = readSkillText(dir);
     }
 
@@ -592,15 +596,17 @@ export async function runAgentReview(baseDeps: ReviewDeps, row: AgentReviewRow):
     store.appendAgentReviewActivity(row.id, deps.now(), "Cloning the source branch");
     const headSha = await cloneSourceBranch(deps, detail, join(workDir, "repo"));
     const descriptionHash = descriptionSha(detail.description);
-    if (store.hasAgentReviewAt(row.mrKey, headSha, descriptionHash))
+    if (
+      store.hasAgentReviewAt(row.mrKey, headSha, descriptionHash, skill, deps.config.review.skill)
+    )
       throw new Skip("this commit was already reviewed");
     writeFileSync(join(workDir, "mr.diff"), renderDiff(detail.files));
     writeFileSync(join(workDir, "mr.md"), renderMrFile(detail));
-    const rereview = await prepareRereview(deps, row, headSha, descriptionHash, workDir);
+    const rereview = await prepareRereview(deps, row, headSha, descriptionHash, skill, workDir);
 
     const prompt = buildPrompt({
       cli: cliId,
-      skill: deps.config.review.skill,
+      skill,
       skillText,
       detail,
       headSha,
@@ -611,7 +617,8 @@ export async function runAgentReview(baseDeps: ReviewDeps, row: AgentReviewRow):
       mr_key: row.mrKey,
       trigger: row.trigger,
       cli: cliId,
-      ...(deps.config.review.model === undefined ? {} : { model: deps.config.review.model }),
+      skill,
+      ...(chosenModel === undefined ? {} : { model: chosenModel }),
       changed_lines: lines,
       rereview: rereview !== undefined,
       incremental: rereview?.incremental ?? false,
@@ -627,7 +634,7 @@ export async function runAgentReview(baseDeps: ReviewDeps, row: AgentReviewRow):
         store.appendAgentReviewActivity(row.id, deps.now(), text);
       },
       {
-        model: deps.config.review.model,
+        model: chosenModel,
         effort: deps.config.review.effort,
         timeoutMinutes: deps.config.review.timeoutMinutes,
         mode: "review",
@@ -638,9 +645,9 @@ export async function runAgentReview(baseDeps: ReviewDeps, row: AgentReviewRow):
     }
     const approval =
       deps.config.review.approveBy === "agent"
-        ? await judgeApproval(deps, row.id, cliId, path, result.body, workDir)
+        ? await judgeApproval(deps, row.id, cliId, path, chosenModel, result.body, workDir)
         : undefined;
-    const model = result.model ?? deps.config.review.model;
+    const model = result.model ?? chosenModel;
     const ready = store.transitionAgentReview(
       row.id,
       ["running"],
@@ -760,6 +767,7 @@ async function judgeApproval(
   id: number,
   cli: Exclude<ModelCliId, "gemini">,
   path: string,
+  model: string | undefined,
   body: string,
   workDir: string,
 ): Promise<ApprovalVerdict> {
@@ -778,7 +786,7 @@ async function judgeApproval(
       judgeDir,
       () => undefined,
       {
-        model: config.review.model,
+        model,
         effort: "low",
         timeoutMinutes: JUDGE_TIMEOUT_MINUTES,
         mode: "judge",
@@ -1064,7 +1072,9 @@ export async function postAgentReview(
 
   try {
     const body = posted.length === 0 ? row.body : summaryWithout(row.body, posted);
-    await deps.post(`${mrPath}/notes`, { body: renderNote(row, deps.config.review.skill, body) });
+    await deps.post(`${mrPath}/notes`, {
+      body: renderNote(row, row.skill ?? deps.config.review.skill, body),
+    });
   } catch (error) {
     const detail =
       posted.length === 0

@@ -276,13 +276,13 @@ export const CONFIG_FIELDS: readonly ConfigField[] = [
     path: ["review", "skill"],
     type: "string",
     label: "Review skill",
-    help: "Claude Code skill the review follows, as typed after the slash (plugin:skill)",
+    help: "Claude Code skill the review follows, picked from the installed ones (plugin:skill in the file). Review with… on an MR picks another one for that review only",
   },
   {
     path: ["review", "model"],
     type: "string",
     label: "Review model",
-    help: "Model the CLI reviews with, such as sonnet, opus or haiku for Claude Code, or a full model name; empty uses the CLI's default",
+    help: "Model the CLI reviews with, picked from the models it lists, or any other name; CLI default when none is set",
     placeholder: "CLI default",
   },
   {

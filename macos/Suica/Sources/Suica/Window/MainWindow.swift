@@ -397,7 +397,7 @@ struct MainWindow: View {
         case .usage: UsageView(window: window)
         case .logs: LogsView(window: window)
         case .configuration: ConfigurationView(
-                window: window, editor: editor, onboarding: onboarding, navigator: navigator,
+                window: window, editor: editor, onboarding: onboarding, reviews: reviews, navigator: navigator,
                 category: item.category)
         case .appearance: AppearanceView(settings: settings)
         case .office: OfficeView(model: office, settings: settings)

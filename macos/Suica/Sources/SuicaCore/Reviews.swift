@@ -34,6 +34,8 @@ public struct AgentReviewInfo: Codable, Equatable, Sendable {
     public let cli: String?
     /// As the CLI reported it, else `review.model`; nil until known or for the CLI's default.
     public let model: String?
+    /// The skill it follows; nil for the default while queued, and from an older CLI.
+    public let skill: String?
     /// Epoch milliseconds; nil while queued.
     public let startedAt: Int?
     public let headSha: String?
@@ -48,7 +50,7 @@ public struct AgentReviewInfo: Codable, Equatable, Sendable {
     public let updatedAt: Int
 
     public init(
-        id: Int, status: String, cli: String? = nil, model: String? = nil, startedAt: Int? = nil,
+        id: Int, status: String, cli: String? = nil, model: String? = nil, skill: String? = nil, startedAt: Int? = nil,
         headSha: String? = nil, previousSha: String? = nil, body: String? = nil, detail: String = "",
         activity: [ReviewActivityLine]? = nil, createdAt: Int = 0, updatedAt: Int = 0
     ) {
@@ -56,6 +58,7 @@ public struct AgentReviewInfo: Codable, Equatable, Sendable {
         self.status = status
         self.cli = cli
         self.model = model
+        self.skill = skill
         self.startedAt = startedAt
         self.headSha = headSha
         self.previousSha = previousSha
@@ -506,8 +509,10 @@ public func parseDiffLines(_ diff: String) -> [DiffLine] {
 public protocol ReviewsClient: Sendable {
     func reviews() async throws(AgentError) -> ReviewListDocument
     func mergeRequest(key: String) async throws(AgentError) -> MergeRequestDetail
-    /// queued, already-queued or bad-key.
-    func queueAgentReview(key: String) async throws(AgentError) -> ActionResult
+    /// queued, already-queued, bad-key, bad-skill or bad-model. An empty choice uses the config's.
+    func queueAgentReview(key: String, choice: ReviewChoice) async throws(AgentError) -> ActionResult
+    /// The skills and models a review can use; `cli` names another Model CLI than the saved one.
+    func reviewOptions(cli: String?) async throws(AgentError) -> ReviewOptions
     /// posted, nothing or failed. `inline` puts findings on their diff lines as threads.
     func postAgentReview(id: Int, inline: Bool) async throws(AgentError) -> ActionResult
     /// discarded or nothing.
@@ -638,9 +643,14 @@ public final class ReviewsModel {
         }
     }
 
-    public func queueAgentReview(_ key: String) async {
-        await agentAction(key) { (client: any ReviewsClient) async throws(AgentError) -> ActionResult in try await client.queueAgentReview(key: key) }
+    public func queueAgentReview(_ key: String, choice: ReviewChoice = ReviewChoice()) async {
+        await agentAction(key) { (client: any ReviewsClient) async throws(AgentError) -> ActionResult in
+            try await client.queueAgentReview(key: key, choice: choice)
+        }
     }
+
+    /// A loader for a skill and model picker, on this page's client.
+    public func optionsLoader() -> ReviewOptionsLoader { ReviewOptionsLoader(client: client) }
 
     public func postAgentReview(_ key: String, inline: Bool) async {
         guard let review = agentReview(for: key), review.isReady else { return }

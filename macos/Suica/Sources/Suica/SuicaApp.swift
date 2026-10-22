@@ -25,7 +25,10 @@ extension UnconfiguredClient: DashboardClient {
 extension UnconfiguredClient: ReviewsClient {
     func reviews() async throws(AgentError) -> ReviewListDocument { throw AgentError.launchFailed }
     func mergeRequest(key: String) async throws(AgentError) -> MergeRequestDetail { throw AgentError.launchFailed }
-    func queueAgentReview(key: String) async throws(AgentError) -> ActionResult { throw AgentError.launchFailed }
+    func queueAgentReview(key: String, choice: ReviewChoice) async throws(AgentError) -> ActionResult {
+        throw AgentError.launchFailed
+    }
+    func reviewOptions(cli: String?) async throws(AgentError) -> ReviewOptions { throw AgentError.launchFailed }
     func postAgentReview(id: Int, inline: Bool) async throws(AgentError) -> ActionResult { throw AgentError.launchFailed }
     func discardAgentReview(id: Int) async throws(AgentError) -> ActionResult { throw AgentError.launchFailed }
     func cancelAgentReview(id: Int) async throws(AgentError) -> ActionResult { throw AgentError.launchFailed }

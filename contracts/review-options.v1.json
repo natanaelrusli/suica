@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "cli": "claude",
+  "defaults": { "skill": "madhani:madhani-code-review", "model": "sonnet" },
+  "skills": [
+    {
+      "name": "madhani:madhani-code-review",
+      "description": "madhani-code-review skill",
+      "source": "plugin",
+      "plugin": "madhani",
+      "missing": false
+    },
+    {
+      "name": "notes",
+      "description": "Takes notes",
+      "source": "user",
+      "plugin": null,
+      "missing": false
+    }
+  ],
+  "models": [
+    {
+      "name": "opus",
+      "label": "Opus",
+      "description": "Most capable; slowest and uses the most tokens"
+    },
+    { "name": "sonnet", "label": "Sonnet", "description": "Balanced speed and depth" },
+    { "name": "haiku", "label": "Haiku", "description": "Fastest and lightest, for small MRs" }
+  ]
+}

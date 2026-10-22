@@ -30,7 +30,7 @@ import type { DetectedCli } from "../src/model-cli.ts";
 import type { MergeRequest } from "../src/domain.ts";
 import type { MrDetailJson } from "../src/reviews.ts";
 import { openStore } from "../src/store.ts";
-import type { AgentReviewRow, Store } from "../src/store.ts";
+import type { AgentReviewRow, ReviewChoice, Store } from "../src/store.ts";
 import { mr, reviewer, snapshot } from "./builders.ts";
 
 const NOW = Date.UTC(2026, 9, 18, 9);
@@ -93,6 +93,8 @@ function row(overrides: Partial<AgentReviewRow> = {}): AgentReviewRow {
     status: "ready",
     mrTitle: "Add thing",
     model: null,
+    skill: null,
+    modelChoice: null,
     startedAt: NOW,
     cli: "claude",
     headSha: SHA,
@@ -444,6 +446,7 @@ function harness(
   };
   const db = store();
   const posts: string[] = [];
+  const postBodies: unknown[] = [];
   const config = {
     ...CONFIG,
     model: { cli: options.model ?? "claude" },
@@ -490,9 +493,10 @@ function harness(
     now: () => NOW,
     detectClis: () => options.clis ?? [CLAUDE, CODEX, GEMINI],
     ...(options.home === undefined ? {} : { home: options.home }),
-    post: (path: string) => {
+    post: (path: string, body: unknown) => {
       if (options.postFails === true) return Promise.reject(new Error("glab"));
       posts.push(path);
+      postBodies.push(body);
       return Promise.resolve({});
     },
     postJson: (path: string) => {
@@ -500,8 +504,8 @@ function harness(
       return Promise.resolve({});
     },
   };
-  const queue = (): AgentReviewRow => {
-    const id = db.queueAgentReview("g/p!7", "manual", NOW) ?? 0;
+  const queue = (choice?: ReviewChoice): AgentReviewRow => {
+    const id = db.queueAgentReview("g/p!7", "manual", NOW, undefined, choice) ?? 0;
     const queued = db.getAgentReview(id);
     if (queued === undefined) throw new Error("not queued");
     return queued;
@@ -542,6 +546,7 @@ function harness(
     queue,
     previous,
     posts,
+    postBodies,
     restPaths,
     logs,
     judgeCalls,
@@ -1007,6 +1012,56 @@ describe("runAgentReview", () => {
     expect(same.db.getAgentReview(b.id)).toMatchObject({ status: "ready", previousSha: null });
     expect(same.file("previous-review.md")).toBeUndefined();
     expect(same.prompt()).not.toContain("re-review");
+  });
+
+  it("follows the skill and model chosen for this review in the prompt, the CLI, the judge and the note", async () => {
+    const h = harness({ autoPost: true, judgeStdout: verdict(false, "Not yet.") });
+    const queued = h.queue({ skill: "tools:go-review", model: "opus" });
+    await runAgentReview(h.deps, queued);
+
+    expect(h.prompt().split("\n")[0]).toBe("/tools:go-review");
+    const review = h.calls.find((call) => call.file === "/bin/claude")?.args ?? [];
+    expect(review[review.indexOf("--model") + 1]).toBe("opus");
+    const judge = h.judgeCalls[0] ?? [];
+    expect(judge[judge.indexOf("--model") + 1]).toBe("opus");
+    expect(h.db.getAgentReview(queued.id)).toMatchObject({
+      status: "posted",
+      skill: "tools:go-review",
+    });
+    expect(JSON.stringify(h.postBodies.at(-1))).toContain("following `tools:go-review`");
+  });
+
+  it("records the default skill on a run without a choice", async () => {
+    const h = harness();
+    const queued = h.queue();
+    await runAgentReview(h.deps, queued);
+    expect(h.db.getAgentReview(queued.id)?.skill).toBe("madhani:madhani-code-review");
+    expect(h.prompt().split("\n")[0]).toBe("/madhani:madhani-code-review");
+  });
+
+  it("reviews a reviewed commit again with another skill, as a first review", async () => {
+    const h = harness();
+    h.previous("posted", SHA, PREVIOUS_REVIEW, descriptionSha("desc"));
+    const queued = h.queue({ skill: "tools:flutter-review" });
+    await runAgentReview(h.deps, queued);
+    expect(h.db.getAgentReview(queued.id)).toMatchObject({ status: "ready", previousSha: null });
+    expect(h.file("previous-review.md")).toBeUndefined();
+    expect(h.prompt()).not.toContain("re-review");
+
+    // Back on the default skill, the commit is still reviewed by the first one.
+    const again = h.queue();
+    await runAgentReview(h.deps, again);
+    expect(h.db.getAgentReview(again.id)?.detail).toBe("this commit was already reviewed");
+  });
+
+  it("does not re-review against a posted review of another skill after a push", async () => {
+    const h = harness();
+    h.previous();
+    const queued = h.queue({ skill: "tools:flutter-review" });
+    await runAgentReview(h.deps, queued);
+    expect(h.db.getAgentReview(queued.id)).toMatchObject({ status: "ready", previousSha: null });
+    expect(h.file("previous-review.md")).toBeUndefined();
+    expect(h.restPaths.some((path) => path.includes("/repository/"))).toBe(false);
   });
 
   it("stops the CLI when the Owner cancels the running review, and reports no failure", async () => {
@@ -1869,6 +1924,7 @@ describe("Agent Review logs", () => {
       mr_key: queued.mrKey,
       trigger: queued.trigger,
       cli: "claude",
+      skill: "madhani:madhani-code-review",
       changed_lines: 4,
       rereview: false,
       incremental: false,

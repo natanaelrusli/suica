@@ -18,6 +18,8 @@ export interface AgentReviewJson {
   readonly cli: string | null;
   /** As the CLI reported it, else `review.model`; null until known. */
   readonly model: string | null;
+  /** The skill it follows; null for the default while queued, and on rows from before schema 18. */
+  readonly skill: string | null;
   /** Epoch milliseconds; null while queued. */
   readonly startedAt: number | null;
   readonly headSha: string | null;
@@ -166,6 +168,7 @@ function toAgentReviewJson(row: AgentReviewRow): AgentReviewJson {
     status: row.status,
     cli: row.cli,
     model: row.model,
+    skill: row.skill,
     startedAt: row.startedAt,
     headSha: row.headSha,
     previousSha: row.previousSha,

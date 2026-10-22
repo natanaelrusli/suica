@@ -183,7 +183,7 @@ describe("schema 10", () => {
     expect(store.getAgentReview(next)?.previousSha).toBe("aaa1111");
     store.close();
     const check = new DatabaseSync(path);
-    expect(check.prepare("PRAGMA user_version").get()?.["user_version"]).toBe(17);
+    expect(check.prepare("PRAGMA user_version").get()?.["user_version"]).toBe(18);
     check.close();
   });
 
@@ -211,7 +211,7 @@ describe("schema 10", () => {
     expect(store.getAgentReview(next)).toMatchObject({ descriptionSha: "d1", approved: true });
     store.close();
     const check = new DatabaseSync(path);
-    expect(check.prepare("PRAGMA user_version").get()?.["user_version"]).toBe(17);
+    expect(check.prepare("PRAGMA user_version").get()?.["user_version"]).toBe(18);
     check.close();
   });
 
@@ -241,15 +241,86 @@ describe("schema 10", () => {
 
   it("hasAgentReviewAt matches the commit and the description, taking an old row without a hash as the same description", () => {
     const store = openStore(":memory:");
+    const at = (key: string, sha: string, description: string): boolean =>
+      store.hasAgentReviewAt(key, sha, description, "s:review", "s:review");
     const old = review(store, "g/p!1", "posted", "aaa1111");
-    expect(store.hasAgentReviewAt("g/p!1", "aaa1111", "d1")).toBe(true);
-    expect(store.hasAgentReviewAt("g/p!1", "bbb2222", "d1")).toBe(false);
+    expect(at("g/p!1", "aaa1111", "d1")).toBe(true);
+    expect(at("g/p!1", "bbb2222", "d1")).toBe(false);
     store.transitionAgentReview(old, ["posted"], "posted", { descriptionSha: "d1" }, NOW);
-    expect(store.hasAgentReviewAt("g/p!1", "aaa1111", "d1")).toBe(true);
-    expect(store.hasAgentReviewAt("g/p!1", "aaa1111", "d2")).toBe(false);
+    expect(at("g/p!1", "aaa1111", "d1")).toBe(true);
+    expect(at("g/p!1", "aaa1111", "d2")).toBe(false);
     review(store, "g/p!2", "failed", "ccc3333");
-    expect(store.hasAgentReviewAt("g/p!2", "ccc3333", "d1")).toBe(false);
+    expect(at("g/p!2", "ccc3333", "d1")).toBe(false);
     store.close();
+  });
+
+  it("hasAgentReviewAt only matches a review of the same skill, an old row counting as the default", () => {
+    const store = openStore(":memory:");
+    review(store, "g/p!1", "posted", "aaa1111");
+    expect(store.hasAgentReviewAt("g/p!1", "aaa1111", "d1", "a:go", "a:go")).toBe(true);
+    expect(store.hasAgentReviewAt("g/p!1", "aaa1111", "d1", "a:flutter", "a:go")).toBe(false);
+    const flutter =
+      store.queueAgentReview("g/p!2", "manual", NOW, undefined, { skill: "a:flutter" }) ?? 0;
+    store.transitionAgentReview(
+      flutter,
+      ["queued"],
+      "running",
+      { headSha: "bbb2222", skill: "a:flutter" },
+      NOW,
+    );
+    store.transitionAgentReview(flutter, ["running"], "ready", { body: "b" }, NOW);
+    expect(store.hasAgentReviewAt("g/p!2", "bbb2222", "d1", "a:flutter", "a:go")).toBe(true);
+    expect(store.hasAgentReviewAt("g/p!2", "bbb2222", "d1", "a:go", "a:go")).toBe(false);
+    store.close();
+  });
+
+  it("queues with a choice, gives a queued review a new choice and leaves a running one alone", () => {
+    const store = openStore(":memory:");
+    const id = store.queueAgentReview("g/p!1", "auto", NOW) ?? 0;
+    expect(store.getAgentReview(id)).toMatchObject({ skill: null, modelChoice: null });
+    expect(store.queueAgentReview("g/p!1", "manual", NOW)).toBeUndefined();
+    expect(
+      store.queueAgentReview("g/p!1", "manual", NOW + 1, undefined, {
+        skill: "a:go",
+        model: "opus",
+      }),
+    ).toBe(id);
+    expect(store.getAgentReview(id)).toMatchObject({
+      skill: "a:go",
+      modelChoice: "opus",
+      trigger: "auto",
+    });
+    expect(store.queueAgentReview("g/p!1", "manual", NOW + 2, undefined, { model: "haiku" })).toBe(
+      id,
+    );
+    expect(store.getAgentReview(id)).toMatchObject({ skill: null, modelChoice: "haiku" });
+    store.transitionAgentReview(id, ["queued"], "running", {}, NOW);
+    expect(
+      store.queueAgentReview("g/p!1", "manual", NOW + 3, undefined, { skill: "a:x" }),
+    ).toBeUndefined();
+    expect(store.getAgentReview(id)?.skill).toBeNull();
+    const other = store.queueAgentReview("g/p!2", "manual", NOW, undefined, { skill: "a:x" }) ?? 0;
+    expect(store.getAgentReview(other)).toMatchObject({ skill: "a:x", modelChoice: null });
+    store.close();
+  });
+
+  it("upgrades schema 17 to 18: agent_review gains skill and model_choice, null on old rows", () => {
+    const path = tempDb();
+    const first = openStore(path);
+    const id = review(first, "g/p!1", "posted", "aaa1111");
+    first.close();
+    const raw = new DatabaseSync(path);
+    raw.exec(
+      "ALTER TABLE agent_review DROP COLUMN skill; ALTER TABLE agent_review DROP COLUMN model_choice; PRAGMA user_version = 17;",
+    );
+    raw.close();
+    const upgraded = openStore(path);
+    expect(upgraded.getAgentReview(id)).toMatchObject({
+      status: "posted",
+      skill: null,
+      modelChoice: null,
+    });
+    upgraded.close();
   });
 
   it("rereviewBases returns the newest posted or discarded review per MR and ignores later failed and skipped rows", () => {
