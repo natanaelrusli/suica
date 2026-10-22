@@ -9,12 +9,23 @@ struct PipelineProgressView: View {
     @State private var showsJobs = false
     @Environment(\.openURL) private var openURL
     @Environment(\.motionLevel) private var motion
+    /// About seven jobs with their stage names; more scroll inside the strip.
+    static let jobsMaxHeight: CGFloat = 240
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             summary
             StageBar(stages: pipeline.stages)
-            if showsJobs { jobs }
+            // The strip sits in the page's pinned header, above the tab's scroll view: a long job
+            // list scrolls in its own box, or it would push the tab content out of the window.
+            if showsJobs {
+                ViewThatFits(in: .vertical) {
+                    jobs
+                    ScrollView { jobs }
+                }
+                .frame(maxHeight: Self.jobsMaxHeight)
+                .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .padding(10)
         .background(.background.secondary, in: RoundedRectangle(cornerRadius: 8))
