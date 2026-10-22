@@ -28,6 +28,7 @@ function deps(store: Store, fix: Partial<Config["fix"]> = {}) {
       config: {
         fix: {
           auto: true,
+          watch: "all" as const,
           pipelines: true,
           effort: "medium" as const,
           timeoutMinutes: 20,
@@ -103,6 +104,16 @@ describe("watchPipelines", () => {
       expect(notifications).toHaveLength(1);
       expect(store.fixes.open("g/p!7")).toBeUndefined();
     }
+  });
+
+  it("only tells the Owner about an MR that is not watched", async () => {
+    const store = openStore(":memory:");
+    store.fixes.setWatchChoice("g/p!7", false);
+    const { deps: run, notifications } = deps(store);
+    await watchPipelines(run, snapshot({ authored: [mine(7, pipeline("41", "RUNNING"))] }));
+    await watchPipelines(run, snapshot({ authored: [mine(7, pipeline("41", "FAILED"))] }));
+    expect(notifications).toHaveLength(1);
+    expect(store.fixes.open("g/p!7")).toBeUndefined();
   });
 
   it("joins a queued fix, and leaves an MR alone whose fix runs or waits for the Owner", async () => {

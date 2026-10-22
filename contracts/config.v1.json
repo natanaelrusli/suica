@@ -402,6 +402,15 @@
       "effective": true
     },
     {
+      "path": ["fix", "watch"],
+      "type": "enum",
+      "label": "Which MRs to watch",
+      "help": "all: every MR of yours is watched unless you press Unwatch on it. chosen: only MRs you press Watch on. Fix findings now works on every MR either way",
+      "options": ["all", "chosen"],
+      "value": null,
+      "effective": "all"
+    },
+    {
       "path": ["fix", "pipelines"],
       "type": "bool",
       "label": "Fix failed pipelines",

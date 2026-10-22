@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   findingThreads,
   isApprovedByAll,
+  isWatched,
   queueAutomaticFixes,
   queueManualFix,
+  setWatch,
 } from "../src/agent-fix.ts";
 import type { FixQueueDeps } from "../src/agent-fix.ts";
 import type { Config } from "../src/config.ts";
@@ -87,6 +89,7 @@ function deps(
     config: {
       fix: {
         auto: true,
+        watch: "all",
         pipelines: true,
         effort: "medium",
         timeoutMinutes: 20,
@@ -161,6 +164,56 @@ describe("isApprovedByAll", () => {
   });
 });
 
+describe("isWatched", () => {
+  it("takes the MR's own choice, else fix.watch", () => {
+    const choices = new Map([
+      ["g/p!1", false],
+      ["g/p!2", true],
+    ]);
+    const all = deps(openStore(":memory:"), {}).config;
+    const chosen = deps(openStore(":memory:"), {}, { watch: "chosen" }).config;
+    expect(["g/p!1", "g/p!2", "g/p!3"].map((key) => isWatched(key, choices, all))).toEqual([
+      false,
+      true,
+      true,
+    ]);
+    expect(["g/p!1", "g/p!2", "g/p!3"].map((key) => isWatched(key, choices, chosen))).toEqual([
+      false,
+      true,
+      false,
+    ]);
+  });
+});
+
+describe("setWatch", () => {
+  it("cancels a queued automatic fix on unwatch and keeps a manual one", () => {
+    const store = openStore(":memory:");
+    const auto = store.fixes.queue("g/p!7", "auto", [thread("d1", "n1")], 1) ?? 0;
+    const manual = store.fixes.queue("g/p!8", "manual", [thread("d1", "n1")], 1) ?? 0;
+    const run = deps(store, {});
+    expect(setWatch(run, "g/p!7", false)).toBe("not-watching");
+    expect(setWatch(run, "g/p!8", false)).toBe("not-watching");
+    expect(store.fixes.get(auto)?.status).toBe("cancelled");
+    expect(store.fixes.get(manual)?.status).toBe("queued");
+    expect(store.fixes.watchChoices()).toEqual(
+      new Map([
+        ["g/p!7", false],
+        ["g/p!8", false],
+      ]),
+    );
+  });
+
+  it("forgets the read mark on watch, and refuses a bad key", () => {
+    const store = openStore(":memory:");
+    store.fixes.markWatched("g/p!7", 1);
+    const run = deps(store, {});
+    expect(setWatch(run, "g/p!7", true)).toBe("watching");
+    expect(store.fixes.watchMarks().has("g/p!7")).toBe(false);
+    expect(setWatch(run, "nope", true)).toBe("bad-key");
+    expect(store.fixes.watchChoices().has("nope")).toBe(false);
+  });
+});
+
 describe("queueAutomaticFixes", () => {
   const mine = (overrides: Parameters<typeof mr>[1] = {}) =>
     mr(7, { author: ME, reviewers: [reviewer("bob", "REQUESTED_CHANGES")], ...overrides });
@@ -195,6 +248,49 @@ describe("queueAutomaticFixes", () => {
       new Set(),
     );
     expect(fresh.fetched).toEqual(["g/p!7"]);
+  });
+
+  it("leaves an unwatched MR alone and reads it once it is watched again", async () => {
+    const store = openStore(":memory:");
+    const details = { "g/p!7": detail([discussion("d1", [gitlabNote("n1")])]) };
+    const run = deps(store, details);
+    setWatch(run, "g/p!7", false);
+    await queueAutomaticFixes(run, snapshot({ authored: [mine()] }), new Set());
+    expect(run.fetched).toEqual([]);
+    expect(store.fixes.open("g/p!7")).toBeUndefined();
+    setWatch(run, "g/p!7", true);
+    await queueAutomaticFixes(run, snapshot({ authored: [mine()] }), new Set());
+    expect(store.fixes.open("g/p!7")?.threads).toHaveLength(1);
+  });
+
+  it("with fix.watch chosen, only fixes MRs the Owner watches", async () => {
+    const store = openStore(":memory:");
+    const details = {
+      "g/p!7": detail([discussion("d1", [gitlabNote("n1")])]),
+      "g/p!8": detail([discussion("d1", [gitlabNote("n1")])], "g/p!8"),
+    };
+    const run = deps(store, details, { watch: "chosen" });
+    setWatch(run, "g/p!8", true);
+    await queueAutomaticFixes(
+      run,
+      snapshot({
+        authored: [
+          mine(),
+          mr(8, { author: ME, reviewers: [reviewer("bob", "REQUESTED_CHANGES")] }),
+        ],
+      }),
+      new Set(),
+    );
+    expect(run.fetched).toEqual(["g/p!8"]);
+  });
+
+  it("forgets the watch choices of MRs that are no longer open", async () => {
+    const store = openStore(":memory:");
+    const run = deps(store, { "g/p!7": detail([]) });
+    setWatch(run, "g/p!7", false);
+    setWatch(run, "g/p!9", false);
+    await queueAutomaticFixes(run, snapshot({ authored: [mine()] }), new Set());
+    expect([...store.fixes.watchChoices().keys()]).toEqual(["g/p!7"]);
   });
 
   it("queues a fix for a Reviewer's new thread", async () => {

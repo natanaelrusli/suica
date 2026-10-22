@@ -62,4 +62,32 @@ describe("suica fix", () => {
       stdout: '{"status":"bad-key"}\n',
     });
   });
+
+  it("watches and unwatches an MR", () => {
+    // The app reads the last line; log lines come before it.
+    const last = (args: string[]) => {
+      const { status, stdout } = suica(args);
+      return { status, line: stdout.trimEnd().split("\n").at(-1) };
+    };
+    expect(last(["fix", "unwatch", "g/p!7", "--json"])).toEqual({
+      status: 0,
+      line: '{"status":"not-watching"}',
+    });
+    expect(last(["fix", "watch", "g/p!8", "--json"])).toEqual({
+      status: 0,
+      line: '{"status":"watching"}',
+    });
+    expect(last(["fix", "watch", "nope", "--json"])).toEqual({
+      status: 1,
+      line: '{"status":"bad-key"}',
+    });
+    const store = openStore(statePath);
+    expect(store.fixes.watchChoices()).toEqual(
+      new Map([
+        ["g/p!7", false],
+        ["g/p!8", true],
+      ]),
+    );
+    store.close();
+  });
 });

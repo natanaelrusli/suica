@@ -156,6 +156,8 @@ export interface YourMrJson {
   readonly fix: FixSummaryJson | null;
   /** The head pipeline; null when the MR has none. */
   readonly pipeline: Pipeline | null;
+  /** Its own watch choice, else `fix.watch`: automatic fixes only reach a watched MR. */
+  readonly watched: boolean;
 }
 
 function toAgentReviewJson(row: AgentReviewRow): AgentReviewJson {
@@ -220,6 +222,7 @@ export function buildReviewList(
   rereviewWaiting: ReadonlyMap<string, RereviewWaitingJson> = new Map(),
   fixes: ReadonlyMap<string, FixRow> = new Map(),
   approveWhen: ApproveWhen = "minor",
+  watched: (key: string) => boolean = () => true,
 ): ReviewListJson {
   return {
     version: 1,
@@ -246,6 +249,7 @@ export function buildReviewList(
                 detail: fix.detail,
               },
         pipeline: mr.pipeline,
+        watched: watched(mr.key),
       };
     }),
     mergeRequests: snapshot.reviewRequested.map((mr) => {

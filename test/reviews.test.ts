@@ -240,6 +240,8 @@ describe("buildReviewList", () => {
           },
         ],
       ]),
+      "minor",
+      (key) => key !== "g/p!10",
     );
     expect(list).toEqual(golden("reviews.v1.json"));
   });

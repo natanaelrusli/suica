@@ -36,6 +36,7 @@ extension UnconfiguredClient: FixesClient {
     func fixes() async throws(AgentError) -> FixListDocument { throw AgentError.launchFailed }
     func queueFix(key: String) async throws(AgentError) -> ActionResult { throw AgentError.launchFailed }
     func queuePipelineFix(key: String) async throws(AgentError) -> ActionResult { throw AgentError.launchFailed }
+    func setWatched(key: String, watched: Bool) async throws(AgentError) -> ActionResult { throw AgentError.launchFailed }
     func confirmFix(id: Int, edits: ConfirmEdits) async throws(AgentError) -> ActionResult { throw AgentError.launchFailed }
     func retryFix(id: Int, note: String) async throws(AgentError) -> ActionResult { throw AgentError.launchFailed }
     func discardFix(id: Int) async throws(AgentError) -> ActionResult { throw AgentError.launchFailed }

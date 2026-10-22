@@ -1,3 +1,4 @@
+import { FIX_WATCH } from "./config.ts";
 import { APPROVE_BY } from "./approval-judge.ts";
 import { APPROVE_WHEN } from "./inline-review.ts";
 import { MODEL_CLI_CHOICES } from "./model-cli.ts";
@@ -332,6 +333,13 @@ export const CONFIG_FIELDS: readonly ConfigField[] = [
     type: "bool",
     label: "Watch my MRs",
     help: "Answer new Reviewer threads on your own MRs with an Agent Fix until the MR is approved. A fix waits for you: nothing is committed, pushed or replied before you confirm",
+  },
+  {
+    path: ["fix", "watch"],
+    type: "enum",
+    label: "Which MRs to watch",
+    help: "all: every MR of yours is watched unless you press Unwatch on it. chosen: only MRs you press Watch on. Fix findings now works on every MR either way",
+    options: FIX_WATCH,
   },
   {
     path: ["fix", "pipelines"],

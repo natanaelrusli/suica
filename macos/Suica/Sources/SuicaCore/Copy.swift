@@ -442,6 +442,18 @@ public enum Copy {
     public static let fixTab = "Agent fix"
     public static let fixFindingsNow = "Fix findings now"
     public static let fixPipelineNow = "Fix pipeline"
+    public static let watch = "Watch"
+    public static let unwatch = "Unwatch"
+    public static let watching = "Watching"
+    public static let watchHelp = "Fix new Reviewer threads and failed pipelines on this MR by itself. Each fix waits for you before anything is pushed."
+    public static let unwatchHelp = "Stop fixing this MR by itself. Fix findings now still works."
+    public static func watchOutcome(_ code: String) -> String {
+        switch code {
+        case "watching": "Watching: Suica fixes new threads on this MR by itself."
+        case "not-watching": "Not watching: Suica leaves this MR to you. Fix findings now still works."
+        default: "This merge request key cannot be watched."
+        }
+    }
     public static let pipelineFailed = "Pipeline failed"
     public static let pipelineRunning = "Pipeline running"
     public static let pipelinePassed = "Pipeline passed"

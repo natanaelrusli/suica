@@ -46,8 +46,13 @@ public struct YourMergeRequest: Codable, Equatable, Identifiable, Sendable {
     public let fix: FixSummary?
     /// Nil when the MR has no pipeline, or the agent is older.
     public let pipeline: PipelineInfo?
+    /// Whether automatic fixes reach it; nil from an older agent, which watched every MR.
+    public var watched: Bool?
 
     public var id: String { key }
+
+    /// Watched and not yet approved: Suica fixes new threads on it by itself.
+    public var isWatched: Bool { watched ?? true }
 
     /// Reviewers who approved, out of all reviewers.
     public var approvals: (approved: Int, total: Int) {
@@ -222,6 +227,8 @@ public protocol FixesClient: Sendable {
     func queueFix(key: String) async throws(AgentError) -> ActionResult
     /// queued, added, busy, no-failed-pipeline, not-yours or bad-key.
     func queuePipelineFix(key: String) async throws(AgentError) -> ActionResult
+    /// watching, not-watching or bad-key.
+    func setWatched(key: String, watched: Bool) async throws(AgentError) -> ActionResult
     /// pushed, partial, branch-moved, push-failed, bad-request or nothing.
     func confirmFix(id: Int, edits: ConfirmEdits) async throws(AgentError) -> ActionResult
     /// queued or nothing.
@@ -284,6 +291,14 @@ public final class FixesModel {
         await act(key, Copy.fixOutcome) { (client: any FixesClient) async throws(AgentError) -> ActionResult in
             try await client.queuePipelineFix(key: key)
         }
+    }
+
+    /// Watches or unwatches your MR; true when the agent took the choice.
+    public func setWatched(_ key: String, _ watched: Bool) async -> Bool {
+        let code = await act(key, Copy.watchOutcome) { (client: any FixesClient) async throws(AgentError) -> ActionResult in
+            try await client.setWatched(key: key, watched: watched)
+        }
+        return code == (watched ? "watching" : "not-watching")
     }
 
     public func confirm(_ fix: FixInfo, edits: ConfirmEdits) async {

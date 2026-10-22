@@ -10,6 +10,7 @@ import type { Store } from "./store.ts";
 const DAY_MS = 86_400_000;
 const OPEN: readonly FixStatus[] = ["queued", "running", "ready", "confirming"];
 const GONE = "The MR is no longer open.";
+const UNWATCHED = "You stopped watching the MR.";
 
 export interface FixQueueDeps {
   readonly store: Store;
@@ -18,6 +19,46 @@ export interface FixQueueDeps {
   readonly now: () => number;
   /** The MR's detail, with its discussions. May throw. */
   readonly detail: (key: string) => Promise<MrDetailJson>;
+}
+
+/** The MR's own watch choice, else `fix.watch`. */
+export function isWatched(
+  key: string,
+  choices: ReadonlyMap<string, boolean>,
+  config: Pick<Config, "fix">,
+): boolean {
+  return choices.get(key) ?? config.fix.watch === "all";
+}
+
+export type WatchOutcome = "watching" | "not-watching" | "bad-key";
+
+/**
+ * Records the Owner's watch choice of an MR. Watching forgets when the MR was last read, so the
+ * next poll fixes threads written while it was not watched; unwatching cancels its fix while that
+ * is queued and was queued automatically.
+ */
+export function setWatch(
+  deps: Pick<FixQueueDeps, "store" | "log" | "now">,
+  key: string,
+  watched: boolean,
+): WatchOutcome {
+  if (parseMrKey(key) === undefined) return "bad-key";
+  const { fixes } = deps.store;
+  fixes.setWatchChoice(key, watched);
+  deps.log.info(watched ? "mr watched" : "mr unwatched", { mr_key: key });
+  if (watched) {
+    fixes.unwatch(key);
+    return "watching";
+  }
+  const open = fixes.open(key);
+  if (
+    open?.status === "queued" &&
+    open.trigger === "auto" &&
+    fixes.transition(open.id, ["queued"], "cancelled", { detail: UNWATCHED }, deps.now())
+  ) {
+    deps.log.info("agent fix cancelled", { id: open.id, mr_key: key, reason: "unwatched" });
+  }
+  return "not-watching";
 }
 
 /** Watching stops once the MR has Reviewers and every one of them approved. */
@@ -117,15 +158,14 @@ export async function queueAutomaticFixes(
   seenNotes: ReadonlySet<string>,
 ): Promise<void> {
   const { store, log } = deps;
-  dropGone(
-    deps,
-    store.fixes.list(Number.MAX_SAFE_INTEGER),
-    new Set(snapshot.authored.map((mr) => mr.key)),
-  );
+  const authored = new Set(snapshot.authored.map((mr) => mr.key));
+  dropGone(deps, store.fixes.list(Number.MAX_SAFE_INTEGER), authored);
+  store.fixes.keepWatchChoices(authored);
   if (!deps.config.fix.auto) return;
   const me = snapshot.me.username;
   const marks = store.fixes.watchMarks();
   const latest = store.fixes.latestByMr();
+  const choices = store.fixes.watchChoices();
   for (const mr of snapshot.authored) {
     const open = store.fixes.open(mr.key);
     if (isApprovedByAll(mr)) {
@@ -147,6 +187,8 @@ export async function queueAutomaticFixes(
       }
       continue;
     }
+    // Read again once watched: `setWatch` forgets the mark, so threads written meanwhile are seen.
+    if (!isWatched(mr.key, choices, deps.config)) continue;
     if (open !== undefined && open.status !== "queued") continue;
     if (!needsLook(mr, me, seenNotes, marks.get(mr.key), latest.get(mr.key))) continue;
     if (

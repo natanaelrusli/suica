@@ -1,3 +1,4 @@
+import { isWatched } from "./agent-fix.ts";
 import { DEFAULT_ALERTS } from "./alerts.ts";
 import type { AlertTemplates } from "./alerts.ts";
 import type { Config } from "./config.ts";
@@ -111,8 +112,8 @@ function queueAutomatic(deps: PipelineWatchDeps, mr: MergeRequest, pipeline: Pip
 
 /**
  * After a poll: tells the Owner about each of their MRs whose head pipeline failed since the last
- * poll and, with `fix.auto` and `fix.pipelines`, queues a Pipeline Fix for it. Records every MR's
- * head pipeline and forgets MRs that are no longer open. Never throws.
+ * poll and, with `fix.auto` and `fix.pipelines`, queues a Pipeline Fix for it when it is watched.
+ * Records every MR's head pipeline and forgets MRs that are no longer open. Never throws.
  */
 export async function watchPipelines(deps: PipelineWatchDeps, snapshot: Snapshot): Promise<void> {
   let failed: MergeRequest[];
@@ -132,6 +133,10 @@ export async function watchPipelines(deps: PipelineWatchDeps, snapshot: Snapshot
     await notifyFailed(deps, mr);
     if (!deps.config.fix.auto || !deps.config.fix.pipelines) continue;
     try {
+      if (!isWatched(mr.key, deps.store.fixes.watchChoices(), deps.config)) {
+        deps.log.info("pipeline fix not queued", { mr_key: mr.key, reason: "unwatched" });
+        continue;
+      }
       queueAutomatic(deps, mr, mr.pipeline);
     } catch (error) {
       deps.log.warn("pipeline fix not queued", {

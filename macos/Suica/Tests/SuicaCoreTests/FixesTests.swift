@@ -44,6 +44,10 @@ actor FakeFixesClient: FixesClient {
         calls.append("queue pipeline \(key)")
         return try result.get()
     }
+    func setWatched(key: String, watched: Bool) async throws(AgentError) -> ActionResult {
+        calls.append("\(watched ? "watch" : "unwatch") \(key)")
+        return try result.get()
+    }
     func confirmFix(id: Int, edits: ConfirmEdits) async throws(AgentError) -> ActionResult {
         calls.append("confirm \(id)")
         lastEdits = edits
@@ -97,6 +101,24 @@ actor FakeFixesClient: FixesClient {
     #expect(!mine.approvedByAll)
     #expect(mine.pipeline?.hasFailed == true && mine.pipeline?.url == "https://gitlab.example/g/p/-/pipelines/2921")
     #expect(reviews.yourMergeRequests.last?.pipeline == nil)
+    #expect(mine.isWatched && reviews.yourMergeRequests.last?.isWatched == false)
+}
+
+@Test func anMrFromAnOlderAgentIsWatched() throws {
+    let old = #"{"key":"g/p!8","title":"Mine","url":"https://x","draft":false,"reviewers":[],"approvedByAll":false}"#
+    let mr = try JSONDecoder().decode(YourMergeRequest.self, from: Data(old.utf8))
+    #expect(mr.watched == nil && mr.isWatched)
+}
+
+@MainActor @Test func watchingAnMrSaysWhatHappened() async {
+    let client = FakeFixesClient()
+    await client.setResult(.success(ActionResult(code: "not-watching")))
+    let model = FixesModel(client: client)
+    #expect(await model.setWatched("g/p!7", false))
+    #expect(await client.calls == ["unwatch g/p!7", "list"])
+    #expect(model.banner == Copy.watchOutcome("not-watching"))
+    await client.setResult(.success(ActionResult(code: "bad-key")))
+    #expect(await !model.setWatched("nope", true))
 }
 
 @Test func aPipelineIsFailedPassedOrStillRunning() {
