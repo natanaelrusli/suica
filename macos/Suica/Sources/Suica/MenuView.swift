@@ -8,6 +8,7 @@ struct MenuView: View {
     let reviews: ReviewsModel
     let settings: AppearanceSettings
     let navigator: Navigator
+    let onboarding: OnboardingModel
     @State private var tab: PanelTab = .recent
     /// Set once the Owner picks a tab, so the opening refresh does not switch it back.
     @State private var tabPicked = false
@@ -20,6 +21,50 @@ struct MenuView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: metrics.gap * 0.75) {
+            if onboarding.needsSetup {
+                // Every command fails without a config file: no errors, only the way in.
+                Spacer(minLength: 0)
+                setupCard
+                Spacer(minLength: 0)
+            } else {
+                content
+            }
+            Divider()
+            footer
+        }
+        .padding(metrics.padding)
+        .background(alignment: .top) {
+            // Appearance → Backdrop behind the header, fading out before the content.
+            BackdropView(backdrop: settings.backdrop, strength: settings.backdrop == .wash ? 0.16 : 0.3)
+                .frame(height: 96)
+        }
+        // Fixed, so the lists have room even with one row in them.
+        .frame(width: 460, height: 640, alignment: .top)
+        .motion(value: onboarding.needsSetup)
+        .motion(value: settings.showsPopoverCounters)
+        .motion(value: model.errorText)
+        .motion(value: model.banner)
+        .motion(value: cancelNotice)
+        .motion(value: model.state?.teams)
+        .motion(value: model.confirmation?.id)
+        .motion(value: model.isPaused)
+        .motion(value: runningReviews.map(\.id))
+        .motion(value: tab)
+        // Runs each time the panel opens.
+        .task {
+            await onboarding.checkNeeded()
+            if onboarding.needsSetup { return }
+            cancelNotice = nil
+            tabPicked = false
+            tab = PanelTab.opening(badgeCount: model.badgeCount)
+            await model.refresh()
+            // A message that arrived since the last refresh can change where the panel should open.
+            if !tabPicked { tab = PanelTab.opening(badgeCount: model.badgeCount) }
+            await window.refreshStatus()
+        }
+    }
+
+    @ViewBuilder private var content: some View {
             header
             if settings.showsPopoverCounters, let state = model.state {
                 quickActions(state).transition(Motion.reveal(motion))
@@ -38,36 +83,28 @@ struct MenuView: View {
                 NoticeBox(text: text, tint: .secondary) { cancelNotice = nil }
             }
             lists
-            Divider()
-            footer
+    }
+
+    /// In place of the panel's status, counters and lists until there is a config file.
+    private var setupCard: some View {
+        VStack(spacing: 12) {
+            AppIconView(size: 72)
+            Text(Copy.setupWelcomeTitle).font(.title2.weight(.semibold))
+            Text(Copy.setupPanelHint)
+                .multilineTextAlignment(.center)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: 320)
+            Button {
+                open(nil)
+            } label: {
+                Label(Copy.setupOpen, systemImage: "sparkles").padding(.horizontal, 12)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .padding(.top, 6)
         }
-        .padding(metrics.padding)
-        .background(alignment: .top) {
-            // Appearance → Backdrop behind the header, fading out before the content.
-            BackdropView(backdrop: settings.backdrop, strength: settings.backdrop == .wash ? 0.16 : 0.3)
-                .frame(height: 96)
-        }
-        // Fixed, so the lists have room even with one row in them.
-        .frame(width: 460, height: 640, alignment: .top)
-        .motion(value: settings.showsPopoverCounters)
-        .motion(value: model.errorText)
-        .motion(value: model.banner)
-        .motion(value: cancelNotice)
-        .motion(value: model.state?.teams)
-        .motion(value: model.confirmation?.id)
-        .motion(value: model.isPaused)
-        .motion(value: runningReviews.map(\.id))
-        .motion(value: tab)
-        // Runs each time the panel opens.
-        .task {
-            cancelNotice = nil
-            tabPicked = false
-            tab = PanelTab.opening(badgeCount: model.badgeCount)
-            await model.refresh()
-            // A message that arrived since the last refresh can change where the panel should open.
-            if !tabPicked { tab = PanelTab.opening(badgeCount: model.badgeCount) }
-            await window.refreshStatus()
-        }
+        .frame(maxWidth: .infinity)
     }
 
     private var header: some View {

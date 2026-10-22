@@ -39,19 +39,35 @@ actor FakeSetupClient: SetupClient {
     #expect(try JSONDecoder().decode(GitlabCheck.self, from: data) == GitlabCheck(status: "ok", username: "owner"))
 }
 
-@MainActor @Test func opensOnlyWhenThereIsNoConfigFile() async {
+@MainActor @Test func needsSetupOnlyWhenThereIsNoConfigFile() async {
     let (missing, _, _) = makeModel()
-    await missing.showIfNeeded()
-    #expect(missing.presented)
+    await missing.checkNeeded()
+    #expect(missing.needsSetup)
 
     let (present, _, _) = makeModel(configs: [.success(makeConfig(sha: "abc"))])
-    await present.showIfNeeded()
-    #expect(!present.presented)
+    await present.checkNeeded()
+    #expect(!present.needsSetup)
 
     // An agent that cannot be reached says nothing about a first run.
     let (unreachable, _, _) = makeModel(configs: [.failure(.launchFailed)])
-    await unreachable.showIfNeeded()
-    #expect(!unreachable.presented)
+    await unreachable.checkNeeded()
+    #expect(!unreachable.needsSetup)
+}
+
+@MainActor @Test func theDoneScreenStaysUntilDoneThenThePagesComeBack() async {
+    let (model, dashboard, _) = makeModel()
+    await model.checkNeeded()
+    model.hostText = "repo.example"
+    model.next()
+    await model.finish()
+    // The file exists now, but a check (the window opening again) keeps the last step on screen.
+    await dashboard.setConfigs([.success(makeConfig(sha: "abc"))])
+    await model.checkNeeded()
+    #expect(model.needsSetup && model.finished)
+    model.complete()
+    #expect(!model.needsSetup && !model.finished && model.step == .welcome)
+    await model.checkNeeded()
+    #expect(!model.needsSetup)
 }
 
 @MainActor @Test func theGitlabStepNeedsAHost() {
@@ -137,7 +153,7 @@ actor FakeSetupClient: SetupClient {
     let dashboard = FakeDashboardClient(statuses: [.success(status)], configs: [.success(makeConfig(sha: nil))])
     let model = OnboardingModel(dashboard: dashboard, setup: FakeSetupClient())
     #expect(model.modelClis == nil)
-    await model.showIfNeeded()
+    await model.checkNeeded()
     #expect(model.modelClis?.active == "codex")
     model.modelCli = "gemini"
     #expect(model.modelClis?.active == "gemini")

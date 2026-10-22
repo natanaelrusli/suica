@@ -161,13 +161,17 @@ struct SuicaApp: App {
         _fixes = State(initialValue: FixesModel(client: fixesClient))
         _templates = State(initialValue: TemplateEditorModel(client: templatesClient))
         _office = State(initialValue: OfficeModel(client: officeClient))
-        _onboarding = State(initialValue: OnboardingModel(dashboard: dashboard, setup: setupClient))
+        let onboardingModel = OnboardingModel(dashboard: dashboard, setup: setupClient)
+        _onboarding = State(initialValue: onboardingModel)
+        Task { @MainActor in await onboardingModel.checkNeeded() }
         Task { @MainActor in await model.runRefreshLoop(every: refreshInterval) }
     }
 
     var body: some Scene {
         MenuBarExtra {
-            MenuView(model: model, window: window, reviews: reviews, settings: appearance, navigator: navigator)
+            MenuView(
+                model: model, window: window, reviews: reviews, settings: appearance, navigator: navigator,
+                onboarding: onboarding)
                 .modifier(Celebrations(model: model, reviews: reviews, settings: appearance, counter: celebrations))
                 .appearance(appearance)
         } label: {

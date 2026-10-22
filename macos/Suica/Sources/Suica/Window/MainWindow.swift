@@ -211,6 +211,54 @@ struct MainWindow: View {
     }
 
     var body: some View {
+        // Without a config file every page's command fails: Set up Suica takes the whole window.
+        Group {
+            if onboarding.needsSetup {
+                OnboardingView(model: onboarding, backdrop: settings.backdrop) { onboarding.complete() }
+                .navigationTitle("\(Copy.appName) · \(Copy.setupTitle)")
+                .transition(.opacity)
+            } else {
+                pages.transition(.opacity)
+            }
+        }
+        .motion(Motion.page, value: onboarding.needsSetup)
+        // Every page failed while there was no config file and keeps that error until it loads again:
+        // load them all once setup is over, by Done or by a config file that turned up.
+        .onChange(of: onboarding.needsSetup) { _, needed in
+            guard !needed else { return }
+            Task {
+                await window.refresh()
+                await window.menu.refresh()
+                await editor.load()
+                await reviews.refresh()
+                await fixes.refresh()
+            }
+        }
+        .frame(minWidth: 760, minHeight: 480)
+        // The Dock icon exists only while the window does.
+        .onAppear {
+            // Opened from the Dock or Open Suica…: the start page. From the popover or Go menu: theirs.
+            if navigator.selection == nil { navigator.selection = current }
+            NSApp.setActivationPolicy(.regular)
+            NSApp.activate()
+        }
+        .onDisappear {
+            navigator.selection = nil
+            NSApp.setActivationPolicy(.accessory)
+        }
+        // A `suica://` link: also runs for one that opened this window.
+        .onChange(of: window.pendingLink, initial: true) { _, _ in
+            guard let link = window.takePendingLink() else { return }
+            navigator.selection = .section(.messages)
+            Task { await window.show(link) }
+        }
+        // Cancelled when the window closes.
+        .task { await window.runRefreshLoop(every: .seconds(30)) }
+        // A first run: no config file yet. Checked again each time the window opens.
+        .task { await onboarding.checkNeeded() }
+    }
+
+    private var pages: some View {
         NavigationSplitView(columnVisibility: $columns) {
             sidebar
         } detail: {
@@ -250,37 +298,6 @@ struct MainWindow: View {
             .motion(Motion.page, value: current)
         }
         .navigationTitle(title)
-        .frame(minWidth: 760, minHeight: 480)
-        // The Dock icon exists only while the window does.
-        .onAppear {
-            // Opened from the Dock or Open Suica…: the start page. From the popover or Go menu: theirs.
-            if navigator.selection == nil { navigator.selection = current }
-            NSApp.setActivationPolicy(.regular)
-            NSApp.activate()
-        }
-        .onDisappear {
-            navigator.selection = nil
-            NSApp.setActivationPolicy(.accessory)
-        }
-        // A `suica://` link: also runs for one that opened this window.
-        .onChange(of: window.pendingLink, initial: true) { _, _ in
-            guard let link = window.takePendingLink() else { return }
-            navigator.selection = .section(.messages)
-            Task { await window.show(link) }
-        }
-        // Cancelled when the window closes.
-        .task { await window.runRefreshLoop(every: .seconds(30)) }
-        // A first run: no config file yet.
-        .task { await onboarding.showIfNeeded() }
-        .sheet(isPresented: $onboarding.presented) {
-            OnboardingView(model: onboarding) {
-                Task {
-                    await window.refresh()
-                    await editor.load()
-                }
-            }
-            .interactiveDismissDisabled(onboarding.finishing)
-        }
     }
 
     /// The row the sidebar marks: Configuration for its own pages, which have no row.
@@ -397,7 +414,7 @@ struct MainWindow: View {
         case .usage: UsageView(window: window)
         case .logs: LogsView(window: window)
         case .configuration: ConfigurationView(
-                window: window, editor: editor, onboarding: onboarding, reviews: reviews, navigator: navigator,
+                window: window, editor: editor, reviews: reviews, navigator: navigator,
                 category: item.category)
         case .appearance: AppearanceView(settings: settings)
         case .office: OfficeView(model: office, settings: settings)

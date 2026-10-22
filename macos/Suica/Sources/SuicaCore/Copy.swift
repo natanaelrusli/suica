@@ -1408,13 +1408,15 @@ public enum Copy {
 extension Copy {
     public static let setupTitle = "Set up Suica"
     public static let setupOpen = "Set up Suica…"
-    public static let setupNotNow = "Not now"
+    public static let setupWelcomeTitle = "Welcome to Suica"
+    public static let setupPanelHint =
+        "Connect Suica to your GitLab and start the background agent. It takes a minute: the window walks you through it."
     public static let setupBack = "Back"
     public static let setupContinue = "Continue"
     public static let setupDone = "Done"
     public static func setupStepTitle(_ step: OnboardingStep) -> String {
         switch step {
-        case .welcome: "Welcome to Suica"
+        case .welcome: setupWelcomeTitle
         case .gitlab: "Connect to GitLab"
         case .codingAgent: "Pick a coding agent"
         case .teams: "Teams messages"
@@ -1450,7 +1452,15 @@ extension Copy {
     }
     public static let setupCopy = "Copy"
     public static let setupCodingAgentHint =
-        "Agent Review and Agent Fix run a coding agent CLI on this Mac. Auto uses the first installed of Claude Code, Codex and Gemini CLI."
+        "Agent Review and Agent Fix run a coding agent CLI on this Mac. You can switch any time in Configuration."
+    public static let setupRecommended = "Recommended"
+    public static func setupAutoUses(_ name: String) -> String {
+        "Uses \(name) now: the first installed of Claude Code, Codex and Gemini CLI."
+    }
+    public static let setupAutoNone = "None of Claude Code, Codex or Gemini CLI is installed yet."
+    public static func setupAgentMissingWarning(_ name: String) -> String {
+        "\(name) is not installed on this Mac. Install it before the first review, or pick another."
+    }
     public static let setupTeamsToggle = "Send Teams messages"
     public static let setupTeamsHint =
         "Suica can nudge reviewers and tell them when you have addressed their comments. It needs the Teams MCP server (teams.command, by default ~/.config/teams-mcp/run.sh). Nudges and most notices wait for your approval in Messages; the notices about an Agent Review's findings and about your approval are sent at once. Change either under Configuration → Teams."
