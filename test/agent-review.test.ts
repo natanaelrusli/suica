@@ -166,6 +166,7 @@ function detail(overrides: Partial<MrDetailJson> = {}): MrDetailJson {
     author: { username: "alice", name: "Alice" },
     labels: [],
     pipelineStatus: null,
+    pipeline: null,
     additions: 3,
     deletions: 1,
     reviewers: [],

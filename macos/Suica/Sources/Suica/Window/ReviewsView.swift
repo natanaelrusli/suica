@@ -1,12 +1,14 @@
 import SuicaCore
 import SwiftUI
 
-/// Your own open MRs and those where you are a Reviewer: the list on the left, the selected MR on the right.
+/// Merge requests (the open MRs where you are a Reviewer, in tabs) or My MRs (your own): the list
+/// on the left, the selected MR on the right. Both pages share one model and its selection.
 struct ReviewsView: View {
     let model: ReviewsModel
     let fixes: FixesModel
+    let scope: ReviewScope
     @State private var query = ""
-    @State private var tab: ReviewTab = .group(.waiting)
+    @State private var tab: ReviewGroup = .waiting
 
     var body: some View {
         // The list runs up under the title bar and scrolls beneath it; the MR starts below it.
@@ -20,13 +22,14 @@ struct ReviewsView: View {
                     .padding(.top, titleBar)
             }
         }
-        .searchable(text: $query, placement: .toolbar, prompt: Copy.searchReviews)
+        .searchable(text: $query, placement: .toolbar, prompt: scope == .mine ? Copy.searchMyMRs : Copy.searchReviews)
         .task {
+            await model.show(scope)
             await refreshAll()
             syncTabToSelection()
         }
         // Reads the list and the selected MR again while the page is open, more often while a
-        // review or a fix is queued, running or being posted (see `refreshSeconds`).
+        // review, a fix or the MR's pipeline is queued or running (see `refreshSeconds`).
         .task(id: refreshSeconds) {
             while true {
                 do { try await Task.sleep(for: .seconds(refreshSeconds)) } catch { return }
@@ -64,7 +67,7 @@ struct ReviewsView: View {
         .motion(value: model.list)
         .motion(value: model.errorText)
         .modifier(ListTopBar(titleBar: titleBar) {
-            if let list = model.list { tabBar(in: list) }
+            if scope == .reviewing, let list = model.list { tabBar(in: list) }
         })
         .onChange(of: tab) { _, tab in
             guard let list = model.list else { return }
@@ -77,14 +80,14 @@ struct ReviewsView: View {
     }
 
     /// The tab on screen: `tab`, unless this list has none of that name (no `me`, so one group).
-    private func shownTab(in list: ReviewListDocument) -> ReviewTab {
-        list.tabs.contains(tab) ? tab : .group(.all)
+    private func shownTab(in list: ReviewListDocument) -> ReviewGroup {
+        list.tabs.contains(tab) ? tab : .all
     }
 
     /// Follows the selection into its tab, when it is chosen elsewhere (the Overview, a refresh).
     private func syncTabToSelection() {
-        guard let key = model.selectedKey, let list = model.list,
-            let owner = list.tab(containing: key), owner != shownTab(in: list)
+        guard scope == .reviewing, let key = model.selectedKey, let list = model.list,
+            let owner = list.group(containing: key), owner != shownTab(in: list)
         else { return }
         tab = owner
     }
@@ -108,21 +111,27 @@ struct ReviewsView: View {
     }
 
     @ViewBuilder private func rows(in list: ReviewListDocument) -> some View {
-        let shown = shownTab(in: list)
-        let keys = list.keys(in: shown, matching: query)
-        if keys.isEmpty {
-            let text = query.trimmingCharacters(in: .whitespaces)
-            Text(text.isEmpty ? Copy.nothingInReviewTab(shown) : Copy.noReviewsMatch(text))
-                .foregroundStyle(.secondary)
-                .listRowSeparator(.hidden)
-        }
-        switch shown {
-        case .yours:
-            ForEach(list.yourMergeRequests(matching: query)) { mr in YourMRRow(mr: mr).tag(mr.key) }
-        case .group(let group):
-            ForEach(list.sections(matching: query).first { $0.group == group }?.items ?? []) { mr in
+        let text = query.trimmingCharacters(in: .whitespaces)
+        switch scope {
+        case .mine:
+            let mine = list.yourMergeRequests(matching: query)
+            if mine.isEmpty {
+                Text(text.isEmpty ? Copy.noOpenMRsOfYours : Copy.noReviewsMatch(text))
+                    .foregroundStyle(.secondary)
+                    .listRowSeparator(.hidden)
+            }
+            ForEach(mine) { mr in YourMRRow(mr: mr).tag(mr.key) }
+        case .reviewing:
+            let shown = shownTab(in: list)
+            let items = list.sections(matching: query).first { $0.group == shown }?.items ?? []
+            if items.isEmpty {
+                Text(text.isEmpty ? Copy.nothingInReviewTab(shown) : Copy.noReviewsMatch(text))
+                    .foregroundStyle(.secondary)
+                    .listRowSeparator(.hidden)
+            }
+            ForEach(items) { mr in
                 ReviewRow(
-                    mr: mr, group: group, myState: list.myState(mr),
+                    mr: mr, group: shown, myState: list.myState(mr),
                     rereviewing: model.agentBusyKeys.contains(mr.key)
                 ) {
                     Task { await model.queueAgentReview(mr.key) }
@@ -132,8 +141,14 @@ struct ReviewsView: View {
         }
     }
 
+    /// The selected MR, when it belongs to this page; the other page's selection is not shown here.
+    private var shownKey: String? {
+        guard let key = model.selectedKey, let list = model.list else { return model.selectedKey }
+        return list.keys(in: scope).contains(key) ? key : nil
+    }
+
     @ViewBuilder private var detail: some View {
-        if let key = model.selectedKey {
+        if let key = shownKey {
             if let detail = model.details[key] {
                 MergeRequestDetailView(
                     detail: detail, error: model.detailErrors[key], model: model, fixes: fixes
@@ -151,8 +166,10 @@ struct ReviewsView: View {
             } else {
                 ProgressView(Copy.loading)
             }
-        } else if model.list?.mergeRequests.isEmpty == true {
+        } else if scope == .reviewing && model.list?.mergeRequests.isEmpty == true {
             ContentUnavailableView(Copy.allCaughtUp, systemImage: "checkmark.circle", description: Text(Copy.noReviewRequests))
+        } else if scope == .mine && model.list?.yourMergeRequests.isEmpty == true {
+            ContentUnavailableView(Copy.myMergeRequests, systemImage: "arrow.triangle.pull", description: Text(Copy.noOpenMRsOfYours))
         } else {
             ContentUnavailableView(
                 Copy.selectMergeRequest, systemImage: "sidebar.left", description: Text(Copy.selectMergeRequestHint))
@@ -446,6 +463,9 @@ private struct MergeRequestDetailView: View {
     @State private var confirmingApprove = false
     @State private var merging = false
     @State private var confirmingClose = false
+    @State private var messaging = false
+    /// Who the last Teams message from this page went to.
+    @State private var messageNotice: String?
     @State private var collapsed = false
     @Environment(\.openURL) private var openURL
 
@@ -461,6 +481,7 @@ private struct MergeRequestDetailView: View {
                 .padding(.bottom, collapsed ? 8 : 12)
                 .motion(value: error)
                 .motion(value: model.approvalNotices[detail.key])
+                .motion(value: messageNotice)
                 .motion(value: collapsed)
             DetailTabBar(selection: $tab, tabs: tabs)
             ZStack {
@@ -503,6 +524,9 @@ private struct MergeRequestDetailView: View {
             Button(Copy.cancel, role: .cancel) {}
         } message: {
             Text(Copy.closeConfirmMessage)
+        }
+        .sheet(isPresented: $messaging) {
+            TeamsMessageSheet(detail: detail, model: model) { name in messageNotice = Copy.messageSent(name) }
         }
         .sheet(isPresented: $merging) {
             MergeSheet(detail: detail, fixes: fixes) {
@@ -553,8 +577,12 @@ private struct MergeRequestDetailView: View {
                     }
                 }
                 chips
+                if let pipeline = detail.pipeline { PipelineProgressView(pipeline: pipeline) }
             }
             if let error { NoticeBox(text: error, tint: .red) }
+            if let messageNotice {
+                NoticeBox(text: messageNotice, tint: .green) { self.messageNotice = nil }
+            }
             if let notice = model.approvalNotices[detail.key] {
                 NoticeBox(text: notice, tint: .secondary) { model.dismissApprovalNotice(detail.key) }
             }
@@ -657,6 +685,10 @@ private struct MergeRequestDetailView: View {
                 }
                 .disabled(model.agentBusyKeys.contains(detail.key))
             }
+            Button { messaging = true } label: {
+                Label(Copy.messageOnTeams, systemImage: "bubble.left.and.text.bubble.right")
+            }
+            .help(Copy.messageOnTeamsHelp)
             if let url = DisplayText.safeURL(detail.url) {
                 Button { openURL(url) } label: {
                     Label(Copy.openInGitLab, systemImage: "arrow.up.right.square")
@@ -689,7 +721,8 @@ private struct MergeRequestDetailView: View {
             .padding(.horizontal, 8)
             .padding(.vertical, 3)
             .background(.quaternary.opacity(0.6), in: Capsule())
-            if let status = detail.pipelineStatus {
+            // The pipeline's own strip shows it below; an older agent sends only the status.
+            if detail.pipeline == nil, let status = detail.pipelineStatus {
                 Badge(text: Copy.pipeline(status), tint: pipelineTint(status), symbol: pipelineSymbol(status))
             }
             if let squash = detail.squashOnMerge {

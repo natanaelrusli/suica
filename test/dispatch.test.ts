@@ -6,8 +6,10 @@ import { TeamsFailure } from "../src/teams/api.ts";
 import type { TeamsApi } from "../src/teams/api.ts";
 import {
   dispatchQueued,
+  draftManual,
   modeFor,
   retryOutbox,
+  sendManual,
   sendPending,
   skipOutbox,
 } from "../src/teams/dispatch.ts";
@@ -799,5 +801,51 @@ describe("logs", () => {
       attributes: { reason: "error" },
     });
     expect(refused.logs.join("\n")).not.toContain("403");
+  });
+});
+
+describe("messages sent by hand", () => {
+  const manual = intent(1, { dedupeKey: "manual:g/p!5:bob:1" });
+
+  it("drafts the template's text with the MR's values", () => {
+    const h = setup();
+    expect(draftManual(h.deps, manual, "Nata")).toBe(
+      "Halo Bob, saya Bahlil, agen review-nya Nata. Boleh minta tolong review MR ini?\n[Add thing](https://gitlab.example/g/p/-/merge_requests/5)\nTerima kasih!",
+    );
+    expect(h.store.listOutbox(["queued", "pending", "sent"])).toEqual([]);
+  });
+
+  it("sends the given text at once, outside working hours, and keeps it as approved and sent", async () => {
+    const h = setup({ mode: "approval", now: EVENING });
+    expect(await sendManual(h.deps, manual, "Bisa dicek lagi?")).toEqual({ status: "sent" });
+    expect(h.sent).toEqual([{ chatId: "chat-bob@x.id", text: "Bisa dicek lagi?" }]);
+    expect(h.store.listOutbox(["sent"])).toMatchObject([
+      { kind: "nudge", text: "Bisa dicek lagi?", approved: true, recipientName: "Bob" },
+    ]);
+  });
+
+  it("stays pending when Teams cannot be reached, and is never skipped as obsolete", async () => {
+    const h = setup({
+      api: { searchUsers: () => Promise.reject(new TeamsFailure("unavailable", "down")) },
+    });
+    // Bob already approved: a planned nudge would be obsolete, a message sent by hand is not.
+    const approved = own([reviewer("bob", "APPROVED", "Bob")]);
+    h.store.commit(approved);
+    expect(await sendManual(h.deps, manual, "Halo")).toMatchObject({ status: "retry-later" });
+    const [row] = h.store.listOutbox(["pending"]);
+    expect(row).toMatchObject({ text: "Halo", approved: true });
+    await dispatchQueued(h.deps, approved);
+    expect(h.store.getOutbox(row?.id ?? 0)).toMatchObject({ status: "pending" });
+  });
+
+  it("keeps the Owner's text when an unresolved message is retried", async () => {
+    const h = setup({ api: { searchUsers: () => Promise.resolve([]) } });
+    h.store.commit(own());
+    expect(await sendManual(h.deps, manual, "Teks saya")).toMatchObject({ status: "unresolved" });
+    const [row] = h.store.listOutbox(["unresolved"]);
+    expect(retryOutbox(h.store, row?.id ?? 0, NOW)).toBe(true);
+    const found = setup();
+    await dispatchQueued({ ...found.deps, store: h.store }, own());
+    expect(found.sent).toEqual([{ chatId: "chat-bob@x.id", text: "Teks saya" }]);
   });
 });

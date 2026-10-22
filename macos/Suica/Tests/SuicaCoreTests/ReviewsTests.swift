@@ -87,6 +87,15 @@ actor FakeReviewsClient: ReviewsClient {
         return try actionResult.get()
     }
 
+    private(set) var messageRequests: [TeamsMessageRequest] = []
+    var messageReply: Result<TeamsMessageReply, AgentError> = .success(TeamsMessageReply(status: "sent"))
+    func setMessageReply(_ next: Result<TeamsMessageReply, AgentError>) { messageReply = next }
+
+    func teamsMessage(key: String, request: TeamsMessageRequest) async throws(AgentError) -> TeamsMessageReply {
+        messageRequests.append(request)
+        return try messageReply.get()
+    }
+
     func mergeRequest(key: String) async throws(AgentError) -> MergeRequestDetail {
         detailCalls.append(key)
         let gate = gates.removeValue(forKey: key)
@@ -115,7 +124,14 @@ actor FakeReviewsClient: ReviewsClient {
     #expect(rereview.headSha == "89abcdef0123456789abcdef0123456789abcdef")
 
     let mr = try decodeDocument(MergeRequestDetail.self, from: contract("mr-detail.v1.json"))
-    #expect(mr.pipelineStatus == "SUCCESS" && mr.additions == 3 && mr.deletions == 1)
+    #expect(mr.pipelineStatus == "RUNNING" && mr.additions == 3 && mr.deletions == 1)
+    let pipeline = try #require(mr.pipeline)
+    #expect(pipeline.iid == "41" && pipeline.isActive && pipeline.startedDate != nil && pipeline.finishedDate == nil)
+    #expect(pipeline.stages.map(\.name) == ["test", "deploy"])
+    #expect(pipeline.stages.first?.jobs.map(\.name) == ["unit", "lint"])
+    #expect(pipeline.stages.first?.jobs.last?.url == nil)
+    #expect(pipeline.progress == (1, 2))
+    #expect(pipeline.currentStage?.name == "test")
     #expect(mr.files.map(\.diff?.isEmpty) == [false, nil])
     #expect(mr.discussions.count == 2)
     #expect(mr.comments.map(\.id) == ["gid://gitlab/Discussion/2"])
@@ -288,7 +304,7 @@ private func review(
         author: Person(username: "a", name: "A"), reviewers: mine + rest)
 }
 
-@Test func theListIsGroupedIntoWaitingReviewedAndDraftsInGitLabOrder() {
+@Test func theListIsGroupedIntoWaitingReviewedApprovedAndDraftsInGitLabOrder() {
     let document = ReviewListDocument(
         version: 1, me: Person(username: "me", name: "Me"),
         mergeRequests: [
@@ -298,8 +314,8 @@ private func review(
             review("g/p!4", me: "REQUESTED_CHANGES"),
             review("g/p!5"),
         ])
-    #expect(document.sections.map(\.group) == [.waiting, .reviewed, .drafts])
-    #expect(document.sections.map { $0.items.map(\.key) } == [["g/p!2", "g/p!5"], ["g/p!1", "g/p!4"], ["g/p!3"]])
+    #expect(document.sections.map(\.group) == [.waiting, .reviewed, .approved, .drafts])
+    #expect(document.sections.map { $0.items.map(\.key) } == [["g/p!2", "g/p!5"], ["g/p!4"], ["g/p!1"], ["g/p!3"]])
     #expect(document.myState(document.mergeRequests[0]) == "APPROVED")
     // Not listed among the reviewers: unknown, and counted as waiting like the badge does.
     #expect(document.myState(document.mergeRequests[4]) == nil)
@@ -308,7 +324,7 @@ private func review(
 @Test func emptyGroupsAreLeftOutAndAListWithoutMeIsOneUngroupedSection() {
     let me = Person(username: "me", name: "Me")
     let reviewedOnly = ReviewListDocument(version: 1, me: me, mergeRequests: [review("g/p!1", me: "APPROVED")])
-    #expect(reviewedOnly.sections.map(\.group) == [.reviewed])
+    #expect(reviewedOnly.sections.map(\.group) == [.approved])
     #expect(ReviewListDocument(version: 1, me: me, mergeRequests: []).sections.isEmpty)
     let older = ReviewListDocument(version: 1, mergeRequests: [review("g/p!1", draft: true), review("g/p!2")])
     #expect(older.sections == [ReviewSection(group: .all, items: older.mergeRequests)])
@@ -600,36 +616,88 @@ private func tabbedList(me: Bool = true) throws -> ReviewListDocument {
         version: 1, me: me ? Person(username: "me", name: "Me") : nil,
         mergeRequests: [
             review("g/p!1", me: "APPROVED"), review("g/p!2", me: "UNREVIEWED"), review("g/p!3", draft: true),
+            review("g/p!4", me: "REQUESTED_CHANGES"),
         ],
         yourMergeRequests: yours)
 }
 
-@Test func eachCategoryOfTheListIsItsOwnTab() throws {
+@Test func eachCategoryOfTheMRsYouReviewIsItsOwnTab() throws {
     let list = try tabbedList()
-    #expect(list.tabs == [.yours, .group(.waiting), .group(.reviewed), .group(.drafts)])
-    #expect(list.keys(in: .yours) == ["g/p!8"])
-    #expect(list.keys(in: .group(.waiting)) == ["g/p!2"])
-    #expect(list.keys(in: .group(.reviewed)) == ["g/p!1"])
-    #expect(list.keys(in: .group(.drafts)) == ["g/p!3"])
-    #expect(list.tab(containing: "g/p!1") == .group(.reviewed))
-    #expect(list.tab(containing: "g/p!8") == .yours)
-    #expect(list.tab(containing: "g/p!99") == nil)
+    #expect(list.tabs == [.waiting, .reviewed, .approved, .drafts])
+    #expect(list.keys(in: .waiting) == ["g/p!2"])
+    #expect(list.keys(in: .reviewed) == ["g/p!4"])
+    #expect(list.keys(in: .approved) == ["g/p!1"])
+    #expect(list.keys(in: .drafts) == ["g/p!3"])
+    #expect(list.group(containing: "g/p!1") == .approved)
+    #expect(list.group(containing: "g/p!8") == nil)
+    #expect(list.group(containing: "g/p!99") == nil)
+    #expect(list.keys(in: ReviewScope.mine) == ["g/p!8"])
+    #expect(list.keys(in: ReviewScope.reviewing) == ["g/p!2", "g/p!4", "g/p!1", "g/p!3"])
 }
 
 @Test func searchNarrowsEveryTabAndTabsStayEvenWhenEmpty() throws {
     let list = try tabbedList()
-    #expect(list.keys(in: .yours, matching: "login") == ["g/p!8"])
-    #expect(list.keys(in: .yours, matching: "p!2").isEmpty)
-    #expect(list.keys(in: .group(.waiting), matching: "p!2") == ["g/p!2"])
-    #expect(list.keys(in: .group(.waiting), matching: "p!1").isEmpty)
+    #expect(list.keys(in: ReviewScope.mine, matching: "login") == ["g/p!8"])
+    #expect(list.keys(in: ReviewScope.mine, matching: "p!2").isEmpty)
+    #expect(list.keys(in: .waiting, matching: "p!2") == ["g/p!2"])
+    #expect(list.keys(in: .waiting, matching: "p!1").isEmpty)
     // Search does not move an MR to another tab.
-    #expect(list.tab(containing: "g/p!2") == .group(.waiting))
+    #expect(list.group(containing: "g/p!2") == .waiting)
 }
 
-@Test func aListWithoutMeHasYoursAndOneTabForTheRest() throws {
+@Test func aListWithoutMeHasOneTabForTheMRsYouReview() throws {
     let list = try tabbedList(me: false)
-    #expect(list.tabs == [.yours, .group(.all)])
-    #expect(list.keys(in: .group(.all)) == ["g/p!1", "g/p!2", "g/p!3"])
+    #expect(list.tabs == [.all])
+    #expect(list.keys(in: .all) == ["g/p!1", "g/p!2", "g/p!3", "g/p!4"])
+}
+
+@MainActor @Test func eachPageSelectsItsOwnFirstMRAndKeepsOneItLists() async throws {
+    let client = FakeReviewsClient(lists: [.success(try tabbedList())])
+    let model = ReviewsModel(client: client)
+    await model.refresh()
+    #expect(model.selectedKey == "g/p!2")
+    await model.show(.mine)
+    #expect(model.selectedKey == "g/p!8")
+    await model.show(.mine)
+    #expect(model.selectedKey == "g/p!8")
+    await model.select("g/p!1")
+    await model.show(.reviewing)
+    #expect(model.selectedKey == "g/p!1")
+
+    let fresh = ReviewsModel(client: client)
+    await fresh.show(.mine)
+    await fresh.refresh()
+    #expect(fresh.selectedKey == "g/p!8")
+}
+
+@MainActor @Test func aTeamsMessageIsDraftedThenSentAndAFailureSaysWhy() async throws {
+    let client = FakeReviewsClient(lists: [])
+    await client.setMessageReply(.success(TeamsMessageReply(status: "draft", text: "Halo Bob")))
+    let model = ReviewsModel(client: client)
+    #expect(await model.draftMessage("g/p!1", to: "bob", template: "nudge").text == "Halo Bob")
+    await client.setMessageReply(.success(TeamsMessageReply(status: "sent")))
+    #expect(await model.sendMessage("g/p!1", to: "bob", template: "nudge", text: "Hi").status == "sent")
+    #expect(
+        await client.messageRequests == [
+            TeamsMessageRequest(to: "bob", template: "nudge", text: nil, send: false),
+            TeamsMessageRequest(to: "bob", template: "nudge", text: "Hi", send: true),
+        ])
+    await client.setMessageReply(.failure(.launchFailed))
+    let failed = await model.sendMessage("g/p!1", to: "bob", template: "nudge", text: "Hi")
+    #expect(failed.status == "failed" && failed.message != nil)
+    let encoded = try JSONEncoder().encode(TeamsMessageRequest(to: "bob", template: "nudge", text: nil, send: false))
+    #expect(String(decoding: encoded, as: UTF8.self).contains(#""text":null"#))
+}
+
+@MainActor @Test func aRunningPipelineOnTheSelectedMRRefreshesEveryTenSeconds() async throws {
+    let client = FakeReviewsClient(lists: [.success(list("g/p!1"))])
+    await client.setDetail("g/p!1", .success(try detail("g/p!1")))
+    let model = ReviewsModel(client: client)
+    await model.refresh()
+    #expect(model.refreshSeconds == 10)
+    await client.setDetail("g/p!1", .success(try detail("g/p!1", ["pipeline": NSNull()])))
+    await model.refresh()
+    #expect(model.refreshSeconds == 30)
 }
 
 @MainActor @Test func aRefreshThatChangesNothingDoesNotRedrawTheListOrTheMR() async throws {
@@ -650,4 +718,56 @@ private func tabbedList(me: Bool = true) throws -> ReviewListDocument {
     await model.refresh()
     #expect(!redrawn.withLock { $0 })
     #expect(await client.detailCalls == ["g/p!1", "g/p!1"])
+}
+
+// MARK: - Teams message choices
+
+@Test func aMessageFromYourMRGoesToItsReviewersAndAsksThemToReview() throws {
+    let me = Person(username: "me", name: "Nata")
+    let mr = try detail("g/p!1", [
+        "author": ["username": "me", "name": "Nata"],
+        "reviewers": [
+            ["username": "bob", "name": "Bob", "state": "UNREVIEWED"],
+            ["username": "rina", "name": "Rina", "state": "APPROVED"],
+        ],
+    ])
+    let people = TeamsMessageChoices.recipients(mr, me: me, yours: true)
+    #expect(people.map(\.username) == ["bob", "rina"])
+    #expect(TeamsMessageChoices.templates(yours: true) == ["nudge", "reminder", "rereview"])
+    #expect(TeamsMessageChoices.defaultTemplate(for: people[0], in: mr, me: me, yours: true) == "nudge")
+    #expect(TeamsMessageChoices.defaultTemplate(for: people[1], in: mr, me: me, yours: true) == "rereview")
+}
+
+@Test func aMessageFromAnotherMRGoesToItsAuthorFirstWithTheNoticeOfYourReview() throws {
+    let me = Person(username: "me", name: "Nata")
+    func mr(_ state: String) throws -> MergeRequestDetail {
+        try detail("g/p!1", [
+            "author": ["username": "alice", "name": "Alice"],
+            "reviewers": [
+                ["username": "me", "name": "Nata", "state": state],
+                ["username": "bob", "name": "Bob", "state": "UNREVIEWED"],
+            ],
+        ])
+    }
+    let people = TeamsMessageChoices.recipients(try mr("APPROVED"), me: me, yours: false)
+    #expect(people.map(\.username) == ["alice", "bob"] && people[0].isAuthor && !people[1].isAuthor)
+    #expect(TeamsMessageChoices.templates(yours: false) == ["notice.comments", "notice.changes", "notice.approved"])
+    let alice = people[0]
+    #expect(TeamsMessageChoices.defaultTemplate(for: alice, in: try mr("APPROVED"), me: me, yours: false) == "notice.approved")
+    #expect(TeamsMessageChoices.defaultTemplate(for: alice, in: try mr("REQUESTED_CHANGES"), me: me, yours: false) == "notice.changes")
+    #expect(TeamsMessageChoices.defaultTemplate(for: alice, in: try mr("REVIEWED"), me: me, yours: false) == "notice.comments")
+}
+
+@Test func aPipelineThatPassedIsCompleteAndManualJobsDoNotCount() throws {
+    let json = """
+        {"iid":"1","status":"SUCCESS","url":"https://x","startedAt":null,"finishedAt":null,"stages":[
+          {"name":"build","status":"SUCCESS","jobs":[
+            {"name":"a","status":"SUCCESS","allowFailure":false,"url":null,"startedAt":null,"finishedAt":null},
+            {"name":"lint","status":"FAILED","allowFailure":true,"url":null,"startedAt":null,"finishedAt":null}]},
+          {"name":"deploy","status":"MANUAL","jobs":[
+            {"name":"prod","status":"MANUAL","allowFailure":false,"url":null,"startedAt":null,"finishedAt":null}]}]}
+        """
+    let pipeline = try JSONDecoder().decode(PipelineDetail.self, from: Data(json.utf8))
+    #expect(pipeline.progress == (2, 2))
+    #expect(pipeline.currentStage == nil && !pipeline.isActive)
 }

@@ -54,7 +54,7 @@ import Testing
         ])
     #expect(list.sections(matching: "") == list.sections)
     let claims = list.sections(matching: "claims")
-    #expect(claims.map(\.group) == [.waiting, .reviewed])
+    #expect(claims.map(\.group) == [.waiting, .approved])
     #expect(claims.map { $0.items.map(\.key) } == [["g/p!1"], ["g/p!3"]])
     #expect(list.sections(matching: "nothing like this").isEmpty)
 }

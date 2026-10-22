@@ -90,7 +90,7 @@ public enum StartPage: String, CaseIterable, Identifiable, Sendable {
     public var title: String {
         switch self {
         case .overview: Copy.overview
-        case .reviews: Copy.reviewRequests
+        case .reviews: Copy.mergeRequests
         case .messages: Copy.messages
         }
     }

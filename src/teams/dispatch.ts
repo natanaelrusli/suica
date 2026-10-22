@@ -21,7 +21,7 @@ import {
   renderTemplate,
 } from "./templates.ts";
 import type { Placeholder, Templates } from "./templates.ts";
-import type { HeldMessage, OutboxRow } from "./types.ts";
+import type { HeldMessage, Intent, OutboxRow } from "./types.ts";
 
 type TeamsStore = Pick<
   Store,
@@ -29,6 +29,7 @@ type TeamsStore = Pick<
   | "loadTeams"
   | "listOutbox"
   | "getOutbox"
+  | "insertManualOutbox"
   | "transitionOutbox"
   | "loadIdentity"
   | "saveIdentity"
@@ -131,8 +132,17 @@ function rereviewOpen(store: TeamsStore, row: OutboxRow): boolean {
   return record?.nudged === true;
 }
 
+/** The prefix of a message the Owner sent by hand from an MR page. */
+export const MANUAL_PREFIX = "manual:";
+
+/** A message the Owner sent by hand is wanted whatever the MR's state; it never turns obsolete. */
+function isManual(row: OutboxRow): boolean {
+  return row.dedupeKey.startsWith(MANUAL_PREFIX);
+}
+
 /** Is the message still worth sending now? Re-checked at send time, not only when it was queued. */
 function stillNeeded(store: TeamsStore, row: OutboxRow, snapshot: Snapshot): boolean {
+  if (isManual(row)) return true;
   if (row.kind === "notice") {
     return snapshot.reviewRequested.some((mr) => mr.key === row.mrKey && !mr.draft);
   }
@@ -151,6 +161,7 @@ function stillNeeded(store: TeamsStore, row: OutboxRow, snapshot: Snapshot): boo
 
 /** The same question as `stillNeeded`, answered from the last committed poll (for `suica send`). */
 function stillNeededInState(store: TeamsStore, row: OutboxRow, state: PreviousState): boolean {
+  if (isManual(row)) return true;
   if (row.kind === "notice") return state.myReviewStates.has(row.mrKey);
   const key = reviewerKey(row.mrKey, row.recipient);
   if (row.kind === "rereview") {
@@ -164,7 +175,7 @@ function stillNeededInState(store: TeamsStore, row: OutboxRow, state: PreviousSt
 }
 
 function valuesFor(
-  row: OutboxRow,
+  row: Pick<OutboxRow, "recipientName" | "mrTitle" | "mrUrl" | "mrIid" | "mrProject" | "findings">,
   ownerName: string,
   agentName: string,
   nowMs: number,
@@ -298,11 +309,15 @@ export async function dispatchQueued(
     if (row.status === "pending" || !inHours) continue;
     let text: string;
     try {
-      // The variant follows the row's dedupe key, so a retry writes the same text.
-      text = renderTemplate(
-        pickVariant(deps.templates[row.variant], row.dedupeKey),
-        valuesFor(row, snapshot.me.name, deps.config.agentName, nowMs),
-      );
+      // The variant follows the row's dedupe key, so a retry writes the same text. A message the
+      // Owner wrote by hand keeps its text.
+      text =
+        isManual(row) && row.text !== null
+          ? row.text
+          : renderTemplate(
+              pickVariant(deps.templates[row.variant], row.dedupeKey),
+              valuesFor(row, snapshot.me.name, deps.config.agentName, nowMs),
+            );
     } catch {
       deps.store.transitionOutbox(row.id, "queued", "failed", { detail: "template" }, nowMs);
       deps.log.warn("teams message failed", { ...rowAttributes(row), reason: "template" });
@@ -360,4 +375,48 @@ export function retryOutbox(
   now: number,
 ): boolean {
   return store.transitionOutbox(id, "unresolved", "queued", { detail: "" }, now);
+}
+
+/** The text a message the Owner is about to send by hand would have, from its template. */
+export function draftManual(deps: DispatchDeps, intent: Intent, ownerName: string): string {
+  const nowMs = deps.now();
+  return renderTemplate(
+    pickVariant(deps.templates[intent.variant], intent.dedupeKey),
+    valuesFor(
+      {
+        recipientName: intent.recipient.name,
+        mrTitle: intent.mr.title,
+        mrUrl: intent.mr.url,
+        mrIid: intent.mr.iid,
+        mrProject: intent.mr.projectPath,
+        findings: null,
+      },
+      ownerName,
+      deps.config.agentName,
+      nowMs,
+    ),
+  );
+}
+
+/**
+ * `suica message <key> --json`: sends `text` now, as the Owner wrote or approved it, outside
+ * working hours and whatever the flow's mode. The row is kept like any other message; when Teams
+ * cannot be reached it stays `pending`, so Messages offers to send it again.
+ */
+export async function sendManual(
+  deps: DispatchDeps,
+  intent: Intent,
+  text: string,
+): Promise<SendPendingOutcome> {
+  const id = deps.store.insertManualOutbox(intent, text, deps.now());
+  const row = deps.store.getOutbox(id);
+  if (row === undefined) return { status: "not-found" };
+  deps.log.info("teams message written by hand", rowAttributes(row));
+  try {
+    const outcome = await deps.gateway.session((api) => deliver(deps, api, row, text));
+    logOutcome(deps.log, row, outcome);
+    return outcome;
+  } catch (error) {
+    return { status: "retry-later", failure: failureKind(error) };
+  }
 }

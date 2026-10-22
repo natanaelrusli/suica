@@ -373,7 +373,8 @@ struct MainWindow: View {
     @ViewBuilder private func sectionPage(_ item: SidebarItem) -> some View {
         switch item.section {
         case .overview: OverviewView(window: window, editor: editor, reviews: reviews, navigator: navigator)
-        case .reviews: ReviewsView(model: reviews, fixes: fixes)
+        case .reviews: ReviewsView(model: reviews, fixes: fixes, scope: .reviewing)
+        case .myMergeRequests: ReviewsView(model: reviews, fixes: fixes, scope: .mine)
         case .messages: MessagesView(window: window)
         case .statistics:
             if let page = item.statisticsPage {

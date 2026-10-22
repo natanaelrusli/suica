@@ -437,7 +437,7 @@ struct MergeSheet: View {
     }
 }
 
-private extension View {
+extension View {
     /// A plain text editor with an inset and a thin border, like a text field.
     func editorBox() -> some View {
         scrollContentBackground(.hidden)

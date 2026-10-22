@@ -451,6 +451,25 @@ extension CLIAgentClient: ReviewsClient {
     public func approve(key: String, sha: String) async throws(AgentError) -> ActionResult {
         try await action(["mr", "approve", key, sha, "--json"], timeout: Self.gitlabTimeout)
     }
+
+    /// Sending waits as long as a pending message does; a draft only reads the MR.
+    public func teamsMessage(key: String, request: TeamsMessageRequest) async throws(AgentError) -> TeamsMessageReply {
+        let body: Data
+        do {
+            body = try JSONEncoder().encode(request)
+        } catch {
+            throw AgentError.badOutput
+        }
+        let result = try await runner.run(
+            invocation(
+                ["message", key, "--json"], timeout: request.send ? Self.sendTimeout : Self.gitlabTimeout, stdin: body))
+        // The CLI exits 1 when nothing was sent, with the reason in the JSON: read that first.
+        if let line = lastLine(of: result.stdout), let reply = try? JSONDecoder().decode(TeamsMessageReply.self, from: line) {
+            return reply
+        }
+        guard result.exitCode == 0 else { throw AgentError.failed(exitCode: result.exitCode) }
+        throw AgentError.badOutput
+    }
 }
 
 extension CLIAgentClient: OfficeClient {

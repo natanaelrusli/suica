@@ -283,33 +283,104 @@ public enum Copy {
     public static let searchSettings = "Search settings"
     public static func noSettingsMatch(_ query: String) -> String { "No settings match “\(query)”" }
     public static let noSettingsMatchHint = "Search looks at each setting's name, help and key."
-    public static func reviewTab(_ tab: ReviewTab) -> String {
-        switch tab {
-        case .yours: "Yours"
-        case .group(.waiting): "Waiting"
-        case .group(.reviewed): "Reviewed"
-        case .group(.drafts): "Drafts"
-        case .group(.all): "All"
+    public static func reviewTab(_ group: ReviewGroup) -> String {
+        switch group {
+        case .waiting: "Waiting"
+        case .reviewed: "Reviewed"
+        case .approved: "Approved"
+        case .drafts: "Drafts"
+        case .all: "All"
         }
     }
     /// The longer name of a tab, for its help text and accessibility.
-    public static func reviewTabHelp(_ tab: ReviewTab) -> String {
-        switch tab {
-        case .yours: "Your open merge requests"
-        case .group(.waiting): "Waiting for you"
-        case .group(.reviewed): "You reviewed"
-        case .group(.drafts): "Drafts"
-        case .group(.all): "All merge requests"
+    public static func reviewTabHelp(_ group: ReviewGroup) -> String {
+        switch group {
+        case .waiting: "Waiting for you"
+        case .reviewed: "You reviewed, not approved yet"
+        case .approved: "You approved"
+        case .drafts: "Drafts"
+        case .all: "All merge requests"
         }
     }
     /// What an empty tab says when nothing is searched.
-    public static func nothingInReviewTab(_ tab: ReviewTab) -> String {
-        switch tab {
-        case .yours: "You have no open merge requests."
-        case .group(.waiting): nothingWaiting
-        case .group(.reviewed): "You have not reviewed any open merge request."
-        case .group(.drafts): "No draft merge requests."
-        case .group(.all): noReviewRequests
+    public static func nothingInReviewTab(_ group: ReviewGroup) -> String {
+        switch group {
+        case .waiting: nothingWaiting
+        case .reviewed: "Nothing you reviewed is waiting for your approval."
+        case .approved: "You have not approved any open merge request."
+        case .drafts: "No draft merge requests."
+        case .all: noReviewRequests
+        }
+    }
+    public static let noOpenMRsOfYours = "You have no open merge requests."
+    public static let mergeRequests = "Merge requests"
+    public static let myMergeRequests = "My MRs"
+    public static let searchMyMRs = "Search my MRs"
+    // Pipeline progress
+    public static func pipelineNumber(_ iid: String) -> String { "Pipeline #\(iid)" }
+    public static func pipelineJobsDone(_ done: Int, of total: Int) -> String {
+        total == 0 ? "No jobs" : "\(done) of \(total) \(total == 1 ? "job" : "jobs") done"
+    }
+    public static func pipelineStageNow(_ stage: String) -> String { "now: \(stage)" }
+    public static func pipelineFor(_ duration: String) -> String { "for \(duration)" }
+    public static func pipelineTook(_ duration: String) -> String { "took \(duration)" }
+    public static let pipelineShowJobs = "Show jobs"
+    public static let pipelineHideJobs = "Hide jobs"
+    public static let allowedToFail = "allowed to fail"
+    public static let openPipeline = "Open the pipeline in GitLab"
+    public static let openJob = "Open the job in GitLab"
+    public static func jobStatus(_ status: String) -> String {
+        switch status {
+        case "SUCCESS": "passed"
+        case "FAILED": "failed"
+        case "RUNNING": "running"
+        case "PENDING", "PREPARING", "WAITING_FOR_RESOURCE", "WAITING_FOR_CALLBACK": "pending"
+        case "CREATED": "not started"
+        case "MANUAL": "manual"
+        case "SKIPPED": "skipped"
+        case "CANCELED": "cancelled"
+        case "SCHEDULED": "scheduled"
+        default: status.lowercased().replacingOccurrences(of: "_", with: " ")
+        }
+    }
+    // Teams message from an MR
+    public static let messageOnTeams = "Message on Teams…"
+    public static let messageOnTeamsHelp = "Write a Teams message to the author or a reviewer of this merge request"
+    public static let messageTo = "To"
+    public static let messageTemplate = "Start from"
+    public static let messageText = "Message"
+    public static let messagePreview = "Preview"
+    public static let messageDrafting = "Writing from the template…"
+    public static let sendMessage = "Send"
+    public static func messageSent(_ name: String) -> String { "Sent to \(name) on Teams." }
+    public static let noOneToMessage = "No one else is on this merge request yet."
+    public static let messageSendsNow = "Sends now as you, also outside working hours. It is kept in Messages."
+    public static func messageRecipient(_ name: String, role: String) -> String { "\(name) (\(role))" }
+    public static let authorRole = "author"
+    public static let reviewerRole = "reviewer"
+    public static func templateLabel(_ name: String) -> String {
+        switch name {
+        case "nudge": "Review request"
+        case "reminder": "Reminder"
+        case "rereview": "Re-review request"
+        case "notice.comments": "I left comments"
+        case "notice.changes": "Changes requested"
+        case "notice.approved": "Approved"
+        default: name
+        }
+    }
+    /// What happened to a Teams message sent from an MR; nil when it was sent.
+    public static func messageOutcome(_ reply: TeamsMessageReply) -> String? {
+        switch reply.status {
+        case "sent", "draft": nil
+        case "teams-off": "Teams is off. Turn it on under Configuration → Teams."
+        case "bad-recipient": "That person is not the author or a reviewer of this merge request."
+        case "unresolved": "Could not find this person in Teams. Add them under Configuration → Teams → People."
+        case "lookup-error": "Teams could not look this person up. The message waits in Messages."
+        case "retry-later": "Teams could not be reached. The message waits in Messages; send it from there."
+        case "busy": "This message is already being sent."
+        case "bad-request": "The message could not be read. Check its text."
+        default: reply.message.map { "Not sent: \($0)" } ?? "Not sent: Teams failed."
         }
     }
     public static let nothingWaiting = "Nothing is waiting for your review."
@@ -1035,7 +1106,7 @@ public enum Copy {
     public static let logTo = "to"
 
     public static let searchMessages = "Search messages"
-    public static let searchReviews = "Search review requests"
+    public static let searchReviews = "Search merge requests"
     public static func noMessagesMatch(_ query: String) -> String { "No messages match “\(query)”." }
     /// After `noMessagesMatch`, when the other tab has some.
     public static func matchesInOtherTab(_ count: Int, _ tab: String) -> String {
