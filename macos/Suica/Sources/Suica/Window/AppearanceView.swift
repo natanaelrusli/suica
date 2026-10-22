@@ -1,8 +1,8 @@
 import SuicaCore
 import SwiftUI
 
-/// The app's own look and feel: accent colour, light or dark, density, animation, the menu bar
-/// badge and where the window opens. Every choice applies at once.
+/// The app's own look and feel: accent colour, light or dark, density, icons, animation, the menu
+/// bar badge and where the window opens. Every choice applies at once.
 struct AppearanceView: View {
     @Bindable var settings: AppearanceSettings
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
@@ -44,6 +44,20 @@ struct AppearanceView: View {
                 Text(Copy.backdropHint).font(.caption).foregroundStyle(.secondary)
             } header: {
                 heading(Copy.backdropHeading, "square.2.layers.3d.top.filled")
+            }
+
+            Section {
+                Picker(Copy.iconStylePicker, selection: $settings.iconStyle) {
+                    ForEach(IconStyle.allCases) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                Text(Copy.iconStyleHint).font(.caption).foregroundStyle(.secondary)
+                LabeledContent(Copy.appIconPicker) {
+                    AppIconPicker(selection: $settings.appIcon)
+                }
+                Text(Copy.appIconHint).font(.caption).foregroundStyle(.secondary)
+            } header: {
+                heading(Copy.iconsHeading, "app.badge")
             }
 
             Section {
@@ -318,6 +332,42 @@ private struct BackdropPicker: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel(backdrop.title)
                 .accessibilityAddTraits(selection == backdrop ? .isSelected : [])
+            }
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+/// The app icons, drawn small; the picked one has a ring in the accent colour.
+private struct AppIconPicker: View {
+    @Binding var selection: AppIconStyle
+    @Environment(\.motionLevel) private var motion
+
+    var body: some View {
+        HStack(spacing: 10) {
+            ForEach(AppIconStyle.allCases) { icon in
+                Button {
+                    withMotion(.snappy(duration: 0.3), motion) { selection = icon }
+                } label: {
+                    VStack(spacing: 4) {
+                        Image(nsImage: AppIconArt.image(icon.palette, size: 48))
+                            .padding(2)
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 12)
+                                    .strokeBorder(.tint, lineWidth: 2)
+                                    .opacity(selection == icon ? 1 : 0)
+                            }
+                        Text(icon.title)
+                            .font(.caption2)
+                            .foregroundStyle(selection == icon ? .primary : .secondary)
+                            .lineLimit(1)
+                            .fixedSize()
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(icon.title)
+                .accessibilityAddTraits(selection == icon ? .isSelected : [])
             }
         }
         .padding(.vertical, 4)

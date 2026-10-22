@@ -30,10 +30,12 @@ for _ in 1 2 3 4 5 6 7 8 9 10; do
   sleep 0.5
 done
 
-# The icon is drawn by macos/make-icon.swift, so no image is kept in git.
+# The icon is drawn by macos/make-icon.swift with the app's own AppIconArt.swift, so no image is
+# kept in git.
 ICONS=$(mktemp -d)
 trap 'rm -rf "$ICONS"' EXIT
-swift "$REPO/macos/make-icon.swift" "$ICONS/icon.png"
+swiftc -parse-as-library -O "$PACKAGE/Sources/Suica/AppIconArt.swift" "$REPO/macos/make-icon.swift" -o "$ICONS/make-icon"
+"$ICONS/make-icon" "$ICONS/icon.png"
 mkdir -p "$ICONS/AppIcon.iconset"
 for px in 16 32 128 256 512; do
   sips -z "$px" "$px" "$ICONS/icon.png" --out "$ICONS/AppIcon.iconset/icon_${px}x${px}.png" >/dev/null

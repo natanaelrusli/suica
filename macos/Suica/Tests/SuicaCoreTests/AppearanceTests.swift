@@ -213,3 +213,43 @@ private final class MemoryStore: PreferenceStore {
     #expect(OfficeBubbles.all.shows(selected: false) && OfficeBubbles.selected.shows(selected: true))
     #expect(!OfficeBubbles.selected.shows(selected: false) && !OfficeBubbles.off.shows(selected: true))
 }
+
+@MainActor @Test func iconChoicesStartFromTheirDefaultsAreKeptAndReset() {
+    withFreshStore { defaults in
+        let settings = AppearanceSettings(defaults: defaults)
+        #expect(settings.iconStyle == .colorful && settings.appIcon == .classic)
+        settings.iconStyle = .monochrome
+        settings.appIcon = .midnight
+        #expect(!settings.isDefault)
+        let again = AppearanceSettings(defaults: defaults)
+        #expect(again.iconStyle == .monochrome && again.appIcon == .midnight)
+        again.reset()
+        #expect(again.isDefault && defaults.values.isEmpty)
+    }
+}
+
+@MainActor @Test func unknownStoredIconChoicesFallBackToTheDefaults() {
+    withFreshStore { defaults in
+        defaults.set("neon", forKey: "appearance.iconStyle")
+        defaults.set("gold", forKey: "appearance.appIcon")
+        let settings = AppearanceSettings(defaults: defaults)
+        #expect(settings.iconStyle == .colorful && settings.appIcon == .classic)
+    }
+}
+
+@MainActor @Test func presetsPickMatchingIcons() {
+    withFreshStore { defaults in
+        let settings = AppearanceSettings(defaults: defaults)
+        AppearancePreset.zen.apply(to: settings)
+        #expect(settings.iconStyle == .monochrome && settings.appIcon == .mono)
+        AppearancePreset.watermelonParty.apply(to: settings)
+        #expect(settings.iconStyle == .colorful && settings.appIcon == .watermelon)
+        AppearancePreset.classic.apply(to: settings)
+        #expect(settings.iconStyle == .colorful && settings.appIcon == .classic)
+    }
+}
+
+@Test func everyIconChoiceHasATitle() {
+    #expect(IconStyle.allCases.allSatisfy { !$0.title.isEmpty })
+    #expect(AppIconStyle.allCases.allSatisfy { !$0.title.isEmpty })
+}
