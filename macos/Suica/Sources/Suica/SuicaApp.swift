@@ -30,6 +30,9 @@ extension UnconfiguredClient: ReviewsClient {
     func discardAgentReview(id: Int) async throws(AgentError) -> ActionResult { throw AgentError.launchFailed }
     func cancelAgentReview(id: Int) async throws(AgentError) -> ActionResult { throw AgentError.launchFailed }
     func approve(key: String, sha: String) async throws(AgentError) -> ActionResult { throw AgentError.launchFailed }
+    func teamsMessage(key: String, request: TeamsMessageRequest) async throws(AgentError) -> TeamsMessageReply {
+        throw AgentError.launchFailed
+    }
 }
 
 extension UnconfiguredClient: FixesClient {

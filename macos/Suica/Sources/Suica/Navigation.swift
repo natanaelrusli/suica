@@ -8,13 +8,17 @@ enum WindowSection: String, CaseIterable, Identifiable {
     case office
     /// After the Office, so it takes ⌘0; the sidebar lists it under Insights.
     case system
+    /// Your own MRs. Added after every digit was taken, so it takes ⇧⌘2 beside Merge requests (⌘2);
+    /// the sidebar and the Go menu list it right after Merge requests.
+    case myMergeRequests
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .overview: Copy.overview
-        case .reviews: Copy.reviewRequests
+        case .reviews: Copy.mergeRequests
+        case .myMergeRequests: Copy.myMergeRequests
         case .messages: Copy.messages
         case .statistics: Copy.statistics
         case .usage: Copy.tokenUsage
@@ -30,6 +34,7 @@ enum WindowSection: String, CaseIterable, Identifiable {
         switch self {
         case .overview: "gauge"
         case .reviews: "checklist"
+        case .myMergeRequests: "arrow.triangle.pull"
         case .messages: "tray.full"
         case .statistics: "chart.bar"
         case .usage: "gauge.with.dots.needle.33percent"
@@ -46,6 +51,7 @@ enum WindowSection: String, CaseIterable, Identifiable {
         switch self {
         case .overview: .blue
         case .reviews: .purple
+        case .myMergeRequests: .blue
         case .messages: .orange
         case .statistics: .green
         case .usage: .pink
@@ -54,6 +60,22 @@ enum WindowSection: String, CaseIterable, Identifiable {
         case .appearance: .indigo
         case .office: .cyan
         case .system: .mint
+        }
+    }
+
+    /// ⌘1 to ⌘9 and ⌘0 in the order of the cases; My MRs takes ⇧⌘2.
+    var shortcut: KeyboardShortcut {
+        if self == .myMergeRequests { return KeyboardShortcut("2", modifiers: [.command, .shift]) }
+        let index = Self.allCases.firstIndex(of: self) ?? 0
+        return KeyboardShortcut(KeyEquivalent(Character(String((index + 1) % 10))))
+    }
+
+    /// The Go menu's order: My MRs beside Merge requests.
+    static let menuOrder: [WindowSection] = allCases.flatMap { section -> [WindowSection] in
+        switch section {
+        case .reviews: [.reviews, .myMergeRequests]
+        case .myMergeRequests: []
+        default: [section]
         }
     }
 
@@ -195,7 +217,13 @@ struct SidebarNode: Identifiable {
     /// are set up. Statistics' pages are nested under it; Configuration's categories, the
     /// templates and Appearance open from its overview page.
     static let groups: [(title: String, nodes: [SidebarNode])] = [
-        (Copy.workGroup, [SidebarNode(.overview), SidebarNode(.reviews), SidebarNode(.messages), SidebarNode(.office)]),
+        (
+            Copy.workGroup,
+            [
+                SidebarNode(.overview), SidebarNode(.reviews), SidebarNode(.myMergeRequests), SidebarNode(.messages),
+                SidebarNode(.office),
+            ]
+        ),
         (
             Copy.insightsGroup,
             [
@@ -235,7 +263,7 @@ struct OpenPageAction {
     }
 }
 
-/// The Go menu (⌘1 to ⌘9 and ⌘0, one per section) and Settings… (⌘,), which opens Appearance.
+/// The Go menu (⌘1 to ⌘9, ⌘0 and ⇧⌘2, one per section) and Settings… (⌘,), which opens Appearance.
 struct NavigationCommands: Commands {
     let navigator: Navigator
 
@@ -245,9 +273,9 @@ struct NavigationCommands: Commands {
                 .keyboardShortcut(",")
         }
         CommandMenu(Copy.goMenu) {
-            ForEach(Array(WindowSection.allCases.enumerated()), id: \.element) { index, section in
+            ForEach(WindowSection.menuOrder) { section in
                 PageButton(navigator: navigator, item: .section(section), title: section.title)
-                    .keyboardShortcut(KeyEquivalent(Character(String((index + 1) % 10))))
+                    .keyboardShortcut(section.shortcut)
             }
         }
     }

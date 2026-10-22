@@ -12,6 +12,7 @@ import { myReviewState, reviewerKey } from "./events.ts";
 import type { PreviousState } from "./events.ts";
 import { isOutboxKind, isOutboxStatus, isTemplateName } from "./teams/types.ts";
 import type {
+  Intent,
   NudgeRecord,
   OutboxRow,
   OutboxStatus,
@@ -206,6 +207,8 @@ export interface Store {
   resetTeamsBaseline(): void;
   /** Queues the plan's intents (idempotent per `dedupeKey`) and updates the ledger in one transaction. */
   applyTeamsPlan(plan: TeamsPlan, now: number): number;
+  /** Stores a message the Owner sends by hand, approved and `pending` until it is delivered; its id. */
+  insertManualOutbox(intent: Intent, text: string, now: number): number;
   listOutbox(statuses: readonly OutboxStatus[]): OutboxRow[];
   getOutbox(id: number): OutboxRow | undefined;
   /** Compare-and-set: true only for the one caller that found the row in `from`. */
@@ -1269,6 +1272,32 @@ export function openStore(path: string): Store {
         db.exec("ROLLBACK");
         throw error;
       }
+    },
+
+    insertManualOutbox(intent, text, now) {
+      const result = db
+        .prepare(
+          `INSERT INTO outbox
+             (dedupe_key, kind, variant, mr_key, mr_iid, mr_project, mr_title, mr_url,
+              recipient, recipient_name, findings, status, detail, text, approved, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'pending', '', ?, 1, ?, ?)`,
+        )
+        .run(
+          intent.dedupeKey,
+          intent.kind,
+          intent.variant,
+          intent.mr.key,
+          intent.mr.iid,
+          intent.mr.projectPath,
+          intent.mr.title,
+          intent.mr.url,
+          intent.recipient.username,
+          intent.recipient.name,
+          text,
+          now,
+          now,
+        );
+      return Number(result.lastInsertRowid);
     },
 
     listOutbox(statuses) {

@@ -55,7 +55,53 @@ function detailResponse(): unknown {
           updatedAt: "2026-10-16T13:26:54+07:00",
           author: alice,
           labels: { nodes: [{ title: "backend" }] },
-          headPipeline: { status: "SUCCESS" },
+          headPipeline: {
+            iid: "41",
+            status: "RUNNING",
+            path: "/g/p/-/pipelines/2921",
+            startedAt: "2026-10-16T13:27:00+07:00",
+            finishedAt: null,
+            stages: {
+              nodes: [
+                {
+                  name: "test",
+                  status: "running",
+                  jobs: {
+                    nodes: [
+                      {
+                        name: "unit",
+                        status: "SUCCESS",
+                        allowFailure: false,
+                        webPath: "/g/p/-/jobs/7",
+                        startedAt: "2026-10-16T13:27:00+07:00",
+                        finishedAt: "2026-10-16T13:28:10+07:00",
+                        retried: false,
+                      },
+                      {
+                        name: "unit",
+                        status: "FAILED",
+                        allowFailure: false,
+                        webPath: "/g/p/-/jobs/6",
+                        startedAt: "2026-10-16T13:20:00+07:00",
+                        finishedAt: "2026-10-16T13:21:00+07:00",
+                        retried: true,
+                      },
+                      {
+                        name: "lint",
+                        status: "RUNNING",
+                        allowFailure: true,
+                        webPath: null,
+                        startedAt: "2026-10-16T13:27:05+07:00",
+                        finishedAt: null,
+                        retried: false,
+                      },
+                    ],
+                  },
+                },
+                { name: "deploy", status: "created", jobs: { nodes: [] } },
+              ],
+            },
+          },
           diffStatsSummary: { additions: 3, deletions: 1 },
           reviewers: {
             nodes: [{ username: "me", name: "Nata", mergeRequestInteraction: null }],

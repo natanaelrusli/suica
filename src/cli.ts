@@ -57,6 +57,7 @@ import { RANKING_WINDOW, buildStats, localDayKey } from "./stats.ts";
 import { openStore } from "./store.ts";
 import { formatOutbox } from "./teams/format-outbox.ts";
 import { OUTBOX_STATUSES } from "./teams/types.ts";
+import { fetchMessageContext, parseMessageRequest } from "./teams/manual.ts";
 import { readChat } from "./office/chat.ts";
 import { geminiResumeId, sendToSession } from "./office/send.ts";
 import { adaptersFor, collectOffice } from "./office/collect.ts";
@@ -64,7 +65,7 @@ import { realProbe } from "./office/probe.ts";
 import { buildUsage } from "./usage.ts";
 
 const USAGE =
-  "usage: suica <once|status|state|stats|usage|office --json|office chat <agent> <sessionId> --json|office send <agent> <sessionId> --json (message on stdin)|pause|resume|pending [--all]|send <id> [--json]|skip <id> [--json]|retry <id> [--json]|selftest|reviews --json|mr <key> --json|mr approve <key> <sha> --json|mr comment <key> --json (body on stdin)|mr close <key> --json|mr merge <key> <sha> [--squash] [--remove-source-branch] [--when-pipeline-succeeds] --json (message on stdin)|review queue <key> --json|review post <id> [--inline|--comment] --json|review discard <id> --json|review cancel <id> --json|fix list --json|fix queue <key> [--pipeline] --json|fix watch <key> --json|fix unwatch <key> --json|fix confirm <id> --json (edits on stdin)|fix retry <id> --json (note on stdin)|fix discard <id> --json|fix cancel <id> --json|fix replies <id> --json|config show --json|config set --json|templates show --json|templates set --json|agent install|agent uninstall|agent restart --json>\n";
+  "usage: suica <once|status|state|stats|usage|office --json|office chat <agent> <sessionId> --json|office send <agent> <sessionId> --json (message on stdin)|pause|resume|pending [--all]|send <id> [--json]|skip <id> [--json]|retry <id> [--json]|selftest|message <key> --json (request on stdin)|reviews --json|mr <key> --json|mr approve <key> <sha> --json|mr comment <key> --json (body on stdin)|mr close <key> --json|mr merge <key> <sha> [--squash] [--remove-source-branch] [--when-pipeline-succeeds] --json (message on stdin)|review queue <key> --json|review post <id> [--inline|--comment] --json|review discard <id> --json|review cancel <id> --json|fix list --json|fix queue <key> [--pipeline] --json|fix watch <key> --json|fix unwatch <key> --json|fix confirm <id> --json (edits on stdin)|fix retry <id> --json (note on stdin)|fix discard <id> --json|fix cancel <id> --json|fix replies <id> --json|config show --json|config set --json|templates show --json|templates set --json|agent install|agent uninstall|agent restart --json>\n";
 const TEAMS_DISABLED = "teams is disabled: set teams.enabled to true in the config\n";
 const SHOWN_WITH_ALL = 50;
 
@@ -478,6 +479,46 @@ async function mrJson(key: string): Promise<number> {
 }
 
 /**
+ * `suica message <key> --json`: a Teams message from an MR's page to its Author or a Reviewer.
+ * With `send: false` it prints the template's text (`{"status": "draft", "text": …}`); with
+ * `send: true` it sends the text given, else the template's, and prints how that went.
+ */
+async function messageCommand(key: string): Promise<number> {
+  const reply = (body: Record<string, string>, ok: boolean): number => {
+    process.stdout.write(`${JSON.stringify(body)}\n`);
+    return ok ? 0 : 1;
+  };
+  const raw = await readLimitedStdin(MAX_REQUEST_BYTES);
+  const request = raw === undefined ? undefined : parseMessageRequest(raw);
+  if (request === undefined || parseMrKey(key) === undefined) {
+    return reply({ status: "bad-request" }, false);
+  }
+  const runtime = createRuntime(defaultConfigPath());
+  try {
+    const { teams } = runtime;
+    if (teams === undefined) return reply({ status: "teams-off" }, false);
+    const context = await fetchMessageContext(
+      glabRunner(runtime.config.gitlab),
+      key,
+      request,
+      Date.now(),
+    );
+    if (context === undefined) return reply({ status: "bad-recipient" }, false);
+    const text = request.text ?? teams.draft(context.intent, context.owner.name);
+    if (!request.send) return reply({ status: "draft", text }, true);
+    const outcome = await teams.sendManual(context.intent, text);
+    return reply({ status: outcome.status }, outcome.status === "sent");
+  } catch (error) {
+    return reply(
+      { status: "failed", message: error instanceof Error ? error.message : "unknown error" },
+      false,
+    );
+  } finally {
+    runtime.store.close();
+  }
+}
+
+/**
  * `suica mr approve <key> <sha> --json`: approves as the Owner at that commit, then resolves the
  * open threads the Owner started; prints `{"status": …}`.
  */
@@ -672,6 +713,14 @@ async function main(argv: readonly string[]): Promise<number> {
     return officeSendCommand(agent, sessionId);
   }
   if (command === "office" && argv.includes("--json")) return officeJson();
+  if (command === "message" && argv.includes("--json")) {
+    const key = argv[1];
+    if (key === undefined) {
+      process.stderr.write(USAGE);
+      return 2;
+    }
+    return messageCommand(key);
+  }
   if (command === "reviews" && argv.includes("--json")) return reviewsJson();
   if (command === "review" && argv.includes("--json")) return reviewCommand(argv);
   if (command === "fix" && argv.includes("--json")) return fixCommand(argv);

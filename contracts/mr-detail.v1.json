@@ -11,7 +11,39 @@
   "updatedAt": "2026-10-16T13:26:54+07:00",
   "author": { "username": "alice", "name": "Alice" },
   "labels": ["backend"],
-  "pipelineStatus": "SUCCESS",
+  "pipelineStatus": "RUNNING",
+  "pipeline": {
+    "iid": "41",
+    "status": "RUNNING",
+    "url": "https://gitlab.example/g/p/-/pipelines/2921",
+    "startedAt": "2026-10-16T13:27:00+07:00",
+    "finishedAt": null,
+    "stages": [
+      {
+        "name": "test",
+        "status": "RUNNING",
+        "jobs": [
+          {
+            "name": "unit",
+            "status": "SUCCESS",
+            "allowFailure": false,
+            "url": "https://gitlab.example/g/p/-/jobs/7",
+            "startedAt": "2026-10-16T13:27:00+07:00",
+            "finishedAt": "2026-10-16T13:28:10+07:00"
+          },
+          {
+            "name": "lint",
+            "status": "RUNNING",
+            "allowFailure": true,
+            "url": null,
+            "startedAt": "2026-10-16T13:27:05+07:00",
+            "finishedAt": null
+          }
+        ]
+      },
+      { "name": "deploy", "status": "CREATED", "jobs": [] }
+    ]
+  },
   "additions": 3,
   "deletions": 1,
   "reviewers": [{ "username": "me", "name": "Nata", "state": "UNREVIEWED" }],

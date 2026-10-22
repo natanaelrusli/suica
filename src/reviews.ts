@@ -304,6 +304,35 @@ export interface DiffFileJson {
   readonly diff: string | null;
 }
 
+/** One job of the head pipeline; a retried job's earlier runs are left out. */
+export interface PipelineJobJson {
+  readonly name: string;
+  /** GitLab's job status (SUCCESS, FAILED, RUNNING, PENDING, CREATED, MANUAL, SKIPPED, …). */
+  readonly status: string;
+  readonly allowFailure: boolean;
+  readonly url: string | null;
+  readonly startedAt: string | null;
+  readonly finishedAt: string | null;
+}
+
+/** A stage of the head pipeline with its jobs, in the pipeline's order. */
+export interface PipelineStageJson {
+  readonly name: string;
+  /** GitLab's stage status, upper-cased like the job statuses. */
+  readonly status: string;
+  readonly jobs: readonly PipelineJobJson[];
+}
+
+/** The MR's head pipeline, stage by stage, so the app can show how far it got. */
+export interface PipelineDetailJson {
+  readonly iid: string;
+  readonly status: string;
+  readonly url: string;
+  readonly startedAt: string | null;
+  readonly finishedAt: string | null;
+  readonly stages: readonly PipelineStageJson[];
+}
+
 /** `suica mr <key> --json`. See contracts/mr-detail.v1.json. */
 export interface MrDetailJson {
   readonly version: 1;
@@ -320,6 +349,8 @@ export interface MrDetailJson {
   readonly labels: readonly string[];
   /** GitLab's pipeline status (SUCCESS, FAILED, RUNNING, …); null without a pipeline. */
   readonly pipelineStatus: string | null;
+  /** The head pipeline's stages and jobs; null without a pipeline. */
+  readonly pipeline: PipelineDetailJson | null;
   readonly additions: number | null;
   readonly deletions: number | null;
   readonly reviewers: readonly Reviewer[];
@@ -377,7 +408,20 @@ query SuicaMergeRequest($path: ID!, $iid: String!) {
       updatedAt
       author { username name }
       labels { nodes { title } }
-      headPipeline { status }
+      headPipeline {
+        iid
+        status
+        path
+        startedAt
+        finishedAt
+        stages {
+          nodes {
+            name
+            status
+            jobs { nodes { name status allowFailure webPath startedAt finishedAt retried } }
+          }
+        }
+      }
       diffStatsSummary { additions deletions }
       reviewers { nodes { username name mergeRequestInteraction { reviewState } } }
       approvedBy { nodes { username name } }
@@ -429,6 +473,66 @@ const noteSchema = z.object({
     .nullable()
     .optional(),
 });
+const pipelineJobSchema = z.object({
+  name: z.string(),
+  status: z.string(),
+  allowFailure: z.boolean(),
+  webPath: z.string().nullable(),
+  startedAt: z.string().nullable(),
+  finishedAt: z.string().nullable(),
+  retried: z.boolean().nullable().optional(),
+});
+const headPipelineSchema = z.object({
+  iid: z.string(),
+  status: z.string(),
+  path: z.string().nullable(),
+  startedAt: z.string().nullable(),
+  finishedAt: z.string().nullable(),
+  stages: z
+    .object({
+      nodes: z.array(
+        z.object({
+          name: z.string().nullable(),
+          status: z.string().nullable(),
+          jobs: z.object({ nodes: z.array(pipelineJobSchema) }).nullable(),
+        }),
+      ),
+    })
+    .nullable(),
+});
+
+/** A path GitLab gives, as a link on the MR's own host; null for anything else. */
+function hostLink(webUrl: string, path: string | null): string | null {
+  return path?.startsWith("/") === true ? `${new URL(webUrl).origin}${path}` : null;
+}
+
+function toPipelineJson(
+  webUrl: string,
+  pipeline: z.infer<typeof headPipelineSchema>,
+): PipelineDetailJson {
+  return {
+    iid: pipeline.iid,
+    status: pipeline.status,
+    url: hostLink(webUrl, pipeline.path) ?? webUrl,
+    startedAt: pipeline.startedAt,
+    finishedAt: pipeline.finishedAt,
+    stages: (pipeline.stages?.nodes ?? []).map((stage) => ({
+      name: stage.name ?? "",
+      status: (stage.status ?? "").toUpperCase(),
+      jobs: (stage.jobs?.nodes ?? [])
+        .filter((job) => job.retried !== true)
+        .map((job) => ({
+          name: job.name,
+          status: job.status,
+          allowFailure: job.allowFailure,
+          url: hostLink(webUrl, job.webPath),
+          startedAt: job.startedAt,
+          finishedAt: job.finishedAt,
+        })),
+    })),
+  };
+}
+
 const detailSchema = z.object({
   data: z
     .object({
@@ -447,7 +551,7 @@ const detailSchema = z.object({
               updatedAt: z.string(),
               author: personSchema.nullable(),
               labels: z.object({ nodes: z.array(z.object({ title: z.string() })) }),
-              headPipeline: z.object({ status: z.string() }).nullable(),
+              headPipeline: headPipelineSchema.nullable(),
               diffStatsSummary: z
                 .object({ additions: z.number().int(), deletions: z.number().int() })
                 .nullable(),
@@ -659,6 +763,7 @@ export function parseMrDetail(
     author: mr.author ?? GHOST,
     labels: mr.labels.nodes.map((label) => label.title),
     pipelineStatus: mr.headPipeline?.status ?? null,
+    pipeline: mr.headPipeline === null ? null : toPipelineJson(mr.webUrl, mr.headPipeline),
     additions: mr.diffStatsSummary?.additions ?? null,
     deletions: mr.diffStatsSummary?.deletions ?? null,
     reviewers: mr.reviewers.nodes.map((reviewer) => ({

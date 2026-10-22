@@ -224,12 +224,17 @@ public struct ReviewListDocument: Codable, Equatable, Sendable {
 
     /// The list as the page shows it: non-empty groups in `ReviewGroup` order, each in GitLab's
     /// order. A non-draft MR waits for the Owner while the Owner's state is UNREVIEWED, the rule
-    /// the menu bar badge uses. Without `me` nothing can be told apart, so every MR is in `all`.
+    /// the menu bar badge uses; once the Owner approved it, it is approved, else reviewed. Without
+    /// `me` nothing can be told apart, so every MR is in `all`.
     public var sections: [ReviewSection] {
         guard me != nil else { return mergeRequests.isEmpty ? [] : [ReviewSection(group: .all, items: mergeRequests)] }
         let grouped = Dictionary(grouping: mergeRequests) { mr -> ReviewGroup in
             if mr.draft { return .drafts }
-            return (myState(mr) ?? "UNREVIEWED") == "UNREVIEWED" ? .waiting : .reviewed
+            switch myState(mr) ?? "UNREVIEWED" {
+            case "UNREVIEWED": return .waiting
+            case "APPROVED": return .approved
+            default: return .reviewed
+            }
         }
         return ReviewGroup.allCases.compactMap { group in
             grouped[group].map { ReviewSection(group: group, items: $0) }
@@ -238,7 +243,7 @@ public struct ReviewListDocument: Codable, Equatable, Sendable {
 }
 
 public enum ReviewGroup: CaseIterable, Sendable {
-    case waiting, reviewed, drafts, all
+    case waiting, reviewed, approved, drafts, all
 }
 
 public struct ReviewSection: Equatable, Sendable {
@@ -246,31 +251,34 @@ public struct ReviewSection: Equatable, Sendable {
     public let items: [ReviewSummary]
 }
 
-/// A tab of the review requests page: your own MRs, or one group of the MRs you review.
-public enum ReviewTab: Hashable, Sendable {
-    case yours
-    case group(ReviewGroup)
+/// Which page shows the list: the MRs you review (Merge requests) or your own (My MRs).
+public enum ReviewScope: Hashable, Sendable {
+    case reviewing, mine
 }
 
 extension ReviewListDocument {
-    /// The page's tabs in order. Without `me` the MRs you review cannot be told apart, so they share one.
-    public var tabs: [ReviewTab] {
-        me == nil ? [.yours, .group(.all)] : [.yours, .group(.waiting), .group(.reviewed), .group(.drafts)]
+    /// The Merge requests page's tabs in order. Without `me` the MRs you review cannot be told
+    /// apart, so they share one.
+    public var tabs: [ReviewGroup] {
+        me == nil ? [.all] : [.waiting, .reviewed, .approved, .drafts]
     }
 
-    /// The keys shown in `tab`, in the order of its rows, narrowed by the search text when there is one.
-    public func keys(in tab: ReviewTab, matching query: String = "") -> [String] {
-        switch tab {
-        case .yours:
-            yourMergeRequests(matching: query).map(\.key)
-        case .group(let group):
-            sections(matching: query).first { $0.group == group }?.items.map(\.key) ?? []
-        }
+    /// The keys shown in the `group` tab, in the order of its rows, narrowed by the search text when there is one.
+    public func keys(in group: ReviewGroup, matching query: String = "") -> [String] {
+        sections(matching: query).first { $0.group == group }?.items.map(\.key) ?? []
     }
 
-    /// The tab that holds the MR, whatever is searched.
-    public func tab(containing key: String) -> ReviewTab? {
+    /// The tab that holds the MR, whatever is searched; nil for one of yours.
+    public func group(containing key: String) -> ReviewGroup? {
         tabs.first { keys(in: $0).contains(key) }
+    }
+
+    /// The keys a page lists, in the order of its rows: your own MRs, or every tab of the others.
+    public func keys(in scope: ReviewScope, matching query: String = "") -> [String] {
+        switch scope {
+        case .mine: yourMergeRequests(matching: query).map(\.key)
+        case .reviewing: tabs.flatMap { keys(in: $0, matching: query) }
+        }
     }
 }
 
@@ -336,6 +344,8 @@ public struct MergeRequestDetail: Codable, Equatable, Sendable {
     public let author: Person
     public let labels: [String]
     public let pipelineStatus: String?
+    /// The head pipeline stage by stage; nil without a pipeline, or from an older agent.
+    public let pipeline: PipelineDetail?
     public let additions: Int?
     public let deletions: Int?
     public let reviewers: [ReviewerInfo]
@@ -368,6 +378,62 @@ public struct MergeRequestDetail: Codable, Equatable, Sendable {
 
     /// Discussions people wrote, without GitLab's activity notes.
     public var comments: [MRDiscussion] { discussions.filter { !$0.isSystem } }
+}
+
+// MARK: - Pipeline
+
+/// One job of the head pipeline, as GitLab reports it.
+public struct PipelineJob: Codable, Equatable, Sendable {
+    public let name: String
+    /// SUCCESS, FAILED, RUNNING, PENDING, CREATED, MANUAL, SKIPPED, CANCELED, …; kept as sent.
+    public let status: String
+    public let allowFailure: Bool
+    public let url: String?
+    public let startedAt: String?
+    public let finishedAt: String?
+
+    public var isActive: Bool { PipelineDetail.activeStatuses.contains(status) }
+    /// Ran to an end: passed, failed or was cancelled. A skipped or manual job never ran.
+    public var isDone: Bool { ["SUCCESS", "FAILED", "CANCELED"].contains(status) }
+    public var startedDate: Date? { startedAt.flatMap(MRNote.parse) }
+    public var finishedDate: Date? { finishedAt.flatMap(MRNote.parse) }
+}
+
+public struct PipelineStage: Codable, Equatable, Sendable {
+    public let name: String
+    public let status: String
+    public let jobs: [PipelineJob]
+}
+
+/// `pipeline` in `suica mr <key> --json`: the head pipeline with its stages in order.
+public struct PipelineDetail: Codable, Equatable, Sendable {
+    public let iid: String
+    public let status: String
+    public let url: String
+    public let startedAt: String?
+    public let finishedAt: String?
+    public let stages: [PipelineStage]
+
+    static let activeStatuses: Set<String> = [
+        "RUNNING", "PENDING", "CREATED", "PREPARING", "WAITING_FOR_RESOURCE", "WAITING_FOR_CALLBACK", "SCHEDULED",
+    ]
+
+    /// Still going: the MR page reads it again sooner while it is.
+    public var isActive: Bool { Self.activeStatuses.contains(status) }
+    public var startedDate: Date? { startedAt.flatMap(MRNote.parse) }
+    public var finishedDate: Date? { finishedAt.flatMap(MRNote.parse) }
+
+    /// Jobs that ran to an end, out of those that run on their own: a manual or skipped job is
+    /// left out unless it ran, so a pipeline that passed reads as complete.
+    public var progress: (done: Int, total: Int) {
+        let jobs = stages.flatMap(\.jobs).filter { $0.isDone || $0.isActive }
+        return (jobs.filter(\.isDone).count, jobs.count)
+    }
+
+    /// The first stage that is still going; nil once none is.
+    public var currentStage: PipelineStage? {
+        stages.first { stage in stage.jobs.contains(where: \.isActive) }
+    }
 }
 
 // MARK: - Diff lines
@@ -443,6 +509,8 @@ public protocol ReviewsClient: Sendable {
     func cancelAgentReview(id: Int) async throws(AgentError) -> ActionResult
     /// Approves the MR as you at `sha`: approved, head-changed, bad-request or failed.
     func approve(key: String, sha: String) async throws(AgentError) -> ActionResult
+    /// Drafts or sends a Teams message to the MR's Author or a Reviewer (`suica message <key> --json`).
+    func teamsMessage(key: String, request: TeamsMessageRequest) async throws(AgentError) -> TeamsMessageReply
 }
 
 // MARK: - Model
@@ -469,6 +537,8 @@ public final class ReviewsModel {
     public private(set) var approvalNotices: [String: String] = [:]
     /// MRs you approved from the app since it started; the views celebrate each one.
     public private(set) var approvedCount = 0
+    /// The page on screen; a refresh with nothing selected selects that page's first MR.
+    public private(set) var scope: ReviewScope = .reviewing
 
     @ObservationIgnored private let client: any ReviewsClient
     @ObservationIgnored private var latestRefresh = 0
@@ -526,10 +596,39 @@ public final class ReviewsModel {
     }
 
     /// How often the page reads the list and the selected MR again: every 3 seconds while a review
-    /// runs, so its activity reads live, every 15 while one is queued or posting, else every 30.
+    /// runs, so its activity reads live, every 10 while the selected MR's pipeline runs, every 15
+    /// while a review is queued or posting, else every 30.
     public var refreshSeconds: Int {
         if list?.mergeRequests.contains(where: { $0.agentReview?.status == "running" }) == true { return 3 }
+        if selectedDetail?.pipeline?.isActive == true { return 10 }
         return hasActiveAgentReview ? 15 : 30
+    }
+
+    /// Opens a page: keeps the selection when the page lists it, else selects the page's first MR.
+    public func show(_ scope: ReviewScope) async {
+        self.scope = scope
+        guard let list else { return }
+        let keys = list.keys(in: scope)
+        guard selectedKey.map(keys.contains) != true else { return }
+        await select(keys.first)
+    }
+
+    /// The template's text for a Teams message to `to`, or why there is none.
+    public func draftMessage(_ key: String, to: String, template: String) async -> TeamsMessageReply {
+        await teamsMessage(key, TeamsMessageRequest(to: to, template: template, text: nil, send: false))
+    }
+
+    /// Sends `text` to `to` on Teams now.
+    public func sendMessage(_ key: String, to: String, template: String, text: String) async -> TeamsMessageReply {
+        await teamsMessage(key, TeamsMessageRequest(to: to, template: template, text: text, send: true))
+    }
+
+    private func teamsMessage(_ key: String, _ request: TeamsMessageRequest) async -> TeamsMessageReply {
+        do {
+            return try await client.teamsMessage(key: key, request: request)
+        } catch {
+            return TeamsMessageReply(status: "failed", message: MenuModel.message(for: error))
+        }
     }
 
     public func queueAgentReview(_ key: String) async {
@@ -619,8 +718,8 @@ public final class ReviewsModel {
             if errorText != nil { errorText = nil }
             let keys = Set(fresh.mergeRequests.map(\.key) + fresh.yourMergeRequests.map(\.key))
             if let selected = selectedKey, !keys.contains(selected) { selectedKey = nil }
-            // The first row on screen, so it is one that waits for the Owner when there is one.
-            if selectedKey == nil { selectedKey = fresh.sections.first?.items.first?.key }
+            // The page's first row, so on Merge requests one that waits for the Owner when there is one.
+            if selectedKey == nil { selectedKey = fresh.keys(in: scope).first }
         } catch {
             guard mine == latestRefresh else { return }
             let message = MenuModel.message(for: error)

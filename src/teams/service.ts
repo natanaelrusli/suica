@@ -4,16 +4,27 @@ import type { PreviousState } from "../events.ts";
 import type { Logger } from "../log.ts";
 import type { DispatchOutcome, TeamsHooks } from "../poller.ts";
 import type { Store } from "../store.ts";
-import { dispatchQueued, retryOutbox, sendPending, skipOutbox } from "./dispatch.ts";
+import {
+  dispatchQueued,
+  draftManual,
+  retryOutbox,
+  sendManual,
+  sendPending,
+  skipOutbox,
+} from "./dispatch.ts";
 import type { DispatchDeps, SendPendingOutcome } from "./dispatch.ts";
 import type { TeamsGateway } from "./gateway.ts";
 import { planTeams } from "./plan.ts";
 import type { Templates } from "./templates.ts";
 import { ATTENTION_STATUSES, OUTBOX_STATUSES } from "./types.ts";
-import type { OutboxRow } from "./types.ts";
+import type { Intent, OutboxRow } from "./types.ts";
 
 export interface TeamsService extends TeamsHooks {
   sendPending(id: number): Promise<SendPendingOutcome>;
+  /** The template's text for a message the Owner is about to send by hand. */
+  draft(intent: Intent, ownerName: string): string;
+  /** Sends a message the Owner wrote or approved on an MR page, now. */
+  sendManual(intent: Intent, text: string): Promise<SendPendingOutcome>;
   /** Rows that need attention, or every row when `all` is true. */
   list(all: boolean): OutboxRow[];
   skip(id: number): boolean;
@@ -77,6 +88,8 @@ export function createTeamsService(deps: ServiceDeps): TeamsService {
     },
 
     sendPending: (id) => sendPending(dispatchDeps, id),
+    draft: (intent, ownerName) => draftManual(dispatchDeps, intent, ownerName),
+    sendManual: (intent, text) => sendManual(dispatchDeps, intent, text),
     list: (all) => deps.store.listOutbox(all ? OUTBOX_STATUSES : ATTENTION_STATUSES),
     skip: (id) => skipOutbox(deps.store, id, deps.now()),
     retry: (id) => retryOutbox(deps.store, id, deps.now()),

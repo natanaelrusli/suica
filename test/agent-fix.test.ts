@@ -54,6 +54,7 @@ function detail(discussions: DiscussionJson[], key = "g/p!7"): MrDetailJson {
     author: ME,
     labels: [],
     pipelineStatus: null,
+    pipeline: null,
     additions: 1,
     deletions: 0,
     reviewers: [],

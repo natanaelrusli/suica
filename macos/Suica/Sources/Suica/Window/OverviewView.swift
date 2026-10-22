@@ -84,10 +84,10 @@ struct OverviewView: View {
 
     private func show(_ section: WindowSection) { navigator.selection = .section(section) }
 
-    /// Opens the MR on the Review requests page.
+    /// Opens the MR on its page: My MRs for one of yours, else Merge requests.
     private func openMR(_ key: String) {
         Task { await reviews.select(key) }
-        show(.reviews)
+        show(reviews.isYours(key) ? .myMergeRequests : .reviews)
     }
 
     // MARK: Status bar and tiles
@@ -241,9 +241,9 @@ struct OverviewView: View {
                 title: Copy.yourMRs, value: list.map { "\($0.yourTally.open)" } ?? "–",
                 symbol: "arrow.triangle.pull", tint: list.map { $0.yourTally.fixesReady > 0 } == true ? .orange : .blue,
                 caption: list.map { Copy.yourTally($0.yourTally) },
-                action: { show(.reviews) }
+                action: { show(.myMergeRequests) }
             )
-            .help(Copy.openSection(WindowSection.reviews.title))
+            .help(Copy.openSection(WindowSection.myMergeRequests.title))
             .staggeredEntrance(3)
         }
     }
