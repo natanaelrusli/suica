@@ -132,6 +132,9 @@ public struct ReviewSummary: Codable, Equatable, Identifiable, Sendable {
     public let agentReview: AgentReviewInfo?
     /// Set when the MR changed since the agent's posted review, no newer review is open and you have not approved it; absent from an older CLI.
     public let changedSinceReview: ChangedSinceReview?
+    /// The newest posted-or-discarded Agent Review was posted, even when a later run failed or was
+    /// skipped (`agentReview` is only the newest run); false from an older CLI.
+    public let agentReviewPosted: Bool
     /// Only minor findings are left on an unchanged MR nobody approved yet; false from an older CLI.
     public let readyToApprove: Bool
     /// Why an automatic re-review has not run yet; nil when none waits, and from an older CLI.
@@ -155,7 +158,7 @@ public struct ReviewSummary: Codable, Equatable, Identifiable, Sendable {
     public init(
         key: String, title: String, url: String, draft: Bool, createdAt: String? = nil, author: Person,
         reviewers: [ReviewerInfo], agentReview: AgentReviewInfo? = nil, changedSinceReview: ChangedSinceReview? = nil,
-        readyToApprove: Bool = false, rereviewWaiting: RereviewWaiting? = nil
+        agentReviewPosted: Bool = false, readyToApprove: Bool = false, rereviewWaiting: RereviewWaiting? = nil
     ) {
         self.key = key
         self.title = title
@@ -166,13 +169,14 @@ public struct ReviewSummary: Codable, Equatable, Identifiable, Sendable {
         self.reviewers = reviewers
         self.agentReview = agentReview
         self.changedSinceReview = changedSinceReview
+        self.agentReviewPosted = agentReviewPosted
         self.readyToApprove = readyToApprove
         self.rereviewWaiting = rereviewWaiting
     }
 
     private enum CodingKeys: String, CodingKey {
-        case key, title, url, draft, createdAt, author, reviewers, agentReview, changedSinceReview, readyToApprove,
-            rereviewWaiting
+        case key, title, url, draft, createdAt, author, reviewers, agentReview, changedSinceReview, agentReviewPosted,
+            readyToApprove, rereviewWaiting
     }
 
     public init(from decoder: any Decoder) throws {
@@ -186,6 +190,7 @@ public struct ReviewSummary: Codable, Equatable, Identifiable, Sendable {
         reviewers = try container.decode([ReviewerInfo].self, forKey: .reviewers)
         agentReview = try container.decodeIfPresent(AgentReviewInfo.self, forKey: .agentReview)
         changedSinceReview = try container.decodeIfPresent(ChangedSinceReview.self, forKey: .changedSinceReview)
+        agentReviewPosted = try container.decodeIfPresent(Bool.self, forKey: .agentReviewPosted) ?? false
         readyToApprove = try container.decodeIfPresent(Bool.self, forKey: .readyToApprove) ?? false
         rereviewWaiting = try container.decodeIfPresent(RereviewWaiting.self, forKey: .rereviewWaiting)
     }
@@ -226,14 +231,14 @@ public struct ReviewListDocument: Codable, Equatable, Sendable {
     }
 
     /// The MR still needs the Owner, drafts aside: it changed since the agent's posted review, or
-    /// neither the Owner nor a posted Agent Review covered it yet. Never once the Owner approved it,
-    /// and always without `me`.
+    /// neither the Owner nor a posted Agent Review covered it yet (a later failed or skipped run does
+    /// not undo a posted one). Never once the Owner approved it, and always without `me`.
     public func isWaiting(_ mr: ReviewSummary) -> Bool {
         guard me != nil else { return true }
         let state = myState(mr) ?? "UNREVIEWED"
         if state == "APPROVED" { return false }
         if mr.changedSinceReview != nil { return true }
-        return state == "UNREVIEWED" && mr.agentReview?.status != "posted"
+        return state == "UNREVIEWED" && mr.agentReview?.status != "posted" && !mr.agentReviewPosted
     }
 
     /// The list as the page shows it: non-empty groups in `ReviewGroup` order, each in GitLab's
@@ -509,7 +514,7 @@ public func parseDiffLines(_ diff: String) -> [DiffLine] {
 public protocol ReviewsClient: Sendable {
     func reviews() async throws(AgentError) -> ReviewListDocument
     func mergeRequest(key: String) async throws(AgentError) -> MergeRequestDetail
-    /// queued, already-queued, bad-key, bad-skill, bad-model or daily-cap. An empty choice uses the config's.
+    /// queued, already-queued, bad-key, bad-skill, bad-model, covered or daily-cap. An empty choice uses the config's.
     func queueAgentReview(key: String, choice: ReviewChoice) async throws(AgentError) -> ActionResult
     /// The skills and models a review can use; `cli` names another Model CLI than the saved one.
     func reviewOptions(cli: String?) async throws(AgentError) -> ReviewOptions

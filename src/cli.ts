@@ -36,6 +36,7 @@ import {
   postAgentReview,
   rereviewWaitingReasons,
 } from "./agent-review.ts";
+import { coversHead } from "./agent-rereview.ts";
 import { parseTemplateRequest, saveTemplate, showTemplates } from "./template-edit.ts";
 import { defaultTemplatesPath } from "./teams/templates.ts";
 import type { TemplateSaveJson } from "./template-edit.ts";
@@ -333,7 +334,8 @@ function reviewOptions(argv: readonly string[]): number {
  * `suica review queue|post|discard|cancel`: the background agent starts a queued review within a few
  * seconds; post and discard act on a review that waits for the Owner, and cancel stops a queued or
  * running one. `queue` takes `--skill` (an installed skill) and `--model` for that review only,
- * and `--auto` to queue an automatic review, refused with `daily-cap` once `review.maxPerDay` is used.
+ * and `--auto` to queue an automatic re-review: `covered` when the agent already queued the MR's
+ * head or a review covers it, `daily-cap` once `review.maxPerDay` is used.
  * `post` takes `--inline` or `--comment`, else `review.postAs`. Each prints `{"status": …}`.
  */
 async function reviewCommand(argv: readonly string[]): Promise<number> {
@@ -363,8 +365,21 @@ async function reviewCommand(argv: readonly string[]): Promise<number> {
               ...(model === undefined ? {} : { model }),
             };
       // The app queues the re-reviews that wait for a push to settle as automatic ones, in the cap.
+      // Its list can be a poll behind: a head the agent queued itself, or that a review already
+      // covers, is left alone (`covered`), so one push is never reviewed twice.
       const auto = argv.includes("--auto");
-      if (auto && dailyCapReached(store, config, Date.now())) return reply("daily-cap", false);
+      if (auto) {
+        const tracked = store.loadReviewHeads().get(target);
+        const latest = store.latestAgentReviews().get(target);
+        if (
+          tracked === undefined ||
+          tracked.queuedHead === tracked.head ||
+          coversHead(latest, tracked.head)
+        ) {
+          return reply("covered", true);
+        }
+        if (dailyCapReached(store, config, Date.now())) return reply("daily-cap", false);
+      }
       const id = store.queueAgentReview(
         target,
         auto ? "auto" : "manual",

@@ -907,3 +907,23 @@ private func options() throws -> ReviewOptions {
     await offline.runWaitingRereviews()
     #expect(await client.actions.count == 4)
 }
+
+@Test func aPostedReviewStillCountsWhenALaterRunWasSkipped() throws {
+    func row(_ key: String, posted: Bool) -> ReviewSummary {
+        ReviewSummary(
+            key: key, title: "T", url: "https://x/\(key)", draft: false, author: Person(username: "a", name: "A"),
+            reviewers: [ReviewerInfo(username: "me", name: "Me", state: "UNREVIEWED")],
+            agentReview: AgentReviewInfo(id: 9, status: "skipped"), agentReviewPosted: posted)
+    }
+    let doc = ReviewListDocument(
+        version: 1, me: Person(username: "me", name: "Me"), mergeRequests: [row("g/p!1", posted: true), row("g/p!2", posted: false)])
+    #expect(doc.sections.map(\.group) == [.waiting, .reviewed])
+    #expect(doc.sections.first?.items.map(\.key) == ["g/p!2"])
+
+    let golden = try decodeDocument(ReviewListDocument.self, from: contract("reviews.v1.json"))
+    #expect(golden.mergeRequests.map(\.agentReviewPosted) == [false, true])
+    let older = Data("""
+        {"key": "g/p!2", "title": "t", "url": "https://x", "draft": false, "author": {"username": "a", "name": "A"}, "reviewers": []}
+        """.utf8)
+    #expect(try JSONDecoder().decode(ReviewSummary.self, from: older).agentReviewPosted == false)
+}

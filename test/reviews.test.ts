@@ -693,3 +693,24 @@ describe("fetchAllDiscussions", () => {
     ]);
   });
 });
+
+describe("buildReviewList agentReviewPosted", () => {
+  it("keeps a posted review in view when a later run was skipped, and not after a discard", () => {
+    const posted: AgentReviewRow = { ...POSTED_NINE, headSha: "sha-9-a" };
+    const skipped: AgentReviewRow = { ...POSTED_NINE, id: 6, status: "skipped", headSha: null };
+    const list = (base: AgentReviewRow | undefined) =>
+      buildReviewList(
+        snapshot({
+          reviewRequested: [
+            mr(9, { headSha: "sha-9-a", reviewers: [reviewer("me", "UNREVIEWED")] }),
+          ],
+        }),
+        new Map([["g/p!9", skipped]]),
+        base === undefined ? new Map() : new Map([["g/p!9", base]]),
+      ).mergeRequests[0];
+    expect(list(posted)?.agentReviewPosted).toBe(true);
+    expect(list(posted)?.changedSinceReview).toBeNull();
+    expect(list({ ...posted, status: "discarded" })?.agentReviewPosted).toBe(false);
+    expect(list(undefined)?.agentReviewPosted).toBe(false);
+  });
+});
