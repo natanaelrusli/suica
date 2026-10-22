@@ -509,7 +509,7 @@ public func parseDiffLines(_ diff: String) -> [DiffLine] {
 public protocol ReviewsClient: Sendable {
     func reviews() async throws(AgentError) -> ReviewListDocument
     func mergeRequest(key: String) async throws(AgentError) -> MergeRequestDetail
-    /// queued, already-queued, bad-key, bad-skill or bad-model. An empty choice uses the config's.
+    /// queued, already-queued, bad-key, bad-skill, bad-model or daily-cap. An empty choice uses the config's.
     func queueAgentReview(key: String, choice: ReviewChoice) async throws(AgentError) -> ActionResult
     /// The skills and models a review can use; `cli` names another Model CLI than the saved one.
     func reviewOptions(cli: String?) async throws(AgentError) -> ReviewOptions
@@ -541,6 +541,7 @@ public final class ReviewsModel {
     public private(set) var loadingKeys: Set<String> = []
     /// MRs with an Agent Review action in flight.
     public private(set) var agentBusyKeys: Set<String> = []
+    private var runningWaitingRereviews = false
     /// The outcome of the last Agent Review action.
     public private(set) var agentBanner: String?
     /// MRs with an approval in flight.
@@ -647,6 +648,19 @@ public final class ReviewsModel {
         await agentAction(key) { (client: any ReviewsClient) async throws(AgentError) -> ActionResult in
             try await client.queueAgentReview(key: key, choice: choice)
         }
+    }
+
+    /// Queues now, as automatic reviews within the daily cap, the re-reviews that only wait for the
+    /// push to settle (`waiting`), so opening the app does not leave them to the wait. Held ones
+    /// (daily cap, approved, draft) stay as they are. A call while one runs does nothing: the window
+    /// and the menu can open together.
+    public func runWaitingRereviews() async {
+        guard !runningWaitingRereviews else { return }
+        runningWaitingRereviews = true
+        defer { runningWaitingRereviews = false }
+        await refresh()
+        let due = list?.mergeRequests.filter { $0.rereviewWaiting?.reason == "waiting" }.map(\.key) ?? []
+        for key in due { await queueAgentReview(key, choice: ReviewChoice(automatic: true)) }
     }
 
     /// A loader for a skill and model picker, on this page's client.

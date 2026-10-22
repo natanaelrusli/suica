@@ -881,3 +881,29 @@ private func options() throws -> ReviewOptions {
             == "By Claude Code (opus), following a:go at commit 01234567")
     #expect(Copy.agentReviewMeta(cli: "claude", model: nil, sha: nil) == "By Claude Code")
 }
+
+@MainActor @Test func openingTheAppStartsTheRereviewsThatOnlyWaitForThePushToSettle() async {
+    func waiting(_ key: String, _ reason: String) -> ReviewSummary {
+        ReviewSummary(
+            key: key, title: "T", url: "https://x/\(key)", draft: false, author: Person(username: "a", name: "A"),
+            reviewers: [], rereviewWaiting: RereviewWaiting(reason: reason, dueAt: reason == "waiting" ? 1 : nil))
+    }
+    let doc = ReviewListDocument(
+        version: 1,
+        mergeRequests: [
+            waiting("g/p!1", "waiting"), waiting("g/p!2", "daily-cap"), waiting("g/p!3", "approved"),
+            waiting("g/p!4", "draft"), summary("g/p!5"), waiting("g/p!6", "waiting"),
+        ])
+    let client = FakeReviewsClient(lists: [.success(doc)])
+    let model = ReviewsModel(client: client)
+    await model.runWaitingRereviews()
+    #expect(await client.actions == ["queue g/p!1 --auto", "queue g/p!6 --auto"])
+    await client.setActionResult(.success(ActionResult(code: "daily-cap")))
+    await model.runWaitingRereviews()
+    #expect(model.agentBanner == "Not queued: automatic reviews reached review.maxPerDay for today.")
+
+    await client.setLists([.failure(.launchFailed)])
+    let offline = ReviewsModel(client: client)
+    await offline.runWaitingRereviews()
+    #expect(await client.actions.count == 4)
+}

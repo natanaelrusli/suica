@@ -40,6 +40,8 @@ struct MenuView: View {
         }
         // Fixed, so the lists have room even with one row in them.
         .frame(width: 460, height: 640, alignment: .top)
+        // Grows out of the menu bar icon when it opens and shrinks back into it when it closes.
+        .background(MenuPanelMotion(level: motion))
         .motion(value: onboarding.needsSetup)
         .motion(value: settings.showsPopoverCounters)
         .motion(value: model.errorText)
@@ -61,6 +63,7 @@ struct MenuView: View {
             // A message that arrived since the last refresh can change where the panel should open.
             if !tabPicked { tab = PanelTab.opening(badgeCount: model.badgeCount) }
             await window.refreshStatus()
+            await reviews.runWaitingRereviews()
         }
     }
 

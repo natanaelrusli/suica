@@ -535,6 +535,7 @@ public enum Copy {
         case "bad-key": "This merge request key cannot be reviewed."
         case "bad-skill": "That skill is not installed any more. Pick another one."
         case "bad-model": "That model name cannot be used. Pick another one."
+        case "daily-cap": "Not queued: automatic reviews reached review.maxPerDay for today."
         default: "Nothing to do: the review changed in the meantime."
         }
     }

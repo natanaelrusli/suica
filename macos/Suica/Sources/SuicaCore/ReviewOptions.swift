@@ -89,17 +89,20 @@ public struct ReviewOptions: Codable, Equatable, Sendable {
 public struct ReviewChoice: Equatable, Sendable {
     public var skill: String?
     public var model: String?
+    /// Queued as an automatic review, so `review.maxPerDay` applies (`daily-cap` once it is used).
+    public var automatic = false
 
-    public init(skill: String? = nil, model: String? = nil) {
+    public init(skill: String? = nil, model: String? = nil, automatic: Bool = false) {
         self.skill = skill
         self.model = model
+        self.automatic = automatic
     }
 
     /// What to send: a pick equal to the default is no pick, so the review follows a later config change.
     public func relative(to defaults: ReviewOptions.Defaults) -> ReviewChoice {
         ReviewChoice(
             skill: skill == defaults.skill ? nil : skill,
-            model: model == defaults.model ? nil : model)
+            model: model == defaults.model ? nil : model, automatic: automatic)
     }
 
     /// The agent's check of a model name: it reaches the CLI's argv, so it may not look like a flag.
@@ -109,7 +112,7 @@ public struct ReviewChoice: Equatable, Sendable {
 
     /// The options of `suica review queue`.
     public var arguments: [String] {
-        (skill.map { ["--skill", $0] } ?? []) + (model.map { ["--model", $0] } ?? [])
+        (skill.map { ["--skill", $0] } ?? []) + (model.map { ["--model", $0] } ?? []) + (automatic ? ["--auto"] : [])
     }
 }
 

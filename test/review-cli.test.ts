@@ -66,4 +66,19 @@ describe("suica review options and queue", () => {
       ["g/p!7", null, "haiku"],
     ]);
   });
+
+  it("queues with --auto as an automatic review, within review.maxPerDay", () => {
+    writeFileSync(
+      configPath,
+      `gitlab:\n  hostname: h\nstatePath: ${statePath}\nreview:\n  maxPerDay: 1\n`,
+    );
+    const reply = (key: string) => suica(["review", "queue", key, "--auto", "--json"]);
+    expect(reply("g/p!7")).toEqual({ status: 0, line: '{"status":"queued"}' });
+    expect(reply("g/p!8")).toEqual({ status: 1, line: '{"status":"daily-cap"}' });
+
+    const store = openStore(statePath);
+    const queued = store.agentReviewActivity().queued;
+    store.close();
+    expect(queued.map((row) => [row.mrKey, row.trigger])).toEqual([["g/p!7", "auto"]]);
+  });
 });

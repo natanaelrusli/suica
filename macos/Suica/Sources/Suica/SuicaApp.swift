@@ -157,13 +157,18 @@ struct SuicaApp: App {
         _window = State(initialValue: window)
         LinkDelegate.window = window
         _editor = State(initialValue: ConfigEditorModel(client: dashboard))
-        _reviews = State(initialValue: ReviewsModel(client: reviewsClient))
         _fixes = State(initialValue: FixesModel(client: fixesClient))
         _templates = State(initialValue: TemplateEditorModel(client: templatesClient))
         _office = State(initialValue: OfficeModel(client: officeClient))
         let onboardingModel = OnboardingModel(dashboard: dashboard, setup: setupClient)
         _onboarding = State(initialValue: onboardingModel)
-        Task { @MainActor in await onboardingModel.checkNeeded() }
+        let reviewsModel = ReviewsModel(client: reviewsClient)
+        _reviews = State(initialValue: reviewsModel)
+        Task { @MainActor in
+            await onboardingModel.checkNeeded()
+            // Opening the app runs the re-reviews that only wait for a push to settle.
+            if !onboardingModel.needsSetup { await reviewsModel.runWaitingRereviews() }
+        }
         Task { @MainActor in await model.runRefreshLoop(every: refreshInterval) }
     }
 
