@@ -298,6 +298,29 @@ private func disc(_ context: CGContext, radius: CGFloat, centre: NSColor, rim: N
     }
 }
 
+/// A monitor with a game on: a night sky over a row of coloured blocks, a little hero mid-jump and a
+/// coin above, so it reads as play rather than work from across the room.
+@MainActor private let screenGame = paintedCard { context, half in
+    context.setFillColor(NSColor(red: 0.1, green: 0.06, blue: 0.22, alpha: 1).cgColor)
+    context.fill(CGRect(x: -half, y: -half, width: 2 * half, height: 2 * half))
+    context.setStrokeColor(NSColor(red: 0.95, green: 0.45, blue: 0.85, alpha: 1).cgColor)
+    context.setLineWidth(half * 0.06)
+    context.stroke(CGRect(x: -half, y: -half, width: 2 * half, height: 2 * half))
+    let blocks = [
+        NSColor(red: 0.95, green: 0.35, blue: 0.4, alpha: 1), NSColor(red: 1, green: 0.8, blue: 0.25, alpha: 1),
+        NSColor(red: 0.35, green: 0.85, blue: 0.5, alpha: 1), NSColor(red: 0.35, green: 0.65, blue: 1, alpha: 1),
+    ]
+    let size = half * 0.25
+    for column in 0..<8 {
+        context.setFillColor(blocks[column % blocks.count].cgColor)
+        context.fill(CGRect(x: -half + CGFloat(column) * size, y: -half, width: size * 0.92, height: size * 0.92))
+    }
+    context.setFillColor(NSColor.white.cgColor)
+    context.fill(CGRect(x: -half * 0.2, y: -half * 0.35, width: half * 0.2, height: half * 0.3))
+    context.setFillColor(NSColor(red: 1, green: 0.85, blue: 0.3, alpha: 1).cgColor)
+    context.fillEllipse(in: CGRect(x: half * 0.3, y: half * 0.3, width: half * 0.18, height: half * 0.18))
+}
+
 /// A monitor waiting for the Owner: amber, with a question mark.
 @MainActor private let screenWaiting = paintedCard { context, half in
     context.setFillColor(NSColor(red: 1, green: 0.72, blue: 0.2, alpha: 1).cgColor)
@@ -347,8 +370,12 @@ private struct FigureRig {
     let hips: [Entity]
     let knees: [Entity]
     let parts: [FigurePart]
+    /// A phone in the right hand, parked far below it while the figure does not hold one.
+    let phone: Entity
 
     static let standingHip: Float = 0.7
+    /// Where the phone sits in the right hand, along the forearm past the fingers.
+    static let phoneInHand = SIMD3<Float>(0, -0.3, 0)
     static let seatedHip: Float = 0.4
 }
 
@@ -420,6 +447,68 @@ private struct Pose {
         return pose
     }
 
+    /// Holding a phone up in front of the chest with both hands, the head bowed to it, the thumb
+    /// scrolling now and then.
+    static func phoning(at time: Float, seated: Bool) -> Pose {
+        var pose = seated ? Pose.seated : Pose.standing
+        pose.shoulderPitch = [0.45, 0.3]
+        pose.shoulderRoll = [-0.25, -0.15]
+        pose.elbow = [1.7, 2.05 + 0.05 * sin(time * 3)]
+        pose.headPitch = 0.35 + 0.03 * sin(time * 0.7)
+        if seated { pose.torsoPitch = 0.05 }
+        return pose
+    }
+
+    /// Playing a game on the monitor: leaning in, hands hammering the keys, swaying with the play.
+    static func gaming(at time: Float) -> Pose {
+        var pose = seated
+        pose.torsoPitch = -0.16
+        pose.torsoYaw = 0.07 * sin(time * 1.7)
+        pose.shoulderPitch = [1.15, 1.15]
+        pose.elbow = [0.85 + 0.1 * sin(time * 15), 0.85 + 0.1 * sin(time * 13 + 1)]
+        pose.headPitch = -0.05 + 0.05 * sin(time * 4)
+        return pose
+    }
+
+    /// Standing beside the desk, both arms up, leaning one way then the other.
+    static func stretching(at time: Float) -> Pose {
+        var pose = standing
+        let sway = sin(time * 0.9)
+        pose.shoulderRoll = [2.75 + 0.15 * sway, 2.75 - 0.15 * sway]
+        pose.elbow = [0.3, 0.3]
+        pose.torsoPitch = 0.08 + 0.04 * sin(time * 1.8)
+        pose.torsoYaw = 0.12 * sway
+        pose.headPitch = 0.15
+        return pose
+    }
+
+    /// Chatting, facing the partner. The one speaking talks with a hand and the head; the other
+    /// nods along with its hands loosely together in front.
+    static func talking(at time: Float, speaking: Bool) -> Pose {
+        var pose = standing
+        if speaking {
+            pose.shoulderPitch = [0.1, 0.55 + 0.2 * sin(time * 2.6)]
+            pose.shoulderRoll = [0, 0.25 + 0.1 * sin(time * 1.9)]
+            pose.elbow = [0.2, 1.1 + 0.35 * sin(time * 3.4)]
+            pose.headPitch = 0.06 * sin(time * 3)
+            pose.headYaw = 0.1 * sin(time * 1.3)
+        } else {
+            pose.shoulderPitch = [0.35, 0.35]
+            pose.shoulderRoll = [-0.2, -0.2]
+            pose.elbow = [0.9, 0.9]
+            pose.headPitch = 0.08 + 0.06 * sin(time * 1.6)
+        }
+        return pose
+    }
+
+    /// Out for a stroll and standing still for a moment: hands behind the back, looking round.
+    static func lookingAround(at time: Float) -> Pose {
+        var pose = listening(at: time)
+        pose.headYaw = 0.6 * sin(time * 0.45)
+        pose.torsoYaw = 0.15 * sin(time * 0.45)
+        return pose
+    }
+
     /// One stride: the legs swing against the arms, a knee bends on the back swing.
     static func walking(phase: Float) -> Pose {
         var pose = standing
@@ -433,9 +522,11 @@ private struct Pose {
     }
 }
 
-/// Where a figure is going: its chair, a spot beside the desk, or out of the office.
+/// Where a figure is going: its chair, a spot beside the desk, a spot in the Center Room (facing
+/// a point there, or the viewer when there is none) or out of the office.
 private enum FigureGoal: Equatable {
     case seated, standingBy, gone
+    case away(OfficePoint, facing: OfficePoint?)
 }
 
 /// A figure on its way: along `path`, `walked` metres so far, to `goal`.
@@ -464,6 +555,8 @@ private struct DeskNode {
     var walk: Walk?
     /// The stride cycle while walking.
     var stride: Float
+    /// What the figure does while its Session is idle; nil otherwise, and before its first turn.
+    var activity: OfficeIdleActivity?
 }
 
 /// How the Owner wants the office shown, beyond its style and environment.
@@ -535,6 +628,10 @@ final class OfficeSceneController {
     private var travellers: [TravellerNode] = []
     private var options = OfficeSceneOptions()
     private var boss: BossNode?
+    /// The Center Room, where idle figures meet.
+    private var hall: PlacedRoom?
+    /// The idle turn the activities were last picked for.
+    private var idleTurn = -1
     private var clock: Float = 0
     private var updates: EventSubscription?
     private var animate = true
@@ -641,6 +738,11 @@ final class OfficeSceneController {
         for node in desks.values where node.at == .standingBy && node.walk == nil {
             node.rig.root.orientation = simd_quatf(angle: .pi + yaw, axis: [0, 1, 0])
         }
+        for node in desks.values where node.walk == nil {
+            if case .away(_, facing: nil) = node.at {
+                node.rig.root.orientation = simd_quatf(angle: .pi + yaw, axis: [0, 1, 0])
+            }
+        }
     }
 
     /// In the top right of the sky of the default view, behind the whole scene, its glow clear of
@@ -719,6 +821,11 @@ final class OfficeSceneController {
         let palette = Palette.make(style: style, environment: environment, dark: dark)
         layoutExtent = SIMD2(Float(layout.width), Float(layout.depth))
         if !adjusted { applyCamera() }
+        if hall != layout.center {
+            hall = layout.center
+            // Meeting spots move with the Center Room: pick again for the new one.
+            idleTurn = -1
+        }
 
         // Rooms: the project Rooms and the Center Room they open onto. A wall on the building's
         // edge is an outer wall and gets windows.
@@ -774,6 +881,8 @@ final class OfficeSceneController {
         }
         for (id, place) in placed {
             guard let session = sessionsById[id] else { continue }
+            // Without animation nobody wanders: idle figures sit at their desks as before.
+            if !animate { desks[id]?.activity = nil }
             if desks[id] == nil {
                 let node = makeDesk(session, at: place.position, way: place.way, palette)
                 if animate {
@@ -845,20 +954,83 @@ final class OfficeSceneController {
             rays.orientation = simd_quatf(angle: clock * 0.05, axis: [0, 0, 1])
             rays.scale = .init(repeating: 1 + 0.04 * sin(clock * 0.9))
         }
+        let turn = Int(clock / Float(OfficeIdle.turn))
+        if turn != idleTurn {
+            idleTurn = turn
+            planIdle(turn: turn)
+        }
         for (id, node) in desks {
             var node = node
+            var holdsPhone = false
             if node.walk != nil {
                 advance(&node, by: delta)
             } else {
-                switch (node.at, node.status) {
-                case (.seated, .working): apply(.typing(at: clock + Float(abs(node.target.x))), to: node.rig)
-                case (.seated, _): apply(.dozing(at: clock + Float(abs(node.target.x))), to: node.rig)
-                case (.standingBy, _): apply(.waving(at: clock), to: node.rig)
-                case (.gone, _): break
+                // Each figure keeps its own beat, so a room never moves in step.
+                let time = clock + Float(abs(node.target.x)) + Float(abs(node.target.z)) * 0.7
+                switch (node.at, node.status, node.activity) {
+                case (.seated, .working, _): apply(.typing(at: time), to: node.rig)
+                case (.seated, .idle, .phone):
+                    apply(.phoning(at: time, seated: true), to: node.rig)
+                    holdsPhone = true
+                case (.seated, .idle, .game): apply(.gaming(at: time), to: node.rig)
+                case (.seated, _, _): apply(.dozing(at: time), to: node.rig)
+                case (.standingBy, .idle, .stretch): apply(.stretching(at: time), to: node.rig)
+                case (.standingBy, _, _): apply(.waving(at: clock), to: node.rig)
+                case (.away, _, .chat(let partner, _, _)):
+                    if let other = desks[partner], other.walk == nil, case .chat(id, _, _) = other.activity {
+                        // Turns to speak, a few seconds each; the pair agree on whose turn it is.
+                        let beat = Int((clock + 2) / 4) % 2 == 0
+                        apply(.talking(at: time, speaking: beat == (id < partner)), to: node.rig)
+                    } else {
+                        // The partner has gone back to work: wait on the phone.
+                        apply(.phoning(at: time, seated: false), to: node.rig)
+                        holdsPhone = true
+                    }
+                case (.away, _, _): apply(.lookingAround(at: time), to: node.rig)
+                case (.gone, _, _): break
                 }
             }
+            node.rig.phone.position = holdsPhone ? FigureRig.phoneInHand : Self.parkedProp
             desks[id] = node
         }
+    }
+
+    /// A prop out of use waits far below the hand that holds it: a model that is disabled or scaled
+    /// to nothing when it first draws is culled by those bounds and never shows again.
+    private static let parkedProp = SIMD3<Float>(0, -40, 0)
+
+    /// Picks what each idle figure does this turn and sends it there. A figure still walking keeps
+    /// what it was doing until the next turn, and the one the boss is visiting stays at its desk.
+    private func planIdle(turn: Int) {
+        guard animate, let hall else { return }
+        let visited = boss?.deskId
+        let free = desks.filter { $0.value.status == .idle && $0.value.walk == nil && $0.key != visited }
+        let plan = OfficeIdle.plan(idle: Array(free.keys), hall: hall, turn: turn)
+        for (id, activity) in plan {
+            guard var node = desks[id] else { continue }
+            setActivity(&node, activity)
+            desks[id] = node
+        }
+    }
+
+    /// Where an idle figure goes for `activity`.
+    private static func goal(for activity: OfficeIdleActivity?) -> FigureGoal {
+        switch activity {
+        case .stroll(let spot): .away(spot, facing: nil)
+        case .chat(_, let spot, let facing): .away(spot, facing: facing)
+        case .stretch: .standingBy
+        case .doze, .phone, .game, nil: .seated
+        }
+    }
+
+    /// Starts `activity`: the monitor shows the game or goes dark, and the figure walks to its place.
+    private func setActivity(_ node: inout DeskNode, _ activity: OfficeIdleActivity?) {
+        let wasGame = node.activity == .game
+        node.activity = activity
+        if (activity == .game) != wasGame {
+            node.screen.model?.materials = [activity == .game ? screenGame : UnlitMaterial(color: NSColor(white: 0.12, alpha: 1))]
+        }
+        send(&node, to: Self.goal(for: activity))
     }
 
     // MARK: Figures on the move
@@ -874,15 +1046,29 @@ final class OfficeSceneController {
             let gap = node.way.points.count >= 2 ? node.way.points[node.way.points.count - 2].x : chair.x + 0.7
             return OfficePoint(x: gap, z: chair.z)
         case .gone: return node.way.start ?? chair
+        case .away(let point, _): return point
         }
     }
 
-    /// The way from `from` to `goal`: by the chair whenever the doorway is one end.
+    /// The way from the doorway to where `goal` puts the figure: down the Room to its chair or the
+    /// gap beside its desk, or across the Center Room to its spot there.
+    private func fromDoor(_ node: DeskNode, to goal: FigureGoal) -> [OfficePoint] {
+        switch goal {
+        case .gone: return Array(node.way.points.prefix(1))
+        case .seated: return node.way.points
+        case .standingBy: return node.way.points.dropLast() + [spot(.standingBy, of: node)]
+        case .away(let point, _): return OfficeIdle.hallWay(from: node.way, to: point)
+        }
+    }
+
+    /// The way from `from` to `goal`: straight across when both are beside the desk or both in the
+    /// Center Room, else by the doorway.
     private func route(_ node: DeskNode, from: FigureGoal, to goal: FigureGoal) -> OfficePath {
         switch (from, goal) {
-        case (.gone, _): return OfficePath(node.way.points + [spot(goal, of: node)])
-        case (_, .gone): return OfficePath([spot(from, of: node)] + node.way.points.reversed())
-        default: return OfficePath([spot(from, of: node), spot(goal, of: node)])
+        case (.seated, .standingBy), (.standingBy, .seated), (.away, .away):
+            return OfficePath([spot(from, of: node), spot(goal, of: node)])
+        default:
+            return OfficePath(fromDoor(node, to: from).reversed() + fromDoor(node, to: goal))
         }
     }
 
@@ -909,6 +1095,13 @@ final class OfficeSceneController {
             apply(.waving(at: 0), to: node.rig)
             node.rig.root.orientation = simd_quatf(angle: .pi + yaw, axis: [0, 1, 0])
         case .gone: node.rig.root.position.y = Self.hidden
+        case .away(let point, let facing):
+            apply(.standing, to: node.rig)
+            if let facing {
+                place(node, at: point, heading: OfficePoint(x: facing.x - point.x, z: facing.z - point.z))
+            } else {
+                node.rig.root.orientation = simd_quatf(angle: .pi + yaw, axis: [0, 1, 0])
+            }
         }
     }
 
@@ -979,6 +1172,11 @@ final class OfficeSceneController {
         // A Desk that is gone takes the boss with it.
         if let id = boss.deskId, desks[id] == nil { settle(&boss, at: .out) }
         let target = order.flatMap { desks[$0.deskId] == nil ? nil : $0.deskId }
+        // The worker the boss visits comes back to its desk from wherever it is passing the time.
+        if let target, var worker = desks[target], worker.activity != nil, worker.activity != .phone {
+            setActivity(&worker, .phone)
+            desks[target] = worker
+        }
         if target != boss.deskId {
             if let target {
                 // Called to another Desk: leave this one at once and walk to the new one.
@@ -1412,6 +1610,7 @@ final class OfficeSceneController {
                 switch session.status {
                 case .working: screenWorking
                 case .waiting: screenWaiting
+                case .idle where node.activity == .game && session.status == node.status: screenGame
                 default: UnlitMaterial(color: NSColor(white: 0.12, alpha: 1))
                 }
             node.screen.model?.materials = [screen]
@@ -1446,6 +1645,8 @@ final class OfficeSceneController {
             }
         }
         node.bubbleText = bubbleText
+        // Only an idle figure passes the time; one that gets work goes back to its desk.
+        if session.status != .idle { node.activity = nil }
         node.status = session.status
         node.agent = session.agent
         node.dark = dark
@@ -1454,7 +1655,8 @@ final class OfficeSceneController {
             switch session.status {
             case .exited: .gone
             case .waiting: .standingBy
-            case .working, .idle: .seated
+            case .working: .seated
+            case .idle: Self.goal(for: node.activity)
             }
         send(&node, to: goal)
     }
@@ -1567,9 +1769,19 @@ final class OfficeSceneController {
                 add(.generateCylinder(height: 0.05, radius: 0.055), dark, at: head + [x, 0, 0], to: neck, turn: alongX)
             }
         }
+        // A phone in the right hand: a dark slab with a lit face toward the eyes when held up.
+        let phone = ModelEntity(mesh: .generateBox(size: [0.075, 0.13, 0.014], cornerRadius: 0.006), materials: [material(nsColour(dark))])
+        let face = ModelEntity(
+            mesh: .generatePlane(width: 0.062, height: 0.11),
+            materials: [UnlitMaterial(color: NSColor(red: 0.55, green: 0.8, blue: 1, alpha: 1))])
+        face.position = [0, 0, -0.008]
+        face.orientation = simd_quatf(angle: .pi, axis: [0, 1, 0])
+        phone.addChild(face)
+        phone.position = Self.parkedProp
+        elbows[1].addChild(phone)
         let rig = FigureRig(
             root: root, pelvis: pelvis, torso: torso, head: neck, shoulders: shoulders, elbows: elbows, hips: hips,
-            knees: knees, parts: parts)
+            knees: knees, parts: parts, phone: phone)
         apply(.seated, to: rig)
         return rig
     }
