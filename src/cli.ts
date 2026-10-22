@@ -276,7 +276,7 @@ async function officeSendCommand(agent: string, sessionId: string): Promise<numb
           body,
         );
   // The message itself is the Owner's words: it is never logged.
-  createLogger().info("office message sent", { agent, session_id: sessionId, outcome });
+  createLogger().info("office message", { agent, session_id: sessionId, outcome });
   process.stdout.write(`${actionJson(outcome)}\n`);
   return outcome === "sent" ? 0 : 1;
 }
