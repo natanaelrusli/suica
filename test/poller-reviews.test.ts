@@ -7,7 +7,10 @@ import { openStore } from "../src/store.ts";
 import type { Snapshot } from "../src/domain.ts";
 import { mr, reviewer, snapshot } from "./builders.ts";
 
-function harness(queueReviews: (snapshot: Snapshot, newRequests: readonly string[]) => void) {
+function harness(
+  queueReviews: (snapshot: Snapshot, newRequests: readonly string[]) => void,
+  recheckApprovals?: (snapshot: Snapshot) => void,
+) {
   let current: Snapshot = snapshot();
   const logs: string[] = [];
   const deps: PollDeps = {
@@ -21,6 +24,7 @@ function harness(queueReviews: (snapshot: Snapshot, newRequests: readonly string
       notifications: { summaryThreshold: 4, ignoreAuthors: [] },
     },
     queueReviews,
+    ...(recheckApprovals === undefined ? {} : { recheckApprovals }),
     now: () => 0,
   };
   return {
@@ -62,5 +66,26 @@ describe("review requests and Agent Review", () => {
     h.set(snapshot({ reviewRequested: [waiting(4)] }));
     expect(await h.poll()).toBe("ok");
     expect(h.logs.some((line) => line.includes("agent review not queued"))).toBe(true);
+  });
+
+  it("starts the approval recheck with every snapshot, and keeps the poll ok when it throws", async () => {
+    const seen: string[][] = [];
+    const h = harness(
+      () => undefined,
+      (snap) => seen.push(snap.reviewRequested.map((m) => m.key)),
+    );
+    h.set(snapshot({ reviewRequested: [waiting(1)] }));
+    await h.poll();
+    await h.poll();
+    expect(seen).toEqual([["g/p!1"], ["g/p!1"]]);
+
+    const failing = harness(
+      () => undefined,
+      () => {
+        throw new Error("db");
+      },
+    );
+    expect(await failing.poll()).toBe("ok");
+    expect(failing.logs.some((line) => line.includes("approval recheck not started"))).toBe(true);
   });
 });

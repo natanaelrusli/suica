@@ -3,7 +3,13 @@ import { join } from "node:path";
 import { defaultStatePath, loadConfig } from "./config.ts";
 import type { Config } from "./config.ts";
 import { queueAutomaticFixes } from "./agent-fix.ts";
-import { createReviewWorker, queueAutomaticReviews } from "./agent-review.ts";
+import {
+  createReviewWorker,
+  queueAutomaticReviews,
+  resolvedNote,
+  runJudge,
+} from "./agent-review.ts";
+import { createApprovalRecheck } from "./approval-recheck.ts";
 import type { ReviewWorker } from "./agent-review.ts";
 import { defaultExec } from "./exec.ts";
 import { createFailureTracker } from "./failures.ts";
@@ -23,7 +29,12 @@ import { loadAlerts } from "./alerts.ts";
 import { createNotifier } from "./notifier.ts";
 import { createFixWorker } from "./fix-runner.ts";
 import { watchPipelines } from "./pipeline-watch.ts";
-import { fetchFixDetail } from "./reviews.ts";
+import {
+  approveMergeRequest,
+  fetchAllDiscussions,
+  fetchFixDetail,
+  resolveOwnThreads,
+} from "./reviews.ts";
 import { pollOnce } from "./poller.ts";
 import type { PollDeps, PollStatus } from "./poller.ts";
 import { openStore } from "./store.ts";
@@ -100,6 +111,29 @@ export function createRuntime(configPath: string, signal?: AbortSignal): Runtime
     ...(signal === undefined ? {} : { signal }),
   });
 
+  // Rereads each reviewed MR's posted review with its discussion after every poll, beside it.
+  const recheck = createApprovalRecheck({
+    store,
+    config,
+    log,
+    now: Date.now,
+    discussions: (key) => fetchAllDiscussions(run, key),
+    judge: (prompt) =>
+      runJudge(
+        {
+          store,
+          config,
+          exec: defaultExec,
+          now: Date.now,
+          ...(signal === undefined ? {} : { signal }),
+        },
+        prompt,
+      ),
+    approve: (key, sha) => approveMergeRequest({ post: glabPost(config.gitlab), log }, key, sha),
+    resolveOwnThreads: async (key) =>
+      resolvedNote(await resolveOwnThreads({ graphql: run, log }, key)),
+  });
+
   // Asked once per run of the agent; a failed lookup is asked again by the next fix.
   let owner: Promise<string> | undefined;
   const ownerName = (): Promise<string> => {
@@ -133,6 +167,13 @@ export function createRuntime(configPath: string, signal?: AbortSignal): Runtime
     alerts,
     queueReviews: (snapshot, newRequests) => {
       queueAutomaticReviews({ store, config, log, now: Date.now }, snapshot, newRequests);
+    },
+    recheckApprovals: (snapshot) => {
+      void recheck.run(snapshot).catch((error: unknown) => {
+        log.warn("approval recheck failed", {
+          reason: error instanceof Error ? error.name : "unknown",
+        });
+      });
     },
     queueFixes: (snapshot, previous) =>
       queueAutomaticFixes(

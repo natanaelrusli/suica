@@ -807,6 +807,37 @@ async function judgeApproval(
   return verdict;
 }
 
+/**
+ * The judge outside a review run, for the approval recheck: the configured model CLI at low
+ * effort, without tools, in a scratch folder of its own. Throws when no CLI can run it or the run
+ * fails, so the caller fails closed; an answer without a verdict is a verdict of not approving.
+ */
+export async function runJudge(
+  deps: Pick<ReviewDeps, "store" | "config" | "exec" | "signal" | "now" | "detectClis">,
+  prompt: string,
+): Promise<ApprovalVerdict> {
+  const clis = (deps.detectClis ?? detectModelClis)();
+  const cliId = resolveModelCli(deps.config.model.cli, clis);
+  if (cliId === null || cliId === "gemini") throw new RunFailure("no model CLI can judge");
+  const path = clis.find((cli) => cli.id === cliId)?.path;
+  if (path === null || path === undefined) throw new RunFailure(`${cliId} is not installed`);
+  const workDir = mkdtempSync(join(tmpdir(), "suica-judge-"));
+  try {
+    const result = await runCli(deps, cliId, path, prompt, workDir, () => undefined, {
+      model: deps.config.review.model,
+      effort: "low",
+      timeoutMinutes: JUDGE_TIMEOUT_MINUTES,
+      mode: "judge",
+    });
+    if (result.tokens !== null) {
+      deps.store.recordTokenUsage({ at: deps.now(), purpose: "approve", ...result.tokens });
+    }
+    return parseVerdict(result.body) ?? NO_VERDICT;
+  } finally {
+    rmSync(workDir, { recursive: true, force: true });
+  }
+}
+
 // MARK: - Queue, worker, post, discard
 
 /**
@@ -1145,7 +1176,7 @@ async function approveAfterPost(
   );
 }
 
-function resolvedNote(threads: ResolveOutcome): string {
+export function resolvedNote(threads: ResolveOutcome): string {
   const count =
     threads.resolved === 1 ? "1 of your threads" : `${threads.resolved} of your threads`;
   if (threads.complete) return threads.resolved === 0 ? "" : `Resolved ${count}.`;
