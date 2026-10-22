@@ -5,6 +5,8 @@ import SwiftUI
 struct ConfigurationView: View {
     let window: WindowModel
     let editor: ConfigEditorModel
+    /// For the installed skills and the models that Review skill and Review model are picked from.
+    let reviews: ReviewsModel
     let navigator: Navigator
     /// One category from the sidebar, or nil for the overview of all of them. A search looks
     /// through every setting.
@@ -14,6 +16,9 @@ struct ConfigurationView: View {
     @State private var query = ""
     /// Overview cards per row, from the page's width.
     @State private var columns = 4
+    /// The drawer's section while it is open.
+    @State private var picking: ReviewPickerPart?
+    @State private var options: ReviewOptionsLoader?
     @Environment(\.motionLevel) private var motion
     @Environment(\.metrics) private var metrics
 
@@ -49,7 +54,15 @@ struct ConfigurationView: View {
         }
         .motion(value: editor.document == nil)
         .toolbar { toolbar }
+        .inspector(isPresented: Binding(get: { picking != nil }, set: { if !$0 { picking = nil } })) {
+            if let picking, let options, let document = editor.document { reviewPicker(picking, options, document) }
+        }
         .task { await editor.load() }
+        // The fields name the picked skill and model; the drawer reads them again as it opens.
+        .task(id: draftedModelCli) {
+            if options == nil { options = reviews.optionsLoader() }
+            await options?.load(cli: draftedModelCli)
+        }
         // The boxes that reported invalid text are destroyed with this view.
         .onDisappear { editor.clearInputInvalid() }
     }
@@ -190,9 +203,44 @@ struct ConfigurationView: View {
             if together, let start, let end, field.path == start.path {
                 WorkingHoursEditor(start: start, end: end, editor: editor)
             } else {
-                FieldEditor(field: field, editor: editor, modelClis: window.status?.modelCli)
+                FieldEditor(
+                    field: field, editor: editor, modelClis: window.status?.modelCli,
+                    reviewOptions: options?.options, choose: { picking = $0 })
             }
         }
+    }
+
+    // MARK: Skill and model drawer
+
+    /// Model CLI as drafted, so the drawer lists the models of an unsaved choice.
+    private var draftedModelCli: String? {
+        guard let field = editor.document?.fields.first(where: { $0.path == ["model", "cli"] }),
+            case .string(let cli) = editor.value(of: field)
+        else { return nil }
+        return cli
+    }
+
+    /// Picks write drafts, saved with the rest of the form.
+    private func reviewPicker(_ part: ReviewPickerPart, _ loader: ReviewOptionsLoader, _ document: ConfigDocument)
+        -> some View
+    {
+        let skillField = document.fields.first { $0.path == ["review", "skill"] }
+        let modelField = document.fields.first { $0.path == ["review", "model"] }
+        let skill = Binding<String>(
+            get: {
+                guard let skillField else { return "" }
+                if case .string(let name) = editor.value(of: skillField) { return name }
+                if case .string(let name) = skillField.effective { return name }
+                return ""
+            },
+            set: { name in if let skillField { editor.setText(skillField, name) } })
+        let model = Binding<String?>(
+            get: {
+                guard let modelField, case .string(let name) = editor.value(of: modelField) else { return nil }
+                return name
+            },
+            set: { name in if let modelField { editor.setText(modelField, name ?? "") } })
+        return ReviewPicker(loader: loader, parts: [part], skill: skill, model: model, cli: draftedModelCli)
     }
 
     private var hasUnsavedInput: Bool { editor.isDirty || !editor.invalidInputKeys.isEmpty }

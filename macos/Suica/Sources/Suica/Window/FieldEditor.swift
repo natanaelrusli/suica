@@ -7,8 +7,12 @@ import SwiftUI
 struct FieldEditor: View {
     let field: ConfigField
     let editor: ConfigEditorModel
-    /// Which model CLIs are installed and in use, for the Model CLI cards and model suggestions.
+    /// Which model CLIs are installed and in use, for the Model CLI cards.
     var modelClis: ModelCliStatus?
+    /// The installed skills and the models, to name the Review skill and Review model.
+    var reviewOptions: ReviewOptions?
+    /// Opens the skill and model drawer at a section.
+    var choose: ((ReviewPickerPart) -> Void)?
 
     private var key: String { field.path.joined(separator: ".") }
     private var isReset: Bool { editor.drafts[key] == .null }
@@ -54,15 +58,16 @@ struct FieldEditor: View {
             case "path":
                 LabeledContent(field.label) { PathInput(field: field, editor: editor) }
             default:
-                LabeledContent(field.label) {
-                    HStack(spacing: 6) {
+                if let choose, key == "review.skill" || key == "review.model" {
+                    LabeledContent(field.label) { pickedValue(choose) }
+                } else {
+                    LabeledContent(field.label) {
                         TextField(field.label, text: stringBinding, prompt: Text(field.placeholder ?? ""))
                             .labelsHidden()
                             .textFieldStyle(.roundedBorder)
                             .multilineTextAlignment(.leading)
-                        if key == "review.model" { modelSuggestions }
+                            .frame(maxWidth: 360)
                     }
-                    .frame(maxWidth: 360)
                 }
             }
         case .int:
@@ -171,25 +176,37 @@ struct FieldEditor: View {
         .fixedSize()
     }
 
-    // MARK: Review model
+    // MARK: Review skill and model
 
-    /// Claude Code's aliases while it reviews; any name can still be typed.
-    @ViewBuilder private var modelSuggestions: some View {
-        if modelClis?.active == "claude" {
-            Menu {
-                ForEach(["opus", "sonnet", "haiku"], id: \.self) { name in
-                    Button(name) { editor.setText(field, name) }
+    /// The picked name with what it is, and a button that opens the drawer to change it.
+    private func pickedValue(_ choose: @escaping (ReviewPickerPart) -> Void) -> some View {
+        let part: ReviewPickerPart = key == "review.skill" ? .skill : .model
+        // A skill always applies: with no value in the file, the default's name.
+        var name = currentOption
+        if name == nil, part == .skill, case .string(let fallback) = field.effective { name = fallback }
+        var title = Copy.cliDefaultModel
+        var detail: String?
+        var missing = false
+        if part == .skill, let name {
+            let skill = reviewOptions?.skill(named: name)
+            title = skill?.shortName ?? name
+            detail = skill?.plugin
+            missing = skill?.missing ?? false
+        } else if let name {
+            title = reviewOptions?.model(named: name)?.label ?? name
+            detail = title.lowercased() == name.lowercased() ? nil : name
+        }
+        return HStack(spacing: 10) {
+            VStack(alignment: .trailing, spacing: 1) {
+                Text(DisplayText.clean(title, max: 80))
+                if missing {
+                    Text(Copy.skillNotInstalled).font(.caption).foregroundStyle(.orange)
+                } else if let detail {
+                    Text(DisplayText.clean(detail, max: 80)).font(.caption).foregroundStyle(.secondary)
                 }
-                Divider()
-                Button(Copy.cliDefaultModel) { editor.setText(field, "") }
-            } label: {
-                Image(systemName: "list.bullet")
             }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .help(Copy.modelSuggestions)
-            .accessibilityLabel(Copy.modelSuggestions)
+            Button(Copy.choose) { choose(part) }
+                .accessibilityLabel("\(Copy.choose) \(field.label)")
         }
     }
 

@@ -79,6 +79,7 @@ One drawer (SwiftUI `.inspector`, trailing side) used in both places, with up to
 
 - **Skill**: a search box over name and description, then one row per skill: name, plugin, two lines of description, a checkmark on the selected one. A missing default shows "Not installed" in orange. User skills and plugin skills are not split into groups (_my call_: the search does the work).
 - **Model**: one row per model: label, name in secondary text, description, checkmark. A last row **Other model…** turns into a text field for any name (_my call_: keeps full model names possible). A first row **CLI default** clears the choice.
+- With both sections (MR detail), a Skill | Model switch at the top shows one at a time, since about 50 skills push the models out of sight, and a line above **Start review** says both picks ("madhani-code-review with Opus") (_my call_, after seeing it with real data).
 - The drawer loads `review options` when it opens; while it loads it shows a spinner, and a failure shows the agent's message with **Try again**.
 
 ### Configuration → Agent Review → Skill and model

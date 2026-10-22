@@ -16,6 +16,8 @@ struct OverviewView: View {
     /// The outcome of the last Agent Review action started here.
     @State private var reviewNotice: String?
     @State private var showsReviewSettings = false
+    /// The models the Model menu offers, read when the review settings open.
+    @State private var reviewOptions: ReviewOptionsLoader?
     @State private var showsSystem = false
 
     private var menu: MenuModel { window.menu }
@@ -397,6 +399,10 @@ struct OverviewView: View {
                         reviewSettings(review)
                     }
                     .padding(.top, 6)
+                    .task {
+                        if reviewOptions == nil { reviewOptions = reviews.optionsLoader() }
+                        await reviewOptions?.load()
+                    }
                 }
             }
             .font(.callout)
@@ -605,10 +611,9 @@ struct OverviewView: View {
                     Task { await window.setReviewPosting(mode) }
                 }
             })
-        // Claude Code's aliases are offered when it reviews; any other value set in the config is kept.
-        let claude = window.status?.modelCli?.active == "claude"
-        let aliases = claude ? ["opus", "sonnet", "haiku"] : []
-        let options = aliases + (review.model.map { aliases.contains($0) ? [] : [$0] } ?? [])
+        // The models the reviewing CLI lists; the value set in the config is kept even when it is not listed.
+        let listed = reviewOptions?.options?.models.map(\.name) ?? []
+        let options = listed + (review.model.map { listed.contains($0) ? [] : [$0] } ?? [])
         let postAs = Binding<String>(
             get: { review.postAs ?? "comment" },
             set: { mode in Task { await window.setReviewPostAs(mode) } })

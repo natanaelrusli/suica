@@ -430,8 +430,13 @@ extension CLIAgentClient: ReviewsClient {
         try await document(MergeRequestDetail.self, ["mr", key, "--json"], timeout: Self.gitlabTimeout)
     }
 
-    public func queueAgentReview(key: String) async throws(AgentError) -> ActionResult {
-        try await action(["review", "queue", key, "--json"], timeout: Self.shortTimeout)
+    public func queueAgentReview(key: String, choice: ReviewChoice) async throws(AgentError) -> ActionResult {
+        try await action(["review", "queue", key] + choice.arguments + ["--json"], timeout: Self.shortTimeout)
+    }
+
+    public func reviewOptions(cli: String?) async throws(AgentError) -> ReviewOptions {
+        try await document(
+            ReviewOptions.self, ["review", "options"] + (cli.map { ["--cli", $0] } ?? []) + ["--json"])
     }
 
     public func postAgentReview(id: Int, inline: Bool) async throws(AgentError) -> ActionResult {

@@ -431,10 +431,37 @@ public enum Copy {
         case nil: "the agent"
         }
     }
-    public static func agentReviewMeta(cli: String?, model: String?, sha: String?) -> String {
-        let who = model.map { "\(cliName(cli)) (\(DisplayText.clean($0, max: 60)))" } ?? cliName(cli)
+    public static func agentReviewMeta(cli: String?, model: String?, sha: String?, skill: String? = nil) -> String {
+        var who = model.map { "\(cliName(cli)) (\(DisplayText.clean($0, max: 60)))" } ?? cliName(cli)
+        if let skill { who += ", following \(DisplayText.clean(skill, max: 80))" }
         return sha.map { "By \(who) at commit \(String($0.prefix(8)))" } ?? "By \(who)"
     }
+    // Skill and model picker
+    public static let reviewWith = "Review with…"
+    public static let reviewWithHelp = "Pick the skill and model for this review only"
+    public static let pickerTitle = "Skill and model"
+    public static let pickerSkill = "Skill"
+    public static let pickerModel = "Model"
+    public static let searchSkills = "Search skills"
+    public static let skillNotInstalled = "Not installed"
+    public static let defaultTag = "Default"
+    public static let otherModel = "Other model…"
+    public static let otherModelPrompt = "Model name"
+    public static let otherModelInvalid = "Starts with a letter or digit; letters, digits and . : _ / - only."
+    public static let startReview = "Start review"
+    public static let choose = "Choose…"
+    public static let tryAgain = "Try again"
+    public static let reviewBusy = "A review of this MR is queued or running: wait for it, or cancel it first."
+    public static let noModelsListed = "This CLI lists no models. Type a name under Other model…"
+    public static let noCli = "No model CLI is installed, so there are no models to list."
+    public static func noSkillsMatch(_ query: String) -> String {
+        "No skill matches “\(DisplayText.clean(query, max: 60))”."
+    }
+    /// "madhani-code-review with Opus", above Start review.
+    public static func reviewWithSummary(skill: String, model: String?) -> String {
+        "\(DisplayText.clean(skill, max: 80)) with \(model.map { DisplayText.clean($0, max: 60) } ?? cliDefaultModel)"
+    }
+    public static func pickerModels(for cli: String?) -> String { "Models of \(cliName(cli))" }
     public static let agentRereviewLabel = "Re-review"
     public static let rereviewNow = "Re-review"
     public static let readyToApprove = "Ready to approve: nothing serious left"
@@ -506,6 +533,8 @@ public enum Copy {
         case "cancelled": "Review cancelled."
         case "failed": "Posting failed. Check the MR in GitLab before posting again."
         case "bad-key": "This merge request key cannot be reviewed."
+        case "bad-skill": "That skill is not installed any more. Pick another one."
+        case "bad-model": "That model name cannot be used. Pick another one."
         default: "Nothing to do: the review changed in the meantime."
         }
     }
@@ -840,7 +869,6 @@ public enum Copy {
     public static let chooseFile = "Choose…"
     public static let showInFinder = "Show in Finder"
     public static let openInBrowser = "Open in browser"
-    public static let modelSuggestions = "Suggested models"
     public static let installed = "Installed"
     public static let notInstalledShort = "Not installed"
     public static let inUse = "In use"

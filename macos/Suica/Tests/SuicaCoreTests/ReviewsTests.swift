@@ -62,9 +62,18 @@ actor FakeReviewsClient: ReviewsClient {
     func setLists(_ next: [Result<ReviewListDocument, AgentError>]) { lists = next }
     func setActionResult(_ next: Result<ActionResult, AgentError>) { actionResult = next }
 
-    func queueAgentReview(key: String) async throws(AgentError) -> ActionResult {
-        actions.append("queue \(key)")
+    func queueAgentReview(key: String, choice: ReviewChoice) async throws(AgentError) -> ActionResult {
+        actions.append((["queue", key] + choice.arguments).joined(separator: " "))
         return try actionResult.get()
+    }
+
+    var optionResults: [Result<ReviewOptions, AgentError>] = []
+    private(set) var optionCalls: [String?] = []
+    func setOptionResults(_ next: [Result<ReviewOptions, AgentError>]) { optionResults = next }
+
+    func reviewOptions(cli: String?) async throws(AgentError) -> ReviewOptions {
+        optionCalls.append(cli)
+        return try (optionResults.isEmpty ? .failure(.launchFailed) : optionResults.removeFirst()).get()
     }
 
     func postAgentReview(id: Int, inline: Bool) async throws(AgentError) -> ActionResult {
@@ -796,4 +805,79 @@ private func tabbedList(me: Bool = true) throws -> ReviewListDocument {
     let pipeline = try JSONDecoder().decode(PipelineDetail.self, from: Data(json.utf8))
     #expect(pipeline.progress == (2, 2))
     #expect(pipeline.currentStage == nil && !pipeline.isActive)
+}
+
+// MARK: - Skill and model picker
+
+private func options() throws -> ReviewOptions {
+    try decodeDocument(ReviewOptions.self, from: contract("review-options.v1.json"))
+}
+
+@Test func reviewOptionsDecodeTheContract() throws {
+    let doc = try options()
+    #expect(doc.cli == "claude")
+    #expect(doc.defaults == ReviewOptions.Defaults(skill: "madhani:madhani-code-review", model: "sonnet"))
+    #expect(doc.skills.map(\.name) == ["madhani:madhani-code-review", "notes"])
+    #expect(doc.skills.first?.plugin == "madhani" && doc.skills.first?.missing == false)
+    #expect(doc.skills.first?.shortName == "madhani-code-review")
+    #expect(doc.models.map(\.name) == ["opus", "sonnet", "haiku"])
+    #expect(doc.model(named: "opus")?.label == "Opus")
+    let reviews = try decodeDocument(ReviewListDocument.self, from: contract("reviews.v1.json"))
+    #expect(reviews.mergeRequests.map { $0.agentReview?.skill } == ["madhani:madhani-code-review", nil])
+}
+
+@Test func skillSearchMatchesEveryWordInNameOrDescription() throws {
+    let doc = try options()
+    #expect(doc.skills(matching: "  ").count == 2)
+    #expect(doc.skills(matching: "TAKES notes").map(\.name) == ["notes"])
+    #expect(doc.skills(matching: "madhani review").map(\.name) == ["madhani:madhani-code-review"])
+    #expect(doc.skills(matching: "flutter").isEmpty)
+}
+
+@Test func aChoiceEqualToTheDefaultIsSentAsNoChoice() {
+    let defaults = ReviewOptions.Defaults(skill: "a:go", model: "sonnet")
+    #expect(ReviewChoice(skill: "a:go", model: "sonnet").relative(to: defaults) == ReviewChoice())
+    #expect(ReviewChoice(skill: "a:flutter", model: "sonnet").relative(to: defaults) == ReviewChoice(skill: "a:flutter"))
+    #expect(ReviewChoice(skill: "a:go", model: "opus").relative(to: defaults).arguments == ["--model", "opus"])
+    #expect(ReviewChoice(skill: "a:x", model: "opus").arguments == ["--skill", "a:x", "--model", "opus"])
+    #expect(ReviewChoice().arguments.isEmpty)
+}
+
+@Test func modelNamesAreCheckedLikeTheAgentDoes() {
+    #expect(ReviewChoice.isValidModel("claude-opus-5-5"))
+    #expect(ReviewChoice.isValidModel("gpt-6.1-sol"))
+    #expect(ReviewChoice.isValidModel("us.anthropic/x:1[1m]"))
+    #expect(!ReviewChoice.isValidModel("-x"))
+    #expect(!ReviewChoice.isValidModel(""))
+    #expect(!ReviewChoice.isValidModel("two words"))
+}
+
+@MainActor @Test func queueingWithAChoicePassesItOn() async throws {
+    let client = FakeReviewsClient(lists: [.success(list("g/p!7"))])
+    let model = ReviewsModel(client: client)
+    await model.queueAgentReview("g/p!7", choice: ReviewChoice(skill: "a:flutter", model: "opus"))
+    await model.queueAgentReview("g/p!7")
+    #expect(await client.actions == ["queue g/p!7 --skill a:flutter --model opus", "queue g/p!7"])
+    await client.setActionResult(.success(ActionResult(code: "bad-skill")))
+    await model.queueAgentReview("g/p!7", choice: ReviewChoice(skill: "gone"))
+    #expect(model.agentBanner == "That skill is not installed any more. Pick another one.")
+}
+
+@MainActor @Test func theOptionsLoaderKeepsTheLastGoodDocumentOnFailure() async throws {
+    let client = FakeReviewsClient(lists: [])
+    let doc = try options()
+    await client.setOptionResults([.success(doc), .failure(.launchFailed)])
+    let loader = ReviewOptionsLoader(client: client)
+    await loader.load()
+    #expect(loader.options == doc && loader.errorText == nil && !loader.loading)
+    await loader.load(cli: "codex")
+    #expect(loader.options == doc && loader.errorText != nil)
+    #expect(await client.optionCalls == [nil, "codex"])
+}
+
+@Test func theReviewMetaNamesTheSkill() {
+    #expect(
+        Copy.agentReviewMeta(cli: "claude", model: "opus", sha: "0123456789", skill: "a:go")
+            == "By Claude Code (opus), following a:go at commit 01234567")
+    #expect(Copy.agentReviewMeta(cli: "claude", model: nil, sha: nil) == "By Claude Code")
 }
