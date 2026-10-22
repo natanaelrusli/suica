@@ -10,17 +10,22 @@ Status: written from the Owner's request on 2026-10-22 ("Add an onboarding featu
 
 ## What it adds
 
-A **Set up Suica** sheet in the app window that a new user walks through once. It opens by itself when the window opens and the config file does not exist (_my call_: a missing file is the one sure sign of a first run; a file that exists but is broken goes to Configuration as before). **Set up Suica…** beside the "No config file yet" line in Configuration opens it again; it is not offered once the file exists, since the sheet creates the file and would conflict (_my call_).
+**Set up Suica**, which a new user walks through once. While the config file does not exist (_my call_: a missing file is the one sure sign of a first run; a file that exists but is broken goes to Configuration as before), every other command fails, so:
+
+- the window shows Set up Suica in place of its sidebar and pages: one card centred over the backdrop, no page errors (revised 2026-10-22 at the Owner's request; it was a sheet over pages full of "Can't reach the suica CLI" errors);
+- the menu bar popover shows only "Welcome to Suica" and **Set up Suica…**, which opens the window, in place of its status, counters, lists and errors.
+
+The app checks for the file when it starts, when the window opens and when the popover opens. Once setup ends, by **Done** or by a file written by hand, the window reloads every page so no error from the setup period is left (the Owner saw one stay on Merge requests).
 
 Steps, with **Back** and **Continue**:
 
 1. **Welcome**: what Suica does and what the next steps ask for.
 2. **GitLab**: the host after a fixed `https://` (a pasted URL keeps only its host, as in Configuration) and **Check connection**, which runs `suica gitlab check <host> --json`. It shows "Signed in as @user" or what to do: install glab (`brew install glab`), or sign in with `glab auth login --hostname <host>` (with a copy button), or that the host cannot be reached. **Continue** needs a host; a failed or skipped check does not block it (_my call_: glab can be fixed later and the agent reports it), but the step says the agent will fail until it passes.
-3. **Coding agent**: the same Auto / Claude Code / Codex / Gemini CLI cards as Configuration, showing which are installed (from `suica status --json`). Default Auto.
+3. **Coding agent**: Auto, Claude Code, Codex and Gemini CLI as a list, one row each with an icon, what it does here and an Installed / Not installed badge (from `suica status --json`); Auto is marked Recommended and names the CLI it would use. Picking one that is not installed is allowed, with a warning under the list. Default Auto. (Revised at the Owner's request: the Configuration cards were cramped in the card and showed "In use" twice.)
 4. **Teams**: one switch, off by default, for `teams.enabled`, with what it needs (the Teams MCP at `teams.command`) and which messages wait for approval by default (nudges and most notices) and which go out at once (the findings and approved notices). Everything else about Teams stays in Configuration (_my call_).
-5. **Finish**: a summary, then **Save and start agent**: writes the file with `suica config set --json` (`baseSha256: null`, so an existing file is never overwritten), then runs `suica agent install --json`. Only keys that differ from the default are written (`gitlab.hostname` always; `model.cli` unless Auto; `teams.enabled` only when on). On success the sheet says the agent is running and **Done** closes it and refreshes the window; a refused save or a failed install is shown in the sheet, with the agent's message, and the user can go back or retry.
+5. **Finish**: a summary, then **Save and start agent**: writes the file with `suica config set --json` (`baseSha256: null`, so an existing file is never overwritten), then runs `suica agent install --json`. Only keys that differ from the default are written (`gitlab.hostname` always; `model.cli` unless Auto; `teams.enabled` only when on). On success it says the agent is running and **Done** brings back the pages, reloaded; a refused save or a failed install is shown on the card, with the agent's message, and the user can go back or retry.
 
-Closing the sheet early (**Not now**) writes nothing; it opens again the next time the window opens while there is still no config file.
+Closing the window part way writes nothing; setup is still there, at the same step, the next time it opens.
 
 ## CLI
 
@@ -34,5 +39,5 @@ Closing the sheet early (**Not now**) writes nothing; it opens again the next ti
 ## Left out
 
 - No step for Agent Review, Agent Fix, polling or working hours: their defaults work, and Configuration covers them.
-- No re-run of the sheet over an existing config file, and no "Install agent" button for a config that exists without an agent (Overview already says the agent is not installed).
+- No re-run of Set up Suica over an existing config file, and no "Install agent" button for a config that exists without an agent (Overview already says the agent is not installed).
 - No change to the menu bar popover.

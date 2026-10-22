@@ -5,7 +5,6 @@ import SwiftUI
 struct ConfigurationView: View {
     let window: WindowModel
     let editor: ConfigEditorModel
-    let onboarding: OnboardingModel
     /// For the installed skills and the models that Review skill and Review model are picked from.
     let reviews: ReviewsModel
     let navigator: Navigator
@@ -87,11 +86,7 @@ struct ConfigurationView: View {
         }
         if let text = window.banner { NoticeBox(text: text, tint: .secondary, onClose: window.dismissBanner) }
         if !document.exists {
-            HStack {
-                Label(Copy.configMissing, systemImage: "doc.badge.plus").foregroundStyle(.secondary)
-                Spacer()
-                Button(Copy.setupOpen) { Task { await onboarding.open() } }
-            }
+            Label(Copy.configMissing, systemImage: "doc.badge.plus").foregroundStyle(.secondary)
         }
         if !document.issues.isEmpty { issues(document.issues) }
     }

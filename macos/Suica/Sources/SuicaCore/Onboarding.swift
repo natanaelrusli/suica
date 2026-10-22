@@ -24,10 +24,14 @@ public enum OnboardingStep: Int, CaseIterable, Sendable {
     case welcome, gitlab, codingAgent, teams, finish
 }
 
-/// The Set up Suica sheet: a few answers that become the first config file, then the agent starts.
+/// Set up Suica: a few answers that become the first config file, then the agent starts. While
+/// there is no config file the window and the menu bar panel show it in place of their pages, whose
+/// commands all fail without one.
 @MainActor @Observable
 public final class OnboardingModel {
-    public var presented = false
+    /// No config file yet, as last checked. False until a check says so, and while the agent
+    /// cannot be reached, which says nothing about a first run.
+    public private(set) var needsSetup = false
     public private(set) var step: OnboardingStep = .welcome
     /// What the host box holds; `host` is what gets written.
     public var hostText = "" {
@@ -66,19 +70,20 @@ public final class OnboardingModel {
         return ModelCliStatus(selected: modelCli, active: active?.id, clis: clis)
     }
 
-    /// Opens the sheet when there is no config file yet, the one sure sign of a first run. A file
-    /// that exists but does not load is Configuration's to fix.
-    public func showIfNeeded() async {
-        guard let document = try? await dashboard.config(), !document.exists else { return }
-        await open()
+    /// A missing config file is the one sure sign of a first run. A file that exists but does not
+    /// load is Configuration's to fix. Answers typed before a check are kept.
+    public func checkNeeded() async {
+        // The sheet's own "you're all set" stays until Done, whatever the file says now.
+        guard !finished, let document = try? await dashboard.config() else { return }
+        needsSetup = !document.exists
+        if needsSetup, let status = try? await dashboard.status() { detectedClis = status.modelCli?.clis }
     }
 
-    /// Opens the sheet from its first step; nothing typed before is lost.
-    public func open() async {
+    /// Done on the last step: the window and the panel go back to their pages.
+    public func complete() {
+        needsSetup = false
+        finished = false
         step = .welcome
-        failure = nil
-        presented = true
-        if let status = try? await dashboard.status() { detectedClis = status.modelCli?.clis }
     }
 
     public var canContinue: Bool { step != .gitlab || !host.isEmpty }
