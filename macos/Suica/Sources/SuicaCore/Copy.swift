@@ -897,7 +897,7 @@ public enum Copy {
     public static let officeSending = "The agent is answering…"
     public static let officeBusyHint = "The agent is working: send when it waits for you or is idle."
     public static let officeSendHint =
-        "Return sends, ⌥Return adds a line. The agent runs one turn with your own settings; a terminal that still has this session open sees it only after resuming."
+        "Return sends, ⌥Return adds a line. One turn runs with your own settings; an open terminal sees it after resuming."
 
     /// The line under the message field when a message was not sent.
     public static func officeSendOutcome(_ code: String) -> String {

@@ -576,7 +576,7 @@ struct OfficeChatPanel: View {
             if let notice, !(busy && notice == Copy.officeBusyHint) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-                    Text(notice).fixedSize(horizontal: false, vertical: true)
+                    Text(notice).lineLimit(3)
                     Spacer(minLength: 0)
                     Button(action: dismissNotice) { Image(systemName: "xmark") }
                         .buttonStyle(.borderless)
@@ -618,7 +618,10 @@ struct OfficeChatPanel: View {
             }
             .font(.caption2)
             .foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
+            // Never `fixedSize(vertical:)` here: wrapped text that sizes its own height feeds back
+            // into the inspector column while it animates open, and AppKit aborts the constraint
+            // loop (crashed the app on every click of a figure).
+            .lineLimit(3)
         }
     }
 
