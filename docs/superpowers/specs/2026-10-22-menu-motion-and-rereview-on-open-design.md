@@ -5,10 +5,13 @@ Status: asked by the Owner on 2026-10-22 ("Make the menubar menu opens and close
 ## Menu bar panel motion
 
 - **What was there.** The `MenuBarExtra` panel (`.window` style) appears and disappears in one frame: its `NSPanel` has `animationBehavior` `.default`, which animates nothing for this panel. Measured in a scratch app that clicks its own status item: with `.utilityWindow` AppKit fades the panel out on close (about 160 ms) but still does nothing on open; `.alertPanel` animates the opening only, with a bounce (about 400 ms); `.documentWindow` animates the closing only.
-- **Close.** The panel gets `.utilityWindow`, so AppKit fades it out.
-- **Open.** `MenuPanelMotion` sets the panel's `alphaValue` to 0 and animates it to 1 (200 ms ease-out; 120 ms with **Fades only**). It runs when the view first moves into the panel (the first opening) and when the panel becomes key while its occlusion state is not yet visible (each later opening; `isVisible` is already true at that point, so it cannot tell). A panel that becomes key while on screen is left alone.
-- **Content.** With full motion the content also drops 8 pt into place (`.smooth`, 300 ms). _My call_: an offset only, no scale, since a scale re-lays out the lists' AppKit views every frame. A `keyframeAnimator` was tried first and left the panel blank; a state-driven offset works.
-- **Animation levels.** Full: fade and drop. Fades only: shorter fade, no drop. Off: `animationBehavior` `.none` and no fade.
+- **Revised the same day.** The Owner asked for it smoother, with the panel's background growing out of the menu bar icon and shrinking back into it, not only the content. The first version (a fade plus an 8 pt drop of the content) is replaced by the following.
+- **What is scaled.** The panel is drawn by its frame view's layer (the material background and the SwiftUI content together), so that layer is scaled. It is made layer-backed when it has no layer yet (the first opening). _My call_: a layer transform, not an animated window frame, which would lay the lists out again on every frame.
+- **Open.** The layer grows from 10% to full size around the middle of the menu bar icon on the panel's top edge, with a spring (stiffness 260, damping 28: settles in about half a second with a barely visible overshoot), and fades in over 180 ms.
+- **Close.** SwiftUI hides the panel with `order(.out, relativeTo:)` at once, so the panel's class gets a hook that holds the hide back while the layer shrinks into the icon and fades (220 ms, ease in), then hides it. A reopening during the shrink (`makeKeyAndOrderFront`, hooked too) cancels the hide and grows from where the shrink was.
+- **Hooks.** The panel is already wrapped by AppKit's key-value observing subclass, and a further runtime subclass crashed in a scratch app, so the two methods are added to the panel's own SwiftUI class (`MenuBarExtraWindow`), once, calling NSWindow's implementations. Only menu bar panels of this app are affected.
+- **Shadow.** The window shadow is drawn for the full-size panel, so it is off while the panel grows or shrinks and comes back once it has settled.
+- **Animation levels.** Full: grow and shrink. Fades only: a 150 ms fade in, AppKit's utility-window fade out. Off: shown and hidden at once.
 
 ## Re-reviews on open
 
@@ -22,4 +25,4 @@ Status: asked by the Owner on 2026-10-22 ("Make the menubar menu opens and close
 
 - Swift: `ReviewsModel.runWaitingRereviews` queues only `waiting` MRs, with `--auto`, shows the `daily-cap` outcome, and does nothing when the list cannot be read.
 - CLI: `suica review queue --auto` queues an `auto` row and refuses with `daily-cap` once `review.maxPerDay` is reached.
-- The panel motion was measured in a scratch `MenuBarExtra` app (alpha over time on first and later openings, captured frames); there is no automated test for it.
+- The panel motion was measured in a scratch `MenuBarExtra` app that clicks its own status item: the layer's scale, offset and opacity over time on the first opening, a later opening, a close and a reopening during the shrink, with captured frames. There is no automated test for it.
