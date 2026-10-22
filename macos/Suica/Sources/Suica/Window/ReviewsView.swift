@@ -375,6 +375,16 @@ private struct DetailTabBar: View {
     @Environment(\.motionLevel) private var motion
 
     var body: some View {
+        // In a page too narrow for every tab, the tabs scroll sideways instead of wrapping.
+        ViewThatFits(in: .horizontal) {
+            row
+            ScrollView(.horizontal, showsIndicators: false) { row }.fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 20)
+        .overlay(alignment: .bottom) { Divider() }
+    }
+
+    private var row: some View {
         HStack(spacing: 22) {
             ForEach(tabs, id: \.tab) { item in
                 let selected = item.tab == selection
@@ -414,8 +424,7 @@ private struct DetailTabBar: View {
             }
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 20)
-        .overlay(alignment: .bottom) { Divider() }
+        .lineLimit(1)
     }
 }
 
@@ -614,10 +623,17 @@ private struct MergeRequestDetailView: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 10) {
             if collapsed {
-                HStack(spacing: 12) {
-                    title.font(.headline).lineLimit(1).truncationMode(.tail)
-                    Spacer(minLength: 12)
-                    actions
+                // The title keeps some room beside the actions; below that the actions go under it.
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 12) {
+                        title.font(.headline).lineLimit(1).truncationMode(.tail)
+                            .frame(minWidth: 160, idealWidth: 160, maxWidth: .infinity, alignment: .leading)
+                        actions.fixedSize()
+                    }
+                    VStack(alignment: .leading, spacing: 8) {
+                        title.font(.headline).lineLimit(1).truncationMode(.tail)
+                        actions
+                    }
                 }
             } else {
                 title.font(.title2.weight(.semibold))
@@ -627,7 +643,7 @@ private struct MergeRequestDetailView: View {
                     HStack(spacing: 12) {
                         facts
                         Spacer(minLength: 12)
-                        actions
+                        actions.fixedSize()
                     }
                     VStack(alignment: .leading, spacing: 8) {
                         facts
@@ -679,8 +695,11 @@ private struct MergeRequestDetailView: View {
         WhileLoading(model: model, key: detail.key) { loading in actions(loading: loading) }
     }
 
+    /// Both pages' actions: yours (Merge, fixes, watching, Close) or a review's (Approve, Review
+    /// with agent), then Message on Teams, Open in GitLab and reload. They wrap onto more lines
+    /// when the page is too narrow for one.
     private func actions(loading: Bool) -> some View {
-        HStack(spacing: 8) {
+        FlowRow(spacing: 8) {
             if yours {
                 let availability = mergeAvailability(detail)
                 Button { merging = true } label: {
@@ -768,7 +787,7 @@ private struct MergeRequestDetailView: View {
             .accessibilityLabel(Copy.reload)
             .disabled(loading)
         }
-        .fixedSize()
+        .lineLimit(1)
     }
 
     /// Branches, pipeline, squash, size, labels and Reviewers, wrapping when the row is full.
@@ -780,6 +799,7 @@ private struct MergeRequestDetailView: View {
             )
             .font(.caption.monospaced())
             .foregroundStyle(.secondary)
+            .truncationMode(.middle)
             .padding(.horizontal, 8)
             .padding(.vertical, 3)
             .background(.quaternary.opacity(0.6), in: Capsule())
@@ -811,6 +831,7 @@ private struct MergeRequestDetailView: View {
                 }
             }
         }
+        .lineLimit(1)
     }
 
     private func blockedReason(_ availability: MergeAvailability) -> String? {
@@ -860,7 +881,8 @@ enum ReviewTint {
     }
 }
 
-/// Lays children out left to right and wraps to a new line when the row is full.
+/// Lays children out left to right and wraps to a new line when the row is full; a child wider
+/// than the row is cut to the row's width.
 private struct FlowRow: Layout {
     var spacing: CGFloat = 6
 
@@ -876,7 +898,7 @@ private struct FlowRow: Layout {
         for row in arrange(width: bounds.width, subviews: subviews) {
             var x = bounds.minX
             for index in row.indices {
-                let size = subviews[index].sizeThatFits(.unspecified)
+                let size = size(of: subviews[index], width: bounds.width)
                 subviews[index].place(
                     at: CGPoint(x: x, y: y + (row.height - size.height) / 2), proposal: ProposedViewSize(size))
                 x += size.width + spacing
@@ -895,7 +917,7 @@ private struct FlowRow: Layout {
         var rows: [Row] = []
         var current = Row()
         for index in subviews.indices {
-            let size = subviews[index].sizeThatFits(.unspecified)
+            let size = size(of: subviews[index], width: width)
             let needed = current.indices.isEmpty ? size.width : current.width + spacing + size.width
             if needed > width, !current.indices.isEmpty {
                 rows.append(current)
@@ -907,6 +929,12 @@ private struct FlowRow: Layout {
         }
         if !current.indices.isEmpty { rows.append(current) }
         return rows
+    }
+
+    /// Only the width is capped, so a child should truncate to one line (see `lineLimit`).
+    private func size(of subview: LayoutSubview, width: CGFloat) -> CGSize {
+        let natural = subview.sizeThatFits(.unspecified)
+        return CGSize(width: min(natural.width, max(width, 0)), height: natural.height)
     }
 }
 
