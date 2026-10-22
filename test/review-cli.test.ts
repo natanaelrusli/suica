@@ -72,6 +72,15 @@ describe("suica review options and queue", () => {
       configPath,
       `gitlab:\n  hostname: h\nstatePath: ${statePath}\nreview:\n  maxPerDay: 1\n`,
     );
+    // Pushes the agent tracks and has not queued a re-review for yet.
+    const seeded = openStore(statePath);
+    seeded.saveReviewHeads(
+      new Map([
+        ["g/p!7", { head: "b7", changedAt: 1, queuedHead: "a7" }],
+        ["g/p!8", { head: "b8", changedAt: 1, queuedHead: "a8" }],
+      ]),
+    );
+    seeded.close();
     const reply = (key: string) => suica(["review", "queue", key, "--auto", "--json"]);
     expect(reply("g/p!7")).toEqual({ status: 0, line: '{"status":"queued"}' });
     expect(reply("g/p!8")).toEqual({ status: 1, line: '{"status":"daily-cap"}' });
@@ -80,5 +89,40 @@ describe("suica review options and queue", () => {
     const queued = store.agentReviewActivity().queued;
     store.close();
     expect(queued.map((row) => [row.mrKey, row.trigger])).toEqual([["g/p!7", "auto"]]);
-  });
+  }, 20_000);
+
+  it("does not queue with --auto a head the agent already queued or a review covers", () => {
+    const store = openStore(statePath);
+    const posted = (key: string, head: string): void => {
+      const id = store.queueAgentReview(key, "auto", 1, undefined) ?? 0;
+      store.transitionAgentReview(id, ["queued"], "running", {}, 1);
+      store.transitionAgentReview(id, ["running"], "ready", { headSha: head }, 1);
+      store.transitionAgentReview(id, ["ready"], "posting", {}, 1);
+      store.transitionAgentReview(id, ["posting"], "posted", {}, 1);
+    };
+    // !1: the agent queued its head itself; !2: a review is posted at its head; !3: a push after
+    // the posted review that the agent has not queued yet; !4: never tracked by the agent.
+    posted("g/p!1", "a1");
+    posted("g/p!2", "a2");
+    posted("g/p!3", "a3");
+    store.saveReviewHeads(
+      new Map([
+        ["g/p!1", { head: "b1", changedAt: 1, queuedHead: "b1" }],
+        ["g/p!2", { head: "a2", changedAt: 1, queuedHead: "" }],
+        ["g/p!3", { head: "b3", changedAt: 1, queuedHead: "" }],
+      ]),
+    );
+    store.close();
+
+    const reply = (key: string) => suica(["review", "queue", key, "--auto", "--json"]);
+    expect(reply("g/p!1")).toEqual({ status: 0, line: '{"status":"covered"}' });
+    expect(reply("g/p!2")).toEqual({ status: 0, line: '{"status":"covered"}' });
+    expect(reply("g/p!4")).toEqual({ status: 0, line: '{"status":"covered"}' });
+    expect(reply("g/p!3")).toEqual({ status: 0, line: '{"status":"queued"}' });
+    // Pressed by hand, a review is queued whatever the agent tracked.
+    expect(suica(["review", "queue", "g/p!1", "--json"])).toEqual({
+      status: 0,
+      line: '{"status":"queued"}',
+    });
+  }, 20_000);
 });

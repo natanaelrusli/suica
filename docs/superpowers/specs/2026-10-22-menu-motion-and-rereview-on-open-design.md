@@ -21,8 +21,16 @@ Status: asked by the Owner on 2026-10-22 ("Make the menubar menu opens and close
 - **Head tracking.** Unchanged: a review queued between polls is seen by the next poll as queued, then ready or posted at the head, and `planRereviews` marks the head as queued, as it does for **Re-review** pressed by hand.
 - **Trade-off.** _Accepted by the Owner_: a push followed by more pushes within the wait can be re-reviewed early, at the head the app saw, if the app is opened in between; the later push is then re-reviewed after its own wait.
 
+## Fix: a re-review queued twice, and a posted review hidden by a skip
+
+Found on 2026-10-22 with monorepo-ess-backend!211 and super-apps-contracts!67, which stayed on **Waiting** after their re-reviews were posted.
+
+- **Race.** The app read the list while both re-reviews still waited, the background agent queued and posted them (reviews 106 and 107), and the app then queued its own (108 and 109). Those were skipped as "this commit was already reviewed". Now `suica review queue --auto` answers `covered` and queues nothing when the agent's head tracking for the MR is missing, already marks its head as queued, or the newest review is ready, being posted or posted at that head (`coversHead`). A push the agent tracks and has not queued yet is still queued at once. Pressed by hand (no `--auto`), a review is queued as before.
+- **Waiting.** The list's `agentReview` is the newest run, so a skipped or failed run after a posted review made the MR look unreviewed. `suica reviews --json` adds `agentReviewPosted` (the newest posted-or-discarded review was posted, the same base as `changedSinceReview`), and an MR you have not reviewed leaves **Waiting** when it is true and the MR has not changed since. A discard still brings the MR back to **Waiting**.
+
 ## Tests
 
 - Swift: `ReviewsModel.runWaitingRereviews` queues only `waiting` MRs, with `--auto`, shows the `daily-cap` outcome, and does nothing when the list cannot be read.
-- CLI: `suica review queue --auto` queues an `auto` row and refuses with `daily-cap` once `review.maxPerDay` is reached.
+- CLI: `suica review queue --auto` queues an `auto` row, refuses with `daily-cap` once `review.maxPerDay` is reached, and answers `covered` for an untracked head, a head the agent queued and a head a posted review covers.
+- List: `agentReviewPosted` is true behind a later skipped run and false after a discard or without a review; the app files such an MR under **Reviewed**.
 - The panel motion was measured in a scratch `MenuBarExtra` app that clicks its own status item: the layer's scale, offset and opacity over time on the first opening, a later opening, a close and a reopening during the shrink, with captured frames. There is no automated test for it.

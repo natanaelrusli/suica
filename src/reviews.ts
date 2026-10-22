@@ -110,6 +110,11 @@ export interface ReviewSummaryJson {
    */
   readonly changedSinceReview: ChangedSinceReviewJson | null;
   /**
+   * True when the newest posted-or-discarded Agent Review was posted, so the MR was reviewed by the
+   * agent even when a later run failed or was skipped (`agentReview` shows only the newest run).
+   */
+  readonly agentReviewPosted: boolean;
+  /**
    * True when the newest posted Agent Review is ready to approve, by the approval judge's verdict
    * or else by `review.approveWhen` (by default only Minor or Nit problems left), the MR has not
    * changed since, no newer review is open, and neither the Owner nor the agent approved it yet.
@@ -271,6 +276,7 @@ export function buildReviewList(
         agentReview: latest === undefined ? null : toAgentReviewJson(latest),
         // Once you approved, a change is yours to look at; the list stops offering a re-review.
         changedSinceReview: approvedByMe ? null : changedSinceReview(mr, latest, bases.get(mr.key)),
+        agentReviewPosted: bases.get(mr.key)?.status === "posted",
         readyToApprove: readyToApprove(mr, snapshot.me, latest, bases.get(mr.key), approveWhen),
         rereviewWaiting: rereviewWaiting.get(mr.key) ?? null,
       };

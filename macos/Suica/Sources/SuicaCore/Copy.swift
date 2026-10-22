@@ -536,6 +536,7 @@ public enum Copy {
         case "bad-skill": "That skill is not installed any more. Pick another one."
         case "bad-model": "That model name cannot be used. Pick another one."
         case "daily-cap": "Not queued: automatic reviews reached review.maxPerDay for today."
+        case "covered": "Not queued: the agent already queued or reviewed this commit."
         default: "Nothing to do: the review changed in the meantime."
         }
     }
