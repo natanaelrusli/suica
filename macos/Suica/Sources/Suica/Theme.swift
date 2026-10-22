@@ -31,6 +31,21 @@ extension AppearanceSettings {
     var accent: Color? { accentHex.map(Color.init(hex:)) }
 }
 
+extension AppIconStyle {
+    var palette: AppIconArt.Palette {
+        switch self {
+        case .classic: .classic
+        case .watermelon: .watermelon
+        case .sunset: .sunset
+        case .midnight: .midnight
+        case .mono: .mono
+        }
+    }
+
+    /// The Dock icon: nil keeps the bundle's own, which is the classic one.
+    var dockImage: NSImage? { self == .classic ? nil : AppIconArt.image(palette) }
+}
+
 extension AppearanceMode {
     var colorScheme: ColorScheme? {
         switch self {
@@ -58,10 +73,11 @@ struct Metrics: Equatable {
 
 extension EnvironmentValues {
     @Entry var metrics: Metrics = .comfortable
+    @Entry var iconStyle: IconStyle = .colorful
 }
 
-/// Applies the Appearance choices to a scene's content: accent colour, light or dark, density and
-/// the animation level (capped by the system's Reduce Motion).
+/// Applies the Appearance choices to a scene's content: accent colour, light or dark, density, icon
+/// style, the animation level (capped by the system's Reduce Motion) and the Dock icon.
 struct AppearanceRoot: ViewModifier {
     let settings: AppearanceSettings
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
@@ -72,6 +88,9 @@ struct AppearanceRoot: ViewModifier {
             .preferredColorScheme(settings.mode.colorScheme)
             .environment(\.metrics, Metrics.of(settings.density))
             .environment(\.motionLevel, settings.motion.effective(systemReduceMotion: systemReduceMotion))
+            .environment(\.iconStyle, settings.iconStyle)
+            // Both scenes carry this modifier; setting the same icon twice is harmless.
+            .onChange(of: settings.appIcon, initial: true) { _, icon in NSApp.applicationIconImage = icon.dockImage }
     }
 }
 
@@ -79,19 +98,38 @@ extension View {
     func appearance(_ settings: AppearanceSettings) -> some View { modifier(AppearanceRoot(settings: settings)) }
 }
 
-/// A white symbol on a coloured rounded square, as in System Settings' sidebar.
+/// A symbol on a rounded square, as in System Settings' sidebar, drawn in Appearance's icon style:
+/// white on its colour, its colour on a pale tile, white on the accent colour or grey.
 struct SidebarIcon: View {
     let symbol: String
     let tint: Color
     var size: CGFloat = 20
+    @Environment(\.iconStyle) private var style
 
     var body: some View {
         Image(systemName: symbol)
             .font(.system(size: size * 0.55, weight: .semibold))
-            .foregroundStyle(.white)
+            .foregroundStyle(glyph)
             .frame(width: size, height: size)
-            .background(tint.gradient, in: RoundedRectangle(cornerRadius: size * 0.26))
+            .background(tile, in: RoundedRectangle(cornerRadius: size * 0.26))
             .accessibilityHidden(true)
+    }
+
+    private var glyph: AnyShapeStyle {
+        switch style {
+        case .colorful, .accent: AnyShapeStyle(.white)
+        case .tinted: AnyShapeStyle(tint)
+        case .monochrome: AnyShapeStyle(.secondary)
+        }
+    }
+
+    private var tile: AnyShapeStyle {
+        switch style {
+        case .colorful: AnyShapeStyle(tint.gradient)
+        case .tinted: AnyShapeStyle(tint.opacity(0.18))
+        case .accent: AnyShapeStyle(.tint)
+        case .monochrome: AnyShapeStyle(Color.primary.opacity(0.09))
+        }
     }
 }
 

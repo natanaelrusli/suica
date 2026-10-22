@@ -104,6 +104,30 @@ public enum MenuBarIcon: String, CaseIterable, Identifiable, Sendable {
     public var title: String { Copy.title(self) }
 }
 
+/// How the coloured icons in the sidebar, tiles and cards are drawn.
+public enum IconStyle: String, CaseIterable, Identifiable, Sendable {
+    /// A white symbol on a tile in the icon's own colour, as in System Settings.
+    case colorful
+    /// The symbol in the icon's colour on a pale tile of that colour.
+    case tinted
+    /// Every tile in the accent colour.
+    case accent
+    /// Grey tiles and symbols: no colour at all.
+    case monochrome
+    public var id: String { rawValue }
+
+    public var title: String { Copy.title(self) }
+}
+
+/// The app icon in the Dock and the app switcher while the window is open.
+public enum AppIconStyle: String, CaseIterable, Identifiable, Sendable {
+    /// The penguin on an ice-blue tile: the icon the app is installed with.
+    case classic, watermelon, sunset, midnight, mono
+    public var id: String { rawValue }
+
+    public var title: String { Copy.title(self) }
+}
+
 /// The soft wash behind the window's pages and the popover header.
 public enum Backdrop: String, CaseIterable, Identifiable, Sendable {
     case plain, wash, sunrise, lagoon, watermelon, aurora
@@ -234,12 +258,16 @@ public enum AppearancePreset: String, CaseIterable, Identifiable, Sendable {
             settings.mode = .system
             settings.backdrop = .wash
             settings.menuBarIcon = .penguin
+            settings.iconStyle = .colorful
+            settings.appIcon = .classic
             settings.celebrations = true
             settings.sound = .off
         case .watermelonParty:
             settings.theme = .watermelon
             settings.backdrop = .watermelon
             settings.menuBarIcon = .watermelon
+            settings.iconStyle = .colorful
+            settings.appIcon = .watermelon
             settings.motion = .full
             settings.celebrations = true
             settings.sound = .pop
@@ -247,12 +275,14 @@ public enum AppearancePreset: String, CaseIterable, Identifiable, Sendable {
             settings.theme = .grape
             settings.mode = .dark
             settings.backdrop = .aurora
+            settings.appIcon = .midnight
             settings.celebrations = true
             settings.sound = .purr
         case .sunrise:
             settings.theme = .tangerine
             settings.mode = .light
             settings.backdrop = .sunrise
+            settings.appIcon = .sunset
             settings.celebrations = true
             settings.sound = .glass
         case .zen:
@@ -261,6 +291,8 @@ public enum AppearancePreset: String, CaseIterable, Identifiable, Sendable {
             settings.density = .compact
             settings.motion = .reduced
             settings.menuBarBadge = .dot
+            settings.iconStyle = .monochrome
+            settings.appIcon = .mono
             settings.celebrations = false
             settings.sound = .off
         }
@@ -303,6 +335,8 @@ public final class AppearanceSettings {
         }
     }
     public var backdrop: Backdrop { didSet { store(backdrop.rawValue, Key.backdrop) } }
+    public var iconStyle: IconStyle { didSet { store(iconStyle.rawValue, Key.iconStyle) } }
+    public var appIcon: AppIconStyle { didSet { store(appIcon.rawValue, Key.appIcon) } }
     /// Confetti when you send, approve or reach inbox zero.
     public var celebrations: Bool { didSet { defaults.set(celebrations, forKey: Key.celebrations) } }
     public var sound: SoundEffect { didSet { store(sound.rawValue, Key.sound) } }
@@ -334,6 +368,8 @@ public final class AppearanceSettings {
         static let icon = "appearance.menuBarIcon"
         static let emoji = "appearance.menuBarEmoji"
         static let backdrop = "appearance.backdrop"
+        static let iconStyle = "appearance.iconStyle"
+        static let appIcon = "appearance.appIcon"
         static let celebrations = "appearance.celebrations"
         static let sound = "appearance.sound"
         static let officeStyle = "appearance.officeStyle"
@@ -346,7 +382,7 @@ public final class AppearanceSettings {
         static let all = [
             theme, mode, density, motion, badge, counters, start, customAccent, icon, emoji, backdrop, celebrations,
             sound, officeStyle, officeEnvironment, officeTimeOfDay, officeBubbles, officeStreetLife, officeSlowTurn,
-            officeBoss,
+            officeBoss, iconStyle, appIcon,
         ]
     }
 
@@ -364,6 +400,8 @@ public final class AppearanceSettings {
         static let icon = MenuBarIcon.penguin
         static let emoji = "🍉"
         static let backdrop = Backdrop.wash
+        static let iconStyle = IconStyle.colorful
+        static let appIcon = AppIconStyle.classic
         static let celebrations = true
         static let sound = SoundEffect.off
         static let officeStyle = OfficeStyle.modern
@@ -395,6 +433,8 @@ public final class AppearanceSettings {
         menuBarIcon = read(Key.icon, Default.icon)
         menuBarEmoji = Self.oneEmoji(defaults.string(forKey: Key.emoji) ?? Default.emoji)
         backdrop = read(Key.backdrop, Default.backdrop)
+        iconStyle = read(Key.iconStyle, Default.iconStyle)
+        appIcon = read(Key.appIcon, Default.appIcon)
         celebrations = defaults.object(forKey: Key.celebrations) as? Bool ?? Default.celebrations
         sound = read(Key.sound, Default.sound)
         officeStyle = read(Key.officeStyle, Default.officeStyle)
@@ -418,7 +458,8 @@ public final class AppearanceSettings {
         theme == Default.theme && mode == Default.mode && density == Default.density && motion == Default.motion
             && menuBarBadge == Default.badge && showsPopoverCounters == Default.counters
             && startPage == Default.start && customAccent == Default.customAccent && menuBarIcon == Default.icon
-            && menuBarEmoji == Default.emoji && backdrop == Default.backdrop && celebrations == Default.celebrations
+            && menuBarEmoji == Default.emoji && backdrop == Default.backdrop && iconStyle == Default.iconStyle
+            && appIcon == Default.appIcon && celebrations == Default.celebrations
             && sound == Default.sound && officeStyle == Default.officeStyle
             && officeEnvironment == Default.officeEnvironment && officeTimeOfDay == Default.officeTimeOfDay
             && officeBubbles == Default.officeBubbles && officeStreetLife == Default.officeStreetLife
@@ -438,6 +479,8 @@ public final class AppearanceSettings {
         menuBarIcon = Default.icon
         menuBarEmoji = Default.emoji
         backdrop = Default.backdrop
+        iconStyle = Default.iconStyle
+        appIcon = Default.appIcon
         celebrations = Default.celebrations
         sound = Default.sound
         officeStyle = Default.officeStyle

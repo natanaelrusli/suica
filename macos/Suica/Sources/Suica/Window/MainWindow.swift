@@ -240,7 +240,11 @@ struct MainWindow: View {
             // Opened from the Dock or Open Suica…: the start page. From the popover or Go menu: theirs.
             if navigator.selection == nil { navigator.selection = current }
             NSApp.setActivationPolicy(.regular)
-            NSApp.activate()
+            // The app is usually active already (the popover or a link brought it forward), and a
+            // plain `activate()` is then a no-op: the system never records the newly regular app as
+            // frontmost, so ⌘Tab lists it last, behind every other app, until it is activated again
+            // from outside. Forcing the activation records it.
+            NSApp.activate(ignoringOtherApps: true)
         }
         .onDisappear {
             navigator.selection = nil

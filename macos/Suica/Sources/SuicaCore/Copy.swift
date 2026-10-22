@@ -1345,6 +1345,29 @@ public enum Copy {
         case .zen: "Zen"
         }
     }
+    public static func title(_ value: IconStyle) -> String {
+        switch value {
+        case .colorful: "Colourful"
+        case .tinted: "Tinted"
+        case .accent: "Accent"
+        case .monochrome: "Monochrome"
+        }
+    }
+    public static func title(_ value: AppIconStyle) -> String {
+        switch value {
+        case .classic: "Classic"
+        case .watermelon: "Watermelon"
+        case .sunset: "Sunset"
+        case .midnight: "Midnight"
+        case .mono: "Mono"
+        }
+    }
+    public static let iconsHeading = "Icons"
+    public static let iconStylePicker = "Icon style"
+    public static let iconStyleHint = "How the icons in the sidebar, tiles and cards are coloured."
+    public static let appIconPicker = "App icon"
+    public static let appIconHint =
+        "Shown in the Dock and the app switcher while this window is open. Finder keeps the classic icon."
     public static let presetsHeading = "Presets"
     public static let presetsHint = "One click sets several choices below; change any of them afterwards."
     public static let customColor = "Your colour"
