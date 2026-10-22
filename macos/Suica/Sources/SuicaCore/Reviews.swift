@@ -222,19 +222,26 @@ public struct ReviewListDocument: Codable, Equatable, Sendable {
         return mr.reviewers.first { $0.username == me.username }?.state
     }
 
+    /// The MR still needs the Owner, drafts aside: it changed since the agent's posted review, or
+    /// neither the Owner nor a posted Agent Review covered it yet. Never once the Owner approved it,
+    /// and always without `me`.
+    public func isWaiting(_ mr: ReviewSummary) -> Bool {
+        guard me != nil else { return true }
+        let state = myState(mr) ?? "UNREVIEWED"
+        if state == "APPROVED" { return false }
+        if mr.changedSinceReview != nil { return true }
+        return state == "UNREVIEWED" && mr.agentReview?.status != "posted"
+    }
+
     /// The list as the page shows it: non-empty groups in `ReviewGroup` order, each in GitLab's
-    /// order. A non-draft MR waits for the Owner while the Owner's state is UNREVIEWED, the rule
-    /// the menu bar badge uses; once the Owner approved it, it is approved, else reviewed. Without
-    /// `me` nothing can be told apart, so every MR is in `all`.
+    /// order. A non-draft MR is in `waiting` while `isWaiting`; once the Owner approved it, it is
+    /// approved, else reviewed. Without `me` nothing can be told apart, so every MR is in `all`.
     public var sections: [ReviewSection] {
         guard me != nil else { return mergeRequests.isEmpty ? [] : [ReviewSection(group: .all, items: mergeRequests)] }
         let grouped = Dictionary(grouping: mergeRequests) { mr -> ReviewGroup in
             if mr.draft { return .drafts }
-            switch myState(mr) ?? "UNREVIEWED" {
-            case "UNREVIEWED": return .waiting
-            case "APPROVED": return .approved
-            default: return .reviewed
-            }
+            if isWaiting(mr) { return .waiting }
+            return myState(mr) == "APPROVED" ? .approved : .reviewed
         }
         return ReviewGroup.allCases.compactMap { group in
             grouped[group].map { ReviewSection(group: group, items: $0) }

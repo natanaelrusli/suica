@@ -36,7 +36,7 @@ extension ReviewListDocument {
         let ordered: [(ReviewShortcutReason, (ReviewSummary) -> Bool)] = [
             (.readyToApprove, { $0.readyToApprove }),
             (.changed, { $0.changedSinceReview != nil }),
-            (.waiting, { me == nil || (myState($0) ?? "UNREVIEWED") == "UNREVIEWED" }),
+            (.waiting, isWaiting),
         ]
         var seen = Set<String>()
         var rows: [ReviewShortcut] = []
@@ -56,7 +56,7 @@ extension ReviewListDocument {
     /// Open review requests by where they stand for the Owner; every non-draft waits without `me`.
     public var tally: ReviewTally {
         let open = mergeRequests.filter { !$0.draft }
-        let waiting = open.filter { me == nil || (myState($0) ?? "UNREVIEWED") == "UNREVIEWED" }.count
+        let waiting = open.filter(isWaiting).count
         return ReviewTally(waiting: waiting, reviewed: open.count - waiting, drafts: mergeRequests.count - open.count)
     }
 

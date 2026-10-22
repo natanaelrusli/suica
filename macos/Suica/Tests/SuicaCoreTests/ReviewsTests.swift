@@ -321,6 +321,32 @@ private func review(
     #expect(document.myState(document.mergeRequests[4]) == nil)
 }
 
+@Test func aPostedAgentReviewMovesTheMRToReviewedUntilItChangesAgain() {
+    func withAgent(_ key: String, _ status: String, me state: String = "UNREVIEWED", changed: Bool = false)
+        -> ReviewSummary
+    {
+        let base = review(key, me: state)
+        return ReviewSummary(
+            key: key, title: key, url: base.url, draft: false, author: base.author, reviewers: base.reviewers,
+            agentReview: AgentReviewInfo(id: 1, status: status),
+            changedSinceReview: changed ? ChangedSinceReview(code: true, description: false) : nil)
+    }
+    let document = ReviewListDocument(
+        version: 1, me: Person(username: "me", name: "Me"),
+        mergeRequests: [
+            withAgent("g/p!1", "posted"),
+            withAgent("g/p!2", "posted", changed: true),
+            withAgent("g/p!3", "ready"),
+            withAgent("g/p!4", "posted", me: "REQUESTED_CHANGES", changed: true),
+            withAgent("g/p!5", "failed", changed: true),
+            withAgent("g/p!6", "posted", me: "APPROVED"),
+        ])
+    #expect(document.sections.map(\.group) == [.waiting, .reviewed, .approved])
+    #expect(document.sections.map { $0.items.map(\.key) } == [["g/p!2", "g/p!3", "g/p!4", "g/p!5"], ["g/p!1"], ["g/p!6"]])
+    #expect(document.tally == ReviewTally(waiting: 4, reviewed: 2, drafts: 0))
+    #expect(!document.shortcuts().map(\.mr.key).contains("g/p!1"))
+}
+
 @Test func emptyGroupsAreLeftOutAndAListWithoutMeIsOneUngroupedSection() {
     let me = Person(username: "me", name: "Me")
     let reviewedOnly = ReviewListDocument(version: 1, me: me, mergeRequests: [review("g/p!1", me: "APPROVED")])
