@@ -698,3 +698,18 @@ public final class OfficeModel {
         layout = OfficeLayout.make(rooms)
     }
 }
+
+// MARK: - Camera
+
+/// The camera arithmetic the Office page shares with its tests.
+public enum OfficeCamera {
+    /// How much closer a scroll of `delta` brings the camera: a factor above 1 for a scroll up
+    /// (toward the scene), below 1 for a scroll down, and the same step undone by the opposite
+    /// scroll. The delta is clamped so a fast spin of a mouse wheel, which the system accelerates,
+    /// still moves the view in smooth steps. A trackpad (`precise`) reports points, a wheel lines.
+    public static func zoomFactor(scrollDelta delta: Double, precise: Bool) -> Double {
+        let (gain, limit) = precise ? (0.01, 40.0) : (0.12, 3.0)
+        guard delta.isFinite else { return 1 }
+        return exp(gain * min(limit, max(-limit, delta)))
+    }
+}

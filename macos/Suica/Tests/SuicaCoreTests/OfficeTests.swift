@@ -446,3 +446,29 @@ private func rooms(_ counts: [Int]) -> [OfficeRoom] {
         }
     }
 }
+
+// MARK: - Camera
+
+@Test func wheelZoomStepsInOnScrollUpAndUndoesItselfOnScrollDown() {
+    let closer = OfficeCamera.zoomFactor(scrollDelta: 1, precise: false)
+    let farther = OfficeCamera.zoomFactor(scrollDelta: -1, precise: false)
+    #expect(closer > 1)
+    #expect(farther < 1)
+    #expect(abs(closer * farther - 1) < 1e-9)
+    #expect(abs(closer - 1.1275) < 0.001)
+}
+
+@Test func wheelZoomClampsAFastSpin() {
+    let fast = OfficeCamera.zoomFactor(scrollDelta: 30, precise: false)
+    #expect(fast == OfficeCamera.zoomFactor(scrollDelta: 3, precise: false))
+    #expect(fast < 1.5)
+    #expect(OfficeCamera.zoomFactor(scrollDelta: .nan, precise: false) == 1)
+}
+
+@Test func trackpadZoomIsFinerPerPointThanAWheelPerLine() {
+    let trackpad = OfficeCamera.zoomFactor(scrollDelta: 10, precise: true)
+    let wheel = OfficeCamera.zoomFactor(scrollDelta: 1, precise: false)
+    #expect(trackpad > 1)
+    #expect(trackpad < wheel)
+    #expect(OfficeCamera.zoomFactor(scrollDelta: 100, precise: true) == OfficeCamera.zoomFactor(scrollDelta: 40, precise: true))
+}
