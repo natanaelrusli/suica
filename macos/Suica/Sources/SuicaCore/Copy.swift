@@ -1374,3 +1374,76 @@ public enum Copy {
         }
     }
 }
+
+// MARK: - Set up Suica
+
+extension Copy {
+    public static let setupTitle = "Set up Suica"
+    public static let setupOpen = "Set up Suica…"
+    public static let setupNotNow = "Not now"
+    public static let setupBack = "Back"
+    public static let setupContinue = "Continue"
+    public static let setupDone = "Done"
+    public static func setupStepTitle(_ step: OnboardingStep) -> String {
+        switch step {
+        case .welcome: "Welcome to Suica"
+        case .gitlab: "Connect to GitLab"
+        case .codingAgent: "Pick a coding agent"
+        case .teams: "Teams messages"
+        case .finish: "Ready to start"
+        }
+    }
+    public static let setupWelcome =
+        "Suica watches your GitLab merge requests in the background: it tells you when someone asks for your review or comments, can review MRs with a coding agent, and can nudge reviewers on Teams."
+    public static let setupWelcomeSteps =
+        "A few questions set up the essentials: your GitLab host, the coding agent to use and whether to send Teams messages. Everything else has sensible defaults and can be changed later in Configuration."
+    public static let setupGitlabHint =
+        "Suica reads GitLab through the glab command, signed in as you. Enter the host of your GitLab, without a path."
+    public static let setupHostPlaceholder = "gitlab.example.com"
+    public static let setupCheck = "Check connection"
+    public static func setupSignedIn(_ username: String) -> String { "Signed in as @\(username)." }
+    public static let setupCheckLater =
+        "You can continue without a working connection, but the agent reports GitLab errors until it works."
+    public static func setupCheckLine(_ status: String) -> String {
+        switch status {
+        case "bad-host": "That is not a host name. Enter only the host, such as gitlab.example.com."
+        case "glab-missing": "The glab command is not installed. Install it, then check again:"
+        case "gitlab-auth": "glab is not signed in to this host. Sign in, then check again:"
+        case "gitlab-unreachable": "The host can't be reached. Check the name and your network or VPN."
+        default: "GitLab answered with an error. Check the host, or sign in again:"
+        }
+    }
+    public static func setupFixCommand(_ status: String, host: String) -> String? {
+        switch status {
+        case "glab-missing": "brew install glab"
+        case "gitlab-auth", "gitlab-error": "glab auth login --hostname \(host)"
+        default: nil
+        }
+    }
+    public static let setupCopy = "Copy"
+    public static let setupCodingAgentHint =
+        "Agent Review and Agent Fix run a coding agent CLI on this Mac. Auto uses the first installed of Claude Code, Codex and Gemini CLI."
+    public static let setupTeamsToggle = "Send Teams messages"
+    public static let setupTeamsHint =
+        "Suica can nudge reviewers and tell them when you have addressed their comments. It needs the Teams MCP server (teams.command, by default ~/.config/teams-mcp/run.sh). Nudges and most notices wait for your approval in Messages; the notices about an Agent Review's findings and about your approval are sent at once. Change either under Configuration → Teams."
+    public static let setupSummaryHost = "GitLab host"
+    public static let setupSummaryAgent = "Coding agent"
+    public static let setupSummaryTeams = "Teams messages"
+    public static let setupOn = "On"
+    public static let setupOff = "Off"
+    public static let setupFinishHint =
+        "Saving writes your config file and starts the background agent. Everything else uses the defaults; change them any time in Configuration."
+    public static let setupStart = "Save and start agent"
+    public static let setupAllSet = "You're all set"
+    public static let setupFinished =
+        "Suica is set up and the agent is running. It takes the first look at GitLab now; new review requests show up in Merge requests."
+    public static func setupNotSaved(status: String, issues: [ConfigIssue]) -> String {
+        if status == "conflict" {
+            return "A config file was created meanwhile, so nothing was written. Edit it in Configuration."
+        }
+        let reasons = issues.map { "\($0.path): \($0.message)" }.joined(separator: " ")
+        return reasons.isEmpty ? "The config was not saved." : "The config was not saved. \(reasons)"
+    }
+    public static let setupAgentNotStarted =
+        "The config is saved, but the agent did not start. Try again, or run suica agent install in Terminal."
+}

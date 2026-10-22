@@ -419,6 +419,28 @@ extension CLIAgentClient: DashboardClient {
     }
 }
 
+// MARK: - Setup client
+
+extension CLIAgentClient: SetupClient {
+    public func checkGitlab(host: String) async throws(AgentError) -> GitlabCheck {
+        // `--` keeps a host typed as an option from being read as one; the CLI refuses it anyway.
+        let result = try await runner.run(
+            invocation(["gitlab", "check", "--json", "--", host], timeout: Self.gitlabTimeout))
+        // The CLI exits 1 for every answer but ok, with the reason in the JSON.
+        if let line = lastLine(of: result.stdout),
+            let parsed = try? JSONDecoder().decode(GitlabCheck.self, from: line)
+        {
+            return parsed
+        }
+        guard result.exitCode == 0 else { throw AgentError.failed(exitCode: result.exitCode) }
+        throw AgentError.badOutput
+    }
+
+    public func installAgent() async throws(AgentError) -> ActionResult {
+        try await action(["agent", "install", "--json"], timeout: Self.restartTimeout)
+    }
+}
+
 // MARK: - Reviews client
 
 extension CLIAgentClient: ReviewsClient {

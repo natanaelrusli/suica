@@ -16,6 +16,7 @@ import {
   glabRest,
   glabRunner,
 } from "./gitlab.ts";
+import { checkGitlab } from "./gitlab-check.ts";
 import { detectModelClis } from "./model-cli.ts";
 import { closeMergeRequest, commentOnMergeRequest, mergeMergeRequest } from "./mr-actions.ts";
 import {
@@ -65,7 +66,7 @@ import { realProbe } from "./office/probe.ts";
 import { buildUsage } from "./usage.ts";
 
 const USAGE =
-  "usage: suica <once|status|state|stats|usage|office --json|office chat <agent> <sessionId> --json|office send <agent> <sessionId> --json (message on stdin)|pause|resume|pending [--all]|send <id> [--json]|skip <id> [--json]|retry <id> [--json]|selftest|message <key> --json (request on stdin)|reviews --json|mr <key> --json|mr approve <key> <sha> --json|mr comment <key> --json (body on stdin)|mr close <key> --json|mr merge <key> <sha> [--squash] [--remove-source-branch] [--when-pipeline-succeeds] --json (message on stdin)|review queue <key> --json|review post <id> [--inline|--comment] --json|review discard <id> --json|review cancel <id> --json|fix list --json|fix queue <key> [--pipeline] --json|fix watch <key> --json|fix unwatch <key> --json|fix confirm <id> --json (edits on stdin)|fix retry <id> --json (note on stdin)|fix discard <id> --json|fix cancel <id> --json|fix replies <id> --json|config show --json|config set --json|templates show --json|templates set --json|agent install|agent uninstall|agent restart --json>\n";
+  "usage: suica <once|status|state|stats|usage|office --json|office chat <agent> <sessionId> --json|office send <agent> <sessionId> --json (message on stdin)|pause|resume|pending [--all]|send <id> [--json]|skip <id> [--json]|retry <id> [--json]|selftest|message <key> --json (request on stdin)|reviews --json|mr <key> --json|mr approve <key> <sha> --json|mr comment <key> --json (body on stdin)|mr close <key> --json|mr merge <key> <sha> [--squash] [--remove-source-branch] [--when-pipeline-succeeds] --json (message on stdin)|review queue <key> --json|review post <id> [--inline|--comment] --json|review discard <id> --json|review cancel <id> --json|fix list --json|fix queue <key> [--pipeline] --json|fix watch <key> --json|fix unwatch <key> --json|fix confirm <id> --json (edits on stdin)|fix retry <id> --json (note on stdin)|fix discard <id> --json|fix cancel <id> --json|fix replies <id> --json|config show --json|config set --json|templates show --json|templates set --json|gitlab check <host> --json|agent install [--json]|agent uninstall|agent restart --json>\n";
 const TEAMS_DISABLED = "teams is disabled: set teams.enabled to true in the config\n";
 const SHOWN_WITH_ALL = 50;
 
@@ -579,7 +580,8 @@ async function closeCommand(key: string): Promise<number> {
   return outcome === "closed" ? 0 : 1;
 }
 
-async function installAgentCommand(): Promise<number> {
+/** With `json`, prints `{"status": "installed" | "no-config" | "failed"}` for the app. */
+async function installAgentCommand(json: boolean): Promise<number> {
   const paths = {
     node: process.execPath,
     main: join(import.meta.dirname, "main.ts"),
@@ -587,6 +589,10 @@ async function installAgentCommand(): Promise<number> {
   };
   const configPath = defaultConfigPath();
   const outcome = await installAgent(defaultExec, process.getuid?.() ?? 0, paths, configPath);
+  if (json) {
+    process.stdout.write(`${actionJson(outcome)}\n`);
+    return outcome === "installed" ? 0 : 1;
+  }
   switch (outcome) {
     case "installed":
       process.stdout.write(`installed ${plistPath(paths.home)} (node: ${paths.node})\n`);
@@ -764,9 +770,15 @@ async function main(argv: readonly string[]): Promise<number> {
     }
     return mrJson(key);
   }
+  if (command === "gitlab" && argv[1] === "check" && argv.includes("--json")) {
+    const host = argv.slice(2).find((arg) => !arg.startsWith("--")) ?? "";
+    const result = await checkGitlab(host, defaultExec);
+    process.stdout.write(`${JSON.stringify(result)}\n`);
+    return result.status === "ok" ? 0 : 1;
+  }
   if (command === "agent") {
     if (argv[1] === "restart" && argv.includes("--json")) return restartAgent();
-    if (argv[1] === "install") return installAgentCommand();
+    if (argv[1] === "install") return installAgentCommand(argv.includes("--json"));
     if (argv[1] === "uninstall") return uninstallAgentCommand();
     process.stderr.write(USAGE);
     return 2;

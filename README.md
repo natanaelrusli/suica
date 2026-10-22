@@ -51,7 +51,9 @@ make install        # Option 1
 make install-app    # builds, installs ~/Applications/Suica.app and starts it
 ```
 
-or by hand: `scripts/install-macos-app.sh` after the three CLI steps. The app bakes in the absolute path of the `suica` command it finds (set `SUICA_CLI` for another one), so run `make install-app` again if the CLI moves. Add Suica under System Settings → General → Login Items to start it at login (see Menu bar app).
+or by hand: `scripts/install-macos-app.sh` after the three CLI steps.
+
+New to Suica? You can skip the config and agent steps: install the CLI (`scripts/install-cli.sh` or `make install-cli`) and the app, then open the window (**Open Suica…** in the menu bar popover). With no config file it opens **Set up Suica**, which asks for your GitLab host and checks that `glab` is signed in to it (with the command to fix it when it is not), lets you pick the coding agent CLI and switch Teams messages on, then writes `~/.config/suica/config.yaml` and starts the background agent. **Not now** writes nothing, and **Set up Suica…** beside "No config file yet" in Configuration opens it again. Design: [first-run setup spec](docs/superpowers/specs/2026-10-22-onboarding-design.md). The app bakes in the absolute path of the `suica` command it finds (set `SUICA_CLI` for another one), so run `make install-app` again if the CLI moves. Add Suica under System Settings → General → Login Items to start it at login (see Menu bar app).
 
 ### Update and remove
 
@@ -156,6 +158,8 @@ suica office send <agent> <sessionId> --json  # message on stdin: one headless t
 suica config show --json    # every config key with the value in the file, the effective value, and the problems found
 suica config set --json     # applies edits read from stdin (see below)
 suica agent restart --json  # launchctl kickstart -k of the background agent
+suica agent install --json  # installs and starts the background agent; prints {"status": "installed" | "no-config" | "failed"}
+suica gitlab check <host> --json  # whether glab reaches the host signed in, without a config file; prints {"status": …, "username": …}
 suica reviews --json        # you, and the open MRs where you are a Reviewer (asks GitLab through glab)
 suica mr <key> --json       # one MR by key (group/project!12): description, reviewers, pipeline with its stages and jobs, squash, discussions, diff
 suica message <key> --json  # a Teams message from an MR's page: {"to", "template", "text", "send"} on stdin; drafts or sends it
@@ -180,6 +184,8 @@ suica fix replies <id> --json      # post the replies a pushed fix could not pos
 ```
 
 `mr comment` prints `posted`, `empty`, `bad-key` or `failed`. `mr close` prints `closed`, `not-yours` (the signed-in GitLab user did not write the MR), `bad-key` or `failed`. `mr merge` prints `merged`, `scheduled` (GitLab merges once the running pipeline succeeds, with `--when-pipeline-succeeds`), `not-mergeable` (GitLab answered 405 or 406), `sha-mismatch` (someone pushed past `<sha>`, so nothing merged), `bad-key` or `failed`; a blank message leaves GitLab's default. `fix confirm` reads `{"commitMessage": "…", "threads": [{"id": "gid://gitlab/Discussion/…", "reply": "…", "post": true}]}` and prints `pushed`, `partial` (pushed, but some replies failed: `fix replies` posts the rest), `branch-moved`, `push-failed`, `bad-request` (an id the fix does not have) or `nothing`.
+
+`gitlab check <host>` runs `glab api user --hostname <host>` (glab from `PATH`, 30 s timeout) and prints `ok` with the username, `bad-host` (not a bare host name with an optional port; glab is not run), or the poller's failure kinds `glab-missing`, `gitlab-auth`, `gitlab-unreachable` and `gitlab-error`; it exits 0 only for `ok`.
 
 `reviews` and `mr` read GitLab directly, not the state database, so they need a working config and `glab` login. `mr` fetches at most 100 discussions and 100 changed files, and leaves out a file's diff when GitLab marks it too large, when it is over 200,000 characters, or once 1.5 million characters of diff have been included (`diff` is then `null`). `mr approve` prints `{"status": …}`: `approved`, `head-changed` (the source branch moved past `<sha>`, so nothing was approved), `bad-request` (malformed key or commit) or `failed`. After `approved` it resolves every open thread you started on the MR (your own comments and an Agent Review's inline threads); threads others started stay open, even where you replied. A thread GitLab refuses to resolve is logged and left; the status stays `approved`.
 
@@ -315,7 +321,7 @@ suica agent install      # writes the LaunchAgent (com.madhani.suica.agent) for 
 suica agent uninstall    # stops it and removes the plist
 ```
 
-`suica agent install` refuses to run without a config file, writes `~/Library/LaunchAgents/com.madhani.suica.agent.plist` pointing at the installed `main.ts` and the `node` that runs the CLI, and reloads and starts the agent. Run it again after reinstalling the CLI elsewhere; `scripts/install-cli.sh` does that for you when the agent is already installed.
+`suica agent install` refuses to run without a config file (`--json` prints the outcome as `{"status": …}` for the app), writes `~/Library/LaunchAgents/com.madhani.suica.agent.plist` pointing at the installed `main.ts` and the `node` that runs the CLI, and reloads and starts the agent. Run it again after reinstalling the CLI elsewhere; `scripts/install-cli.sh` does that for you when the agent is already installed.
 
 Logs are JSON lines captured by launchd in `~/Library/Logs/suica/` (`stdout.log`, `stderr.log`). The agent does no rotation. At the default log level it writes a line on start (with its main settings) and stop, the first poll's baseline, each Review Request, Reviewer state change and comment it detects, delivered notifications, pause and resume, each Agent Review queued, started, ready, posted, skipped or failed (with the reason), and each Teams message sent, held, skipped or failed. It logs errors once per failure streak and the recovery once the streak ends. Lines name MRs by key and messages and reviews by id, never a person. Actions run through the CLI (sending a held message, posting a review, approving) are not in these logs. Set `SUICA_LOG_LEVEL=debug` to see every poll. launchd restarts the agent only when it exits with an error, at most once a minute, and the installer refuses to run without a config file. The plist bakes in the absolute path of the `node` found when you ran the installer: re-run it after switching Node versions or moving the repository.
 

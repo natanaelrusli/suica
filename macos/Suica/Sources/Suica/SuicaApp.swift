@@ -62,6 +62,11 @@ extension UnconfiguredClient: OfficeClient {
     }
 }
 
+extension UnconfiguredClient: SetupClient {
+    func checkGitlab(host: String) async throws(AgentError) -> GitlabCheck { throw AgentError.launchFailed }
+    func installAgent() async throws(AgentError) -> ActionResult { throw AgentError.launchFailed }
+}
+
 extension UnconfiguredClient: TemplatesClient {
     func templates() async throws(AgentError) -> TemplatesDocument { throw AgentError.launchFailed }
     func saveTemplate(name: String, text: String?) async throws(AgentError) -> TemplateSaveResult {
@@ -111,6 +116,7 @@ struct SuicaApp: App {
     @State private var fixes: FixesModel
     @State private var templates: TemplateEditorModel
     @State private var office: OfficeModel
+    @State private var onboarding: OnboardingModel
     @State private var appearance = AppearanceSettings()
     @State private var navigator = Navigator()
     @State private var celebrations = CelebrationCounter()
@@ -122,6 +128,7 @@ struct SuicaApp: App {
         let fixesClient: any FixesClient
         let templatesClient: any TemplatesClient
         let officeClient: any OfficeClient
+        let setupClient: any SetupClient
         if let config = AgentConfig.fromBundle(.main) {
             let client = CLIAgentClient(config: config, runner: ProcessRunner())
             agent = client
@@ -130,6 +137,7 @@ struct SuicaApp: App {
             fixesClient = client
             templatesClient = client
             officeClient = client
+            setupClient = client
         } else {
             agent = UnconfiguredClient()
             dashboard = UnconfiguredClient()
@@ -137,6 +145,7 @@ struct SuicaApp: App {
             fixesClient = UnconfiguredClient()
             templatesClient = UnconfiguredClient()
             officeClient = UnconfiguredClient()
+            setupClient = UnconfiguredClient()
         }
         let model = MenuModel(client: agent)
         _model = State(initialValue: model)
@@ -149,6 +158,7 @@ struct SuicaApp: App {
         _fixes = State(initialValue: FixesModel(client: fixesClient))
         _templates = State(initialValue: TemplateEditorModel(client: templatesClient))
         _office = State(initialValue: OfficeModel(client: officeClient))
+        _onboarding = State(initialValue: OnboardingModel(dashboard: dashboard, setup: setupClient))
         Task { @MainActor in await model.runRefreshLoop(every: refreshInterval) }
     }
 
@@ -167,7 +177,7 @@ struct SuicaApp: App {
         Window(Copy.appName, id: "main") {
             MainWindow(
                 window: window, editor: editor, reviews: reviews, fixes: fixes, templates: templates,
-                office: office, settings: appearance, navigator: navigator
+                office: office, onboarding: onboarding, settings: appearance, navigator: navigator
             )
             .modifier(Celebrations(model: model, reviews: reviews, settings: appearance, counter: celebrations))
             .appearance(appearance)
