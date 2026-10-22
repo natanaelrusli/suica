@@ -58,12 +58,13 @@ import { openStore } from "./store.ts";
 import { formatOutbox } from "./teams/format-outbox.ts";
 import { OUTBOX_STATUSES } from "./teams/types.ts";
 import { readChat } from "./office/chat.ts";
+import { geminiResumeId, sendToSession } from "./office/send.ts";
 import { adaptersFor, collectOffice } from "./office/collect.ts";
 import { realProbe } from "./office/probe.ts";
 import { buildUsage } from "./usage.ts";
 
 const USAGE =
-  "usage: suica <once|status|state|stats|usage|office --json|office chat <agent> <sessionId> --json|pause|resume|pending [--all]|send <id> [--json]|skip <id> [--json]|retry <id> [--json]|selftest|reviews --json|mr <key> --json|mr approve <key> <sha> --json|mr comment <key> --json (body on stdin)|mr close <key> --json|mr merge <key> <sha> [--squash] [--remove-source-branch] [--when-pipeline-succeeds] --json (message on stdin)|review queue <key> --json|review post <id> [--inline|--comment] --json|review discard <id> --json|review cancel <id> --json|fix list --json|fix queue <key> [--pipeline] --json|fix confirm <id> --json (edits on stdin)|fix retry <id> --json (note on stdin)|fix discard <id> --json|fix cancel <id> --json|fix replies <id> --json|config show --json|config set --json|templates show --json|templates set --json|agent install|agent uninstall|agent restart --json>\n";
+  "usage: suica <once|status|state|stats|usage|office --json|office chat <agent> <sessionId> --json|office send <agent> <sessionId> --json (message on stdin)|pause|resume|pending [--all]|send <id> [--json]|skip <id> [--json]|retry <id> [--json]|selftest|reviews --json|mr <key> --json|mr approve <key> <sha> --json|mr comment <key> --json (body on stdin)|mr close <key> --json|mr merge <key> <sha> [--squash] [--remove-source-branch] [--when-pipeline-succeeds] --json (message on stdin)|review queue <key> --json|review post <id> [--inline|--comment] --json|review discard <id> --json|review cancel <id> --json|fix list --json|fix queue <key> [--pipeline] --json|fix confirm <id> --json (edits on stdin)|fix retry <id> --json (note on stdin)|fix discard <id> --json|fix cancel <id> --json|fix replies <id> --json|config show --json|config set --json|templates show --json|templates set --json|agent install|agent uninstall|agent restart --json>\n";
 const TEAMS_DISABLED = "teams is disabled: set teams.enabled to true in the config\n";
 const SHOWN_WITH_ALL = 50;
 
@@ -249,6 +250,35 @@ function officeChatJson(agent: string, sessionId: string): number {
   const document = readChat(realProbe().home, agent, sessionId);
   process.stdout.write(`${JSON.stringify(document)}\n`);
   return 0;
+}
+
+/**
+ * `suica office send <agent> <sessionId> --json`: the message comes on stdin; runs one headless
+ * turn of the agent that resumes the Session and prints `{"status": …}` when it ends.
+ */
+async function officeSendCommand(agent: string, sessionId: string): Promise<number> {
+  const config = loadConfig(defaultConfigPath());
+  const body = await readLimitedStdin(MAX_REQUEST_BYTES);
+  const probe = realProbe();
+  const clis = detectModelClis();
+  const outcome =
+    body === undefined
+      ? "too_long"
+      : await sendToSession(
+          {
+            sessions: () => collectOffice(adaptersFor(config.office), probe).sessions,
+            cliPath: (id) => clis.find((cli) => cli.id === id)?.path ?? null,
+            geminiResumeId: (id) => geminiResumeId(probe.home, id),
+            exec: defaultExec,
+          },
+          agent,
+          sessionId,
+          body,
+        );
+  // The message itself is the Owner's words: it is never logged.
+  createLogger().info("office message", { agent, session_id: sessionId, outcome });
+  process.stdout.write(`${actionJson(outcome)}\n`);
+  return outcome === "sent" ? 0 : 1;
 }
 
 /** `suica reviews --json` and `suica mr <key> --json`: no runtime. */
@@ -625,6 +655,14 @@ async function main(argv: readonly string[]): Promise<number> {
       return 2;
     }
     return officeChatJson(agent, sessionId);
+  }
+  if (command === "office" && argv[1] === "send" && argv.includes("--json")) {
+    const [agent, sessionId] = argv.slice(2).filter((arg) => !arg.startsWith("--"));
+    if (agent === undefined || sessionId === undefined) {
+      process.stderr.write(USAGE);
+      return 2;
+    }
+    return officeSendCommand(agent, sessionId);
   }
   if (command === "office" && argv.includes("--json")) return officeJson();
   if (command === "reviews" && argv.includes("--json")) return reviewsJson();

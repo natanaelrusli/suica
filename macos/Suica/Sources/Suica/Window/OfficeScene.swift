@@ -400,6 +400,26 @@ private struct Pose {
         return pose
     }
 
+    /// Standing, hands behind the back, the head tilting now and then: the boss listening.
+    static func listening(at time: Float) -> Pose {
+        var pose = standing
+        pose.shoulderPitch = [-0.35, -0.35]
+        pose.shoulderRoll = [0.12, 0.12]
+        pose.elbow = [0.55, 0.55]
+        pose.headPitch = 0.06 + 0.04 * sin(time * 0.8)
+        return pose
+    }
+
+    /// Talking to the worker: the right hand points, the left rests at the side, the head nods.
+    static func instructing(at time: Float) -> Pose {
+        var pose = standing
+        pose.torsoPitch = -0.05
+        pose.shoulderPitch = [0.15, 1.25 + 0.15 * sin(time * 5)]
+        pose.elbow = [0.35, 0.2 + 0.1 * sin(time * 5 + 1)]
+        pose.headPitch = 0.08 * sin(time * 3.2)
+        return pose
+    }
+
     /// One stride: the legs swing against the arms, a knee bends on the back swing.
     static func walking(phase: Float) -> Pose {
         var pose = standing
@@ -446,6 +466,42 @@ private struct DeskNode {
     var stride: Float
 }
 
+/// How the Owner wants the office shown, beyond its style and environment.
+struct OfficeSceneOptions: Equatable {
+    var bubbles = OfficeBubbles.all
+    /// Walkers, cyclists and cars on the street.
+    var streetLife = true
+    /// The camera turns slowly round the office (only with animation).
+    var slowTurn = false
+}
+
+/// Where the boss should be: at a Desk (by Session id), saying something or listening.
+struct OfficeBossOrder: Equatable {
+    let deskId: String
+    /// What the boss says, already short enough for a bubble; nil while the Owner is still writing.
+    let speech: String?
+}
+
+/// Where the boss is going: to the spot beside a worker's desk, or out of the Room.
+private enum BossGoal: Equatable {
+    case attending, out
+}
+
+/// The boss: one figure, kept under the lawn until the Owner writes to an agent.
+private struct BossNode {
+    let rig: FigureRig
+    /// Above the head, facing the camera; under the lawn while the boss says nothing.
+    let bubble: Entity
+    /// The Desk the boss is at or on the way to or from.
+    var deskId: String?
+    var at = BossGoal.out
+    var path: OfficePath?
+    var walked: Float = 0
+    var goal = BossGoal.out
+    var stride: Float = 0
+    var speech: String?
+}
+
 /// One traveller on the street, with the limbs that swing and the wheels that turn as it goes.
 private struct TravellerNode {
     let entity: Entity
@@ -477,6 +533,8 @@ final class OfficeSceneController {
     private var streetEntity: Entity?
     private var streetSignature = ""
     private var travellers: [TravellerNode] = []
+    private var options = OfficeSceneOptions()
+    private var boss: BossNode?
     private var clock: Float = 0
     private var updates: EventSubscription?
     private var animate = true
@@ -518,6 +576,21 @@ final class OfficeSceneController {
         fill.look(at: .zero, from: [6, 5, 3], relativeTo: nil)
         root.addChild(key)
         root.addChild(fill)
+        let rig = dress(OfficeLook.boss)
+        // A tie, so the boss reads as the boss from afar.
+        let tie = ModelEntity(
+            mesh: .generateBox(size: [0.05, 0.22, 0.02]),
+            materials: [material(NSColor(red: 0.75, green: 0.12, blue: 0.15, alpha: 1))])
+        tie.position = [0, 0.33, -0.165]
+        rig.torso.addChild(tie)
+        apply(.standing, to: rig)
+        rig.root.position.y = Self.hidden
+        root.addChild(rig.root)
+        let bubble = Entity()
+        bubble.position = [0, Self.hidden, 0]
+        bubble.components.set(BillboardComponent())
+        rig.root.addChild(bubble)
+        boss = BossNode(rig: rig, bubble: bubble)
         applyCamera()
     }
 
@@ -634,9 +707,11 @@ final class OfficeSceneController {
 
     func sync(
         layout: OfficeLayout, sessions: [OfficeSession], selected: String?, style: OfficeStyle,
-        environment: OfficeEnvironment, dark: Bool, animate: Bool
+        environment: OfficeEnvironment, dark: Bool, animate: Bool, options: OfficeSceneOptions = .init(),
+        boss order: OfficeBossOrder? = nil
     ) {
         self.animate = animate
+        self.options = options
         let darkChanged = self.dark != dark
         self.dark = dark
         self.style = style
@@ -674,7 +749,7 @@ final class OfficeSceneController {
         }
 
         // The street outside, laid out again only when the building's size or the look changes.
-        let streetSignature = "\(layout.width)|\(layout.depth)|\(dark)|\(style)|\(environment)"
+        let streetSignature = "\(layout.width)|\(layout.depth)|\(dark)|\(style)|\(environment)|\(options.streetLife)"
         if streetSignature != self.streetSignature {
             self.streetSignature = streetSignature
             streetEntity?.removeFromParent()
@@ -735,6 +810,11 @@ final class OfficeSceneController {
         // Hidden by sinking it into the floor slab: a model that starts disabled or at zero scale is
         // culled by its first bounds and never shows.
         for (id, node) in desks { node.rug.position.y = id == selected ? 0.02 : -0.03 }
+        // Bubbles as the Owner chose: all, the selected one only, or none (sunk under the lawn).
+        for (id, node) in desks {
+            node.bubble.position.y = options.bubbles.shows(selected: id == selected) ? 1.6 : Self.hidden
+        }
+        direct(boss: order, palette: palette)
     }
 
     private func remove(_ entity: Entity) {
@@ -754,6 +834,11 @@ final class OfficeSceneController {
     func tick(_ delta: Float) {
         clock += delta
         guard animate else { return }
+        if options.slowTurn {
+            yaw -= delta * 0.06
+            applyCamera()
+        }
+        moveBoss(by: delta)
         moveTravellers()
         // The sun's rays turn slowly and breathe a little.
         if rays.isEnabled {
@@ -871,6 +956,135 @@ final class OfficeSceneController {
             rig.hips[side].orientation = simd_quatf(angle: pose.hipPitch[side], axis: x)
             rig.knees[side].orientation = simd_quatf(angle: pose.knee[side], axis: x)
         }
+    }
+
+    // MARK: The boss
+
+    /// Beside the worker's desk, in the gap the worker walks down, a step nearer the monitor than
+    /// the chair: in view of the default camera and facing the worker.
+    private func bossSpot(at node: DeskNode) -> OfficePoint {
+        let worker = spot(.standingBy, of: node)
+        return OfficePoint(x: worker.x, z: worker.z - 0.6)
+    }
+
+    /// From the Room's doorway down the worker's way to the boss's spot, or back.
+    private func bossRoute(at node: DeskNode, to goal: BossGoal) -> OfficePath {
+        let inward = Array(node.way.points.dropLast()) + [bossSpot(at: node)]
+        return OfficePath(goal == .attending ? inward : inward.reversed())
+    }
+
+    /// Takes the page's order: walk to a Desk, say something there, or leave.
+    private func direct(boss order: OfficeBossOrder?, palette: Palette) {
+        guard var boss else { return }
+        // A Desk that is gone takes the boss with it.
+        if let id = boss.deskId, desks[id] == nil { settle(&boss, at: .out) }
+        let target = order.flatMap { desks[$0.deskId] == nil ? nil : $0.deskId }
+        if target != boss.deskId {
+            if let target {
+                // Called to another Desk: leave this one at once and walk to the new one.
+                if boss.deskId != nil { settle(&boss, at: .out) }
+                boss.deskId = target
+                walk(&boss, to: .attending)
+            } else if boss.deskId != nil, boss.goal != .out {
+                // Not already on the way out.
+                walk(&boss, to: .out)
+            }
+        } else if target != nil, boss.at == .attending, boss.path == nil {
+            // The Desk may have moved since the boss got there.
+            settle(&boss, at: .attending)
+        }
+        let speech = target == nil ? nil : order?.speech
+        if speech != boss.speech {
+            boss.speech = speech
+            draw(speech, in: boss.bubble, palette: palette)
+        }
+        boss.bubble.position.y = speech == nil ? Self.hidden : 2.45
+        self.boss = boss
+    }
+
+    private func draw(_ speech: String?, in bubble: Entity, palette: Palette) {
+        for child in Array(bubble.children) { child.removeFromParent() }
+        guard let speech else { return }
+        let mesh = textMesh("“\(speech)”", size: 0.13)
+        let bounds = mesh.bounds
+        let navy = NSColor(red: 0.15, green: 0.19, blue: 0.32, alpha: 1)
+        let plate = ModelEntity(
+            mesh: .generatePlane(width: max(0.6, bounds.extents.x + 0.3), height: 0.3, cornerRadius: 0.1),
+            materials: [UnlitMaterial(color: navy)])
+        bubble.addChild(plate)
+        let label = ModelEntity(mesh: mesh, materials: [UnlitMaterial(color: .white)])
+        label.position = [-(bounds.min.x + bounds.extents.x / 2), -(bounds.min.y + bounds.extents.y / 2), 0.004]
+        bubble.addChild(label)
+    }
+
+    private func walk(_ boss: inout BossNode, to goal: BossGoal) {
+        guard let id = boss.deskId, let node = desks[id] else {
+            settle(&boss, at: .out)
+            return
+        }
+        guard animate else {
+            settle(&boss, at: goal)
+            return
+        }
+        // Coming in, the boss starts at the doorway; going out, from wherever it stands.
+        let route = bossRoute(at: node, to: goal)
+        boss.path = route
+        boss.walked = 0
+        boss.goal = goal
+        if goal == .out, boss.at != .attending {
+            // Still on the way in: go straight back out from here.
+            settle(&boss, at: .out)
+            return
+        }
+        moveBoss(&boss, by: 0)
+    }
+
+    private func settle(_ boss: inout BossNode, at goal: BossGoal) {
+        boss.path = nil
+        boss.at = goal
+        boss.goal = goal
+        switch goal {
+        case .out:
+            boss.deskId = nil
+            boss.rig.root.position = [0, Self.hidden, 0]
+            apply(.standing, to: boss.rig)
+        case .attending:
+            guard let id = boss.deskId, let node = desks[id] else { return settle(&boss, at: .out) }
+            let at = bossSpot(at: node)
+            let worker = spot(node.at == .standingBy ? .standingBy : .seated, of: node)
+            placeBoss(boss, at: at, heading: OfficePoint(x: worker.x - at.x, z: worker.z - at.z))
+            apply(boss.speech == nil ? .listening(at: clock) : .instructing(at: clock), to: boss.rig)
+        }
+    }
+
+    private func placeBoss(_ boss: BossNode, at point: OfficePoint, heading: OfficePoint?) {
+        boss.rig.root.position = [Float(point.x), 0, Float(point.z)]
+        let yaw = heading.map { atan2(-Float($0.x), -Float($0.z)) } ?? 0
+        boss.rig.root.orientation = simd_quatf(angle: yaw, axis: [0, 1, 0])
+    }
+
+    private func moveBoss(by delta: Float) {
+        guard var boss else { return }
+        moveBoss(&boss, by: delta)
+        self.boss = boss
+    }
+
+    private func moveBoss(_ boss: inout BossNode, by delta: Float) {
+        guard let path = boss.path else {
+            if boss.at == .attending {
+                apply(boss.speech == nil ? .listening(at: clock) : .instructing(at: clock), to: boss.rig)
+            }
+            return
+        }
+        boss.walked += delta * Self.walkSpeed
+        if Double(boss.walked) >= path.length {
+            settle(&boss, at: boss.goal)
+            return
+        }
+        boss.stride += delta * Self.walkSpeed * Self.strideRate
+        let now = path.position(at: Double(boss.walked))
+        placeBoss(boss, at: now.point, heading: now.heading)
+        apply(.walking(phase: boss.stride), to: boss.rig)
     }
 
     // MARK: Building
@@ -1599,7 +1813,7 @@ final class OfficeSceneController {
         fill.light.color = key.light.color
 
         // No cars in the park; winter coats under snow.
-        travellers = street.travellers.filter { !(park && $0.kind == .car) }.map { traveller in
+        travellers = street.travellers.filter { options.streetLife && !(park && $0.kind == .car) }.map { traveller in
             let node = makeTraveller(traveller, coats: snow)
             entity.addChild(node.entity)
             return node

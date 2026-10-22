@@ -30,7 +30,7 @@ const MAX_CHARS = 4000;
 /** Tool results make a transcript large and its messages sparse: 32 MB of one held 9. */
 const TAIL_BYTES = 64 * 1024 * 1024;
 /** A session id is a file name: nothing that could leave the agent's folder. */
-const SAFE_ID = /^[A-Za-z0-9_-][A-Za-z0-9._-]*$/;
+export const SAFE_ID = /^[A-Za-z0-9_-][A-Za-z0-9._-]*$/;
 
 function list(dir: string): string[] {
   try {
@@ -69,7 +69,7 @@ function codexRollout(home: string, sessionId: string): string | undefined {
 }
 
 /** The `session-…<sessionId>.jsonl` under a project's `chats` folder in `~/.gemini/tmp`. */
-function geminiChat(home: string, sessionId: string): string | undefined {
+export function geminiChat(home: string, sessionId: string): string | undefined {
   const tmp = join(home, ".gemini", "tmp");
   for (const project of list(tmp)) {
     const dir = join(tmp, project, "chats");

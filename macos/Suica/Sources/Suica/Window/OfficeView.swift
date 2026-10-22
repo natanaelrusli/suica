@@ -4,7 +4,7 @@ import SuicaCore
 import SwiftUI
 
 /// The coding agents running on this Mac, as a small 3D office: a Room per project, a Desk per
-/// Session. It watches only; nothing here controls an agent.
+/// Session. It watches, and sends the selected agent a message from the Chat Panel; nothing here stops or approves one.
 struct OfficeView: View {
     let model: OfficeModel
     /// Where the building style and the environment are kept.
@@ -14,6 +14,12 @@ struct OfficeView: View {
     @State private var windowVisible = true
     /// The Owner closed the Chat Panel while a figure stays selected; picking a figure reopens it.
     @State private var panelHidden = false
+    /// What the Owner is writing to the selected figure's agent.
+    @State private var draft = ""
+    /// The message field has focus.
+    @State private var composing = false
+    /// What the boss is saying, and at which Desk: from a send until 6 seconds after its turn ends.
+    @State private var speech: (deskId: String, text: String)?
     @Environment(\.colorScheme) private var scheme
     @Environment(\.motionLevel) private var motion
 
@@ -23,10 +29,11 @@ struct OfficeView: View {
             ZStack {
                 ZStack(alignment: .top) {
                     // The sky above the street.
-                    Self.sky(settings.officeEnvironment, dark: scheme == .dark)
+                    Self.sky(settings.officeEnvironment, dark: night)
                     OfficeSceneView(
                         model: model, controller: controller, style: settings.officeStyle,
-                        environment: settings.officeEnvironment)
+                        environment: settings.officeEnvironment, night: night, options: sceneOptions,
+                        boss: bossOrder)
                     vignette.frame(height: titleBar + 70)
                 }
                 .clipped()
@@ -38,11 +45,20 @@ struct OfficeView: View {
         // reaches the camera, and the scene keeps every pixel it has left.
         .inspector(isPresented: panelShown) {
             if let session = model.selected {
-                OfficeChatPanel(session: session, chat: model.chat, error: model.chatError) { model.select(nil) }
-                    .inspectorColumnWidth(min: 320, ideal: 400, max: 560)
+                OfficeChatPanel(
+                    session: session, chat: model.chat, error: model.chatError, draft: $draft,
+                    sending: model.sendingTo == session.id, notice: model.sendNotice, send: send,
+                    dismissNotice: model.dismissSendNotice, composing: { composing = $0 }
+                ) { model.select(nil) }
+                .inspectorColumnWidth(min: 320, ideal: 400, max: 560)
             }
         }
-        .onChange(of: model.selectedId) { _, id in if id != nil { panelHidden = false } }
+        .onChange(of: model.selectedId) { _, id in
+            if id != nil { panelHidden = false }
+            // A draft belongs to the figure it was written to.
+            draft = ""
+            model.dismissSendNotice()
+        }
         .toolbar {
             Button {
                 panelHidden.toggle()
@@ -58,8 +74,18 @@ struct OfficeView: View {
                 Picker(Copy.officeEnvironmentPicker, selection: $settings.officeEnvironment) {
                     ForEach(OfficeEnvironment.allCases) { Text($0.title).tag($0) }
                 }
+                Picker(Copy.officeTimeOfDayPicker, selection: $settings.officeTimeOfDay) {
+                    ForEach(OfficeTimeOfDay.allCases) { Text($0.title).tag($0) }
+                }
+                Picker(Copy.officeBubblesPicker, selection: $settings.officeBubbles) {
+                    ForEach(OfficeBubbles.allCases) { Text($0.title).tag($0) }
+                }
+                Divider()
+                Toggle(Copy.officeStreetLifeToggle, isOn: $settings.officeStreetLife)
+                Toggle(Copy.officeSlowTurnToggle, isOn: $settings.officeSlowTurn)
+                Toggle(Copy.officeBossToggle, isOn: $settings.officeBoss)
             } label: {
-                Label(Copy.officeStyleMenu, systemImage: "paintbrush")
+                Label(Copy.officeStyleMenu, systemImage: "slider.horizontal.3")
             }
             .help(Copy.officeStyleHint)
             Button {
@@ -96,6 +122,39 @@ struct OfficeView: View {
         case (.park, false): Color(red: 0.8, green: 0.91, blue: 0.96)
         case (_, false): Color(red: 0.8, green: 0.9, blue: 0.98)
         case (_, true): Color(red: 0.06, green: 0.08, blue: 0.14)
+        }
+    }
+
+    /// Night by the app's mode, or pinned to day or night in the options.
+    private var night: Bool { settings.officeTimeOfDay.isNight(darkMode: scheme == .dark) }
+
+    private var sceneOptions: OfficeSceneOptions {
+        OfficeSceneOptions(
+            bubbles: settings.officeBubbles, streetLife: settings.officeStreetLife, slowTurn: settings.officeSlowTurn)
+    }
+
+    /// The boss stands at the selected figure's desk while the Owner writes to it, and speaks what
+    /// was sent until a few seconds after the agent's turn ends.
+    private var bossOrder: OfficeBossOrder? {
+        guard settings.officeBoss, let id = model.selectedId, panelShown.wrappedValue else { return nil }
+        if let speech, speech.deskId == id { return OfficeBossOrder(deskId: id, speech: speech.text) }
+        let writing = composing || !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return writing ? OfficeBossOrder(deskId: id, speech: nil) : nil
+    }
+
+    /// Sends the draft to the selected figure's agent; the boss says its first line meanwhile.
+    private func send() {
+        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, model.sendingTo == nil, let id = model.selectedId else { return }
+        draft = ""
+        let said = OfficeLook.bossLine(text)
+        speech = (id, said)
+        Task {
+            let sent = await model.send(text)
+            // Not sent: the words come back so nothing is lost.
+            if !sent && draft.isEmpty && model.selectedId == id { draft = text }
+            try? await Task.sleep(for: .seconds(6))
+            if speech?.deskId == id && speech?.text == said { speech = nil }
         }
     }
 
@@ -171,7 +230,9 @@ private struct OfficeSceneView: View {
     let controller: OfficeSceneController
     let style: OfficeStyle
     let environment: OfficeEnvironment
-    @Environment(\.colorScheme) private var scheme
+    let night: Bool
+    let options: OfficeSceneOptions
+    let boss: OfficeBossOrder?
     @Environment(\.motionLevel) private var motion
     @State private var lastDrag = CGSize.zero
     @State private var lastMagnification: CGFloat = 1
@@ -187,7 +248,7 @@ private struct OfficeSceneView: View {
                 controller.setAspect(Float(proxy.size.width / max(proxy.size.height, 1)))
                 controller.sync(
                     layout: layout, sessions: sessions, selected: selected, style: style, environment: environment,
-                    dark: scheme == .dark, animate: motion == .full)
+                    dark: night, animate: motion == .full, options: options, boss: boss)
             }
             .gesture(
                 SpatialTapGesture().targetedToAnyEntity().onEnded { value in
@@ -354,14 +415,24 @@ private struct PointerControl: NSViewRepresentable {
     }
 }
 
-/// The Chat Panel: one Session's title, project, status and last actions, and its conversation as
-/// chat bubbles in a trailing sidebar. It only shows; the Office cannot write to an agent.
+/// The Chat Panel: one Session's title, project, status and last actions, its conversation as
+/// chat bubbles in a trailing sidebar, and a field to write to its agent.
 struct OfficeChatPanel: View {
     let session: OfficeSession
     let chat: OfficeChatDocument?
     let error: String?
+    @Binding var draft: String
+    /// The agent is running the turn a message from here started.
+    let sending: Bool
+    /// Why the last message was not sent.
+    let notice: String?
+    let send: () -> Void
+    let dismissNotice: () -> Void
+    /// Tells the page when the field gains or loses focus, so the boss can walk over.
+    let composing: (Bool) -> Void
     let close: () -> Void
     @State private var actionsShown = false
+    @FocusState private var fieldFocused: Bool
     @Environment(\.motionLevel) private var motion
 
     private var agent: OfficeAgent { OfficeAgent(kind: session.agent) }
@@ -375,7 +446,11 @@ struct OfficeChatPanel: View {
             header.padding(14)
             Divider()
             conversation
+            Divider()
+            composer.padding(12)
         }
+        .onChange(of: fieldFocused) { _, focused in composing(focused) }
+        .onDisappear { composing(false) }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(session.heading)
     }
@@ -484,6 +559,66 @@ struct OfficeChatPanel: View {
             .onChange(of: chat?.messages.count) { _, _ in
                 withMotion(.smooth(duration: 0.3), motion) { proxy.scrollTo("end", anchor: .bottom) }
             }
+        }
+    }
+
+    /// Only a Session that is not in the middle of a turn takes a message.
+    private var busy: Bool { session.status == .working && !sending }
+
+    private var canSend: Bool {
+        !sending && !busy && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// The message field: Return sends, ⌥Return adds a line.
+    private var composer: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            // The busy line below already says what a busy notice would.
+            if let notice, !(busy && notice == Copy.officeBusyHint) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                    Text(notice).fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                    Button(action: dismissNotice) { Image(systemName: "xmark") }
+                        .buttonStyle(.borderless)
+                        .accessibilityLabel(Copy.closeDetails)
+                }
+                .font(.caption)
+            }
+            HStack(alignment: .bottom, spacing: 8) {
+                TextField(Copy.officeMessagePlaceholder, text: $draft, axis: .vertical)
+                    .lineLimit(1...6)
+                    .textFieldStyle(.plain)
+                    .font(.callout)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 10))
+                    .focused($fieldFocused)
+                    .onSubmit { if canSend { send() } }
+                    .accessibilityLabel(Copy.officeMessagePlaceholder)
+                Button(action: send) {
+                    Image(systemName: "arrow.up.circle.fill").font(.title2)
+                }
+                .buttonStyle(.borderless)
+                .foregroundStyle(canSend ? Color.accentColor : Color.secondary)
+                .disabled(!canSend)
+                .help(Copy.officeSendMessage)
+                .accessibilityLabel(Copy.officeSendMessage)
+            }
+            Group {
+                if sending {
+                    HStack(spacing: 6) {
+                        ProgressView().controlSize(.mini)
+                        Text(Copy.officeSending)
+                    }
+                } else if busy {
+                    Text(Copy.officeBusyHint)
+                } else {
+                    Text(Copy.officeSendHint)
+                }
+            }
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
         }
     }
 

@@ -881,11 +881,37 @@ public enum Copy {
     public static let officeLastActions = "Last actions"
     public static let officeNoActions = "No actions seen yet."
     public static let closeDetails = "Close"
-    public static let officeStyleMenu = "Style"
+    public static let officeStyleMenu = "Customize"
     public static let officeBuildingPicker = "Building"
     public static let officeEnvironmentPicker = "Environment"
     public static let officeHeading = "Office"
-    public static let officeStyleHint = "What the building is made of and what lies outside it. The Office page's Style menu has the same choices."
+    public static let officeStyleHint =
+        "What the building is made of, what lies outside it and how the office looks. The Office page's Customize menu has the same choices."
+    public static let officeTimeOfDayPicker = "Time of day"
+    public static let officeBubblesPicker = "Bubbles"
+    public static let officeStreetLifeToggle = "Street life"
+    public static let officeSlowTurnToggle = "Slow turn"
+    public static let officeBossToggle = "Boss walks over"
+    public static let officeMessagePlaceholder = "Message the agent…"
+    public static let officeSendMessage = "Send"
+    public static let officeSending = "The agent is answering…"
+    public static let officeBusyHint = "The agent is working: send when it waits for you or is idle."
+    public static let officeSendHint =
+        "Return sends, ⌥Return adds a line. The agent runs one turn with your own settings; a terminal that still has this session open sees it only after resuming."
+
+    /// The line under the message field when a message was not sent.
+    public static func officeSendOutcome(_ code: String) -> String {
+        switch code {
+        case "busy": officeBusyHint
+        case "not_found": "This session is no longer running on this Mac."
+        case "unsupported": "Suica can write only to Claude Code, Codex and Gemini CLI."
+        case "agent_missing": "The agent's command line tool was not found on this Mac."
+        case "empty": "Write a message first."
+        case "too_long": "The message is too long: 8,000 characters at most."
+        case "failed": "The agent's turn failed or ran out of time; its own log says why."
+        default: "The message was not sent (\(code))."
+        }
+    }
     public static let officeConversation = "Conversation"
     public static let officeNoChat = "No conversation to show."
     public static let officeChatLoading = "Reading the conversation…"
@@ -1150,6 +1176,22 @@ public enum Copy {
         case .city: "City"
         case .park: "Park"
         case .snow: "Snow"
+        }
+    }
+
+    public static func title(_ value: OfficeTimeOfDay) -> String {
+        switch value {
+        case .system: "Follow appearance"
+        case .day: "Day"
+        case .night: "Night"
+        }
+    }
+
+    public static func title(_ value: OfficeBubbles) -> String {
+        switch value {
+        case .all: "All"
+        case .selected: "Selected only"
+        case .off: "Off"
         }
     }
 

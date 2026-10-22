@@ -461,6 +461,14 @@ extension CLIAgentClient: OfficeClient {
     public func chat(agent: String, sessionId: String) async throws(AgentError) -> OfficeChatDocument {
         try await document(OfficeChatDocument.self, ["office", "chat", agent, sessionId, "--json"])
     }
+
+    /// The CLI gives the agent's turn 30 minutes; this leaves it time to say so.
+    private static let officeSendTimeout: TimeInterval = 31 * 60
+
+    public func send(agent: String, sessionId: String, message: String) async throws(AgentError) -> ActionResult {
+        try await action(
+            ["office", "send", agent, sessionId, "--json"], timeout: Self.officeSendTimeout, stdin: Data(message.utf8))
+    }
 }
 
 extension CLIAgentClient: TemplatesClient {}

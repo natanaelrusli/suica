@@ -146,7 +146,10 @@ public struct OfficeChatDocument: Codable, Equatable, Sendable {
 public protocol OfficeClient: Sendable {
     func office() async throws(AgentError) -> OfficeDocument
     func chat(agent: String, sessionId: String) async throws(AgentError) -> OfficeChatDocument
+    /// Runs one headless turn of the agent with `message` and waits for it: `sent`, or why not.
+    func send(agent: String, sessionId: String, message: String) async throws(AgentError) -> ActionResult
 }
+
 
 // MARK: - Agents
 
@@ -265,6 +268,31 @@ public struct OfficeLook: Equatable, Sendable {
         OfficeColour(0.16, 0.2, 0.34), OfficeColour(0.22, 0.22, 0.24), OfficeColour(0.66, 0.58, 0.42),
         OfficeColour(0.3, 0.42, 0.6), OfficeColour(0.1, 0.1, 0.11),
     ]
+
+    public init(
+        skin: OfficeColour, hair: OfficeHair, hairColour: OfficeColour, shirt: OfficeShirt, shirtColour: OfficeColour,
+        trousers: OfficeColour, extra: OfficeExtra
+    ) {
+        self.skin = skin
+        self.hair = hair
+        self.hairColour = hairColour
+        self.shirt = shirt
+        self.shirtColour = shirtColour
+        self.trousers = trousers
+        self.extra = extra
+    }
+
+    /// The boss who walks over while the Owner writes to an agent: a navy suit with a white
+    /// collar, grey hair and glasses, unlike any agent's figure.
+    public static let boss = OfficeLook(
+        skin: skins[1], hair: .short, hairColour: hairColours[5], shirt: .collar,
+        shirtColour: OfficeColour(0.15, 0.19, 0.32), trousers: OfficeColour(0.12, 0.13, 0.18), extra: .glasses)
+
+    /// What the boss says of a message: its first line, at most 60 characters.
+    public static func bossLine(_ text: String) -> String {
+        let line = text.split(whereSeparator: \.isNewline).first.map(String.init) ?? text
+        return line.count > 60 ? String(line.prefix(59)) + "…" : line
+    }
 
     public init(session: OfficeSession) {
         var seed = OfficeSeed("figure:\(session.id)")
@@ -588,6 +616,10 @@ public final class OfficeModel {
     /// The selected Session's conversation, once read; nil until then and after a deselection.
     public private(set) var chat: OfficeChatDocument?
     public private(set) var chatError: String?
+    /// The Session (its `id`) whose agent is running a turn the Owner started; nil otherwise.
+    public private(set) var sendingTo: String?
+    /// Why the last message was not sent; nil when it was, or before any.
+    public private(set) var sendNotice: String?
 
     /// A Session whose process exited stays at its Desk, greyed, this long.
     public static let stay: TimeInterval = 300
@@ -642,6 +674,30 @@ public final class OfficeModel {
             chatError = MenuModel.message(for: error)
         }
     }
+
+    /// Sends `text` to the selected Session's agent and waits for its turn to end; the answer is
+    /// in the conversation, which is read again then. One message at a time.
+    @discardableResult
+    public func send(_ text: String) async -> Bool {
+        let message = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let session = selected, sendingTo == nil, !message.isEmpty else { return false }
+        sendingTo = session.id
+        sendNotice = nil
+        var sent = false
+        do {
+            let result = try await client.send(agent: session.agent, sessionId: session.sessionId, message: message)
+            sent = result.code == "sent"
+            if !sent { sendNotice = Copy.officeSendOutcome(result.code) }
+        } catch {
+            sendNotice = MenuModel.message(for: error)
+        }
+        sendingTo = nil
+        await loadChat()
+        return sent
+    }
+
+    /// Clears the line under the message field.
+    public func dismissSendNotice() { sendNotice = nil }
 
     /// Polls until cancelled; the page runs it only while it is on screen.
     public func runPollLoop(every interval: Duration) async {

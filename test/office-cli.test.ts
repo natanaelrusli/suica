@@ -122,3 +122,37 @@ describe("suica office chat <agent> <sessionId> --json", () => {
     expect(suica("", ["office", "chat", "claude", "--json"]).status).toBe(2);
   });
 });
+
+describe("suica office send --json", () => {
+  function send(args: readonly string[], input: string): Run {
+    const configPath = join(dir, "config.yaml");
+    writeFileSync(configPath, "gitlab:\n  hostname: h\n");
+    const result = spawnSync(
+      "node",
+      [join(process.cwd(), "src/cli.ts"), "office", "send", ...args],
+      {
+        encoding: "utf8",
+        input,
+        env: { ...process.env, SUICA_CONFIG: configPath, HOME: dir },
+      },
+    );
+    return { status: result.status, stdout: result.stdout, stderr: result.stderr };
+  }
+  const status = (run: Run): unknown => JSON.parse(run.stdout.trim().split("\n").at(-1) ?? "");
+
+  it("refuses a blank message without looking for the Session", () => {
+    const run = send(["claude", "c1", "--json"], "  \n");
+    expect(status(run)).toEqual({ status: "empty" });
+    expect(run.status).toBe(1);
+  });
+
+  it("says when the Session is not running on this Mac", () => {
+    const run = send(["claude", "c1", "--json"], "Fix the test");
+    expect(status(run)).toEqual({ status: "not_found" });
+    expect(run.status).toBe(1);
+  });
+
+  it("needs an agent and a session id", () => {
+    expect(send(["claude", "--json"], "hi").status).toBe(2);
+  });
+});

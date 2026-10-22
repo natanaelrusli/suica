@@ -155,6 +155,39 @@ public enum OfficeEnvironment: String, CaseIterable, Identifiable, Sendable {
     public var title: String { Copy.title(self) }
 }
 
+/// Whether the Office shows day or night: as the app's light or dark mode, or always one.
+public enum OfficeTimeOfDay: String, CaseIterable, Identifiable, Sendable {
+    case system, day, night
+    public var id: String { rawValue }
+
+    public var title: String { Copy.title(self) }
+
+    /// Night lights the lamps, shows the moon and darkens the sky.
+    public func isNight(darkMode: Bool) -> Bool {
+        switch self {
+        case .system: darkMode
+        case .day: false
+        case .night: true
+        }
+    }
+}
+
+/// Which figures show their bubble.
+public enum OfficeBubbles: String, CaseIterable, Identifiable, Sendable {
+    case all, selected, off
+    public var id: String { rawValue }
+
+    public var title: String { Copy.title(self) }
+
+    public func shows(selected: Bool) -> Bool {
+        switch self {
+        case .all: true
+        case .selected: selected
+        case .off: false
+        }
+    }
+}
+
 /// A system sound for a celebration.
 public enum SoundEffect: String, CaseIterable, Identifiable, Sendable {
     case off, pop, glass, purr, hero, tink, submarine
@@ -278,6 +311,14 @@ public final class AppearanceSettings {
     public var officeEnvironment: OfficeEnvironment {
         didSet { store(officeEnvironment.rawValue, Key.officeEnvironment) }
     }
+    public var officeTimeOfDay: OfficeTimeOfDay { didSet { store(officeTimeOfDay.rawValue, Key.officeTimeOfDay) } }
+    public var officeBubbles: OfficeBubbles { didSet { store(officeBubbles.rawValue, Key.officeBubbles) } }
+    /// Walkers, cyclists and cars on the street.
+    public var officeStreetLife: Bool { didSet { defaults.set(officeStreetLife, forKey: Key.officeStreetLife) } }
+    /// The camera turns slowly round the office while nothing is dragged.
+    public var officeSlowTurn: Bool { didSet { defaults.set(officeSlowTurn, forKey: Key.officeSlowTurn) } }
+    /// The boss walks to a figure while you write to it.
+    public var officeBoss: Bool { didSet { defaults.set(officeBoss, forKey: Key.officeBoss) } }
 
     @ObservationIgnored private let defaults: any PreferenceStore
 
@@ -297,9 +338,15 @@ public final class AppearanceSettings {
         static let sound = "appearance.sound"
         static let officeStyle = "appearance.officeStyle"
         static let officeEnvironment = "appearance.officeEnvironment"
+        static let officeTimeOfDay = "appearance.officeTimeOfDay"
+        static let officeBubbles = "appearance.officeBubbles"
+        static let officeStreetLife = "appearance.officeStreetLife"
+        static let officeSlowTurn = "appearance.officeSlowTurn"
+        static let officeBoss = "appearance.officeBoss"
         static let all = [
             theme, mode, density, motion, badge, counters, start, customAccent, icon, emoji, backdrop, celebrations,
-            sound, officeStyle, officeEnvironment,
+            sound, officeStyle, officeEnvironment, officeTimeOfDay, officeBubbles, officeStreetLife, officeSlowTurn,
+            officeBoss,
         ]
     }
 
@@ -321,6 +368,11 @@ public final class AppearanceSettings {
         static let sound = SoundEffect.off
         static let officeStyle = OfficeStyle.modern
         static let officeEnvironment = OfficeEnvironment.city
+        static let officeTimeOfDay = OfficeTimeOfDay.system
+        static let officeBubbles = OfficeBubbles.all
+        static let officeStreetLife = true
+        static let officeSlowTurn = false
+        static let officeBoss = true
     }
 
     /// `defaults` is the app's own (`UserDefaults.standard`) unless a test passes its own store.
@@ -347,6 +399,11 @@ public final class AppearanceSettings {
         sound = read(Key.sound, Default.sound)
         officeStyle = read(Key.officeStyle, Default.officeStyle)
         officeEnvironment = read(Key.officeEnvironment, Default.officeEnvironment)
+        officeTimeOfDay = read(Key.officeTimeOfDay, Default.officeTimeOfDay)
+        officeBubbles = read(Key.officeBubbles, Default.officeBubbles)
+        officeStreetLife = defaults.object(forKey: Key.officeStreetLife) as? Bool ?? Default.officeStreetLife
+        officeSlowTurn = defaults.object(forKey: Key.officeSlowTurn) as? Bool ?? Default.officeSlowTurn
+        officeBoss = defaults.object(forKey: Key.officeBoss) as? Bool ?? Default.officeBoss
     }
 
     /// The accent colour as 0xRRGGBB, or nil for the system's.
@@ -363,7 +420,9 @@ public final class AppearanceSettings {
             && startPage == Default.start && customAccent == Default.customAccent && menuBarIcon == Default.icon
             && menuBarEmoji == Default.emoji && backdrop == Default.backdrop && celebrations == Default.celebrations
             && sound == Default.sound && officeStyle == Default.officeStyle
-            && officeEnvironment == Default.officeEnvironment
+            && officeEnvironment == Default.officeEnvironment && officeTimeOfDay == Default.officeTimeOfDay
+            && officeBubbles == Default.officeBubbles && officeStreetLife == Default.officeStreetLife
+            && officeSlowTurn == Default.officeSlowTurn && officeBoss == Default.officeBoss
     }
 
     /// Every choice back to its default, and the stored values removed.
@@ -383,6 +442,11 @@ public final class AppearanceSettings {
         sound = Default.sound
         officeStyle = Default.officeStyle
         officeEnvironment = Default.officeEnvironment
+        officeTimeOfDay = Default.officeTimeOfDay
+        officeBubbles = Default.officeBubbles
+        officeStreetLife = Default.officeStreetLife
+        officeSlowTurn = Default.officeSlowTurn
+        officeBoss = Default.officeBoss
         for key in Key.all { defaults.removeObject(forKey: key) }
     }
 
