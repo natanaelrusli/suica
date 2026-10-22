@@ -31,6 +31,7 @@ import {
 } from "./reviews.ts";
 import {
   cancelAgentReview,
+  dailyCapReached,
   discardAgentReview,
   postAgentReview,
   rereviewWaitingReasons,
@@ -67,7 +68,7 @@ import { realProbe } from "./office/probe.ts";
 import { buildUsage } from "./usage.ts";
 
 const USAGE =
-  "usage: suica <once|status|state|stats|usage|office --json|office chat <agent> <sessionId> --json|office send <agent> <sessionId> --json (message on stdin)|pause|resume|pending [--all]|send <id> [--json]|skip <id> [--json]|retry <id> [--json]|selftest|message <key> --json (request on stdin)|reviews --json|mr <key> --json|mr approve <key> <sha> --json|mr comment <key> --json (body on stdin)|mr close <key> --json|mr merge <key> <sha> [--squash] [--remove-source-branch] [--when-pipeline-succeeds] --json (message on stdin)|review options [--cli <id>] --json|review queue <key> [--skill <name>] [--model <name>] --json|review post <id> [--inline|--comment] --json|review discard <id> --json|review cancel <id> --json|fix list --json|fix queue <key> [--pipeline] --json|fix watch <key> --json|fix unwatch <key> --json|fix confirm <id> --json (edits on stdin)|fix retry <id> --json (note on stdin)|fix discard <id> --json|fix cancel <id> --json|fix replies <id> --json|config show --json|config set --json|templates show --json|templates set --json|gitlab check <host> --json|agent install [--json]|agent uninstall|agent restart --json>\n";
+  "usage: suica <once|status|state|stats|usage|office --json|office chat <agent> <sessionId> --json|office send <agent> <sessionId> --json (message on stdin)|pause|resume|pending [--all]|send <id> [--json]|skip <id> [--json]|retry <id> [--json]|selftest|message <key> --json (request on stdin)|reviews --json|mr <key> --json|mr approve <key> <sha> --json|mr comment <key> --json (body on stdin)|mr close <key> --json|mr merge <key> <sha> [--squash] [--remove-source-branch] [--when-pipeline-succeeds] --json (message on stdin)|review options [--cli <id>] --json|review queue <key> [--skill <name>] [--model <name>] [--auto] --json|review post <id> [--inline|--comment] --json|review discard <id> --json|review cancel <id> --json|fix list --json|fix queue <key> [--pipeline] --json|fix watch <key> --json|fix unwatch <key> --json|fix confirm <id> --json (edits on stdin)|fix retry <id> --json (note on stdin)|fix discard <id> --json|fix cancel <id> --json|fix replies <id> --json|config show --json|config set --json|templates show --json|templates set --json|gitlab check <host> --json|agent install [--json]|agent uninstall|agent restart --json>\n";
 const TEAMS_DISABLED = "teams is disabled: set teams.enabled to true in the config\n";
 const SHOWN_WITH_ALL = 50;
 
@@ -331,7 +332,8 @@ function reviewOptions(argv: readonly string[]): number {
 /**
  * `suica review queue|post|discard|cancel`: the background agent starts a queued review within a few
  * seconds; post and discard act on a review that waits for the Owner, and cancel stops a queued or
- * running one. `queue` takes `--skill` (an installed skill) and `--model` for that review only.
+ * running one. `queue` takes `--skill` (an installed skill) and `--model` for that review only,
+ * and `--auto` to queue an automatic review, refused with `daily-cap` once `review.maxPerDay` is used.
  * `post` takes `--inline` or `--comment`, else `review.postAs`. Each prints `{"status": …}`.
  */
 async function reviewCommand(argv: readonly string[]): Promise<number> {
@@ -360,7 +362,16 @@ async function reviewCommand(argv: readonly string[]): Promise<number> {
               ...(skill === undefined ? {} : { skill }),
               ...(model === undefined ? {} : { model }),
             };
-      const id = store.queueAgentReview(target, "manual", Date.now(), undefined, choice);
+      // The app queues the re-reviews that wait for a push to settle as automatic ones, in the cap.
+      const auto = argv.includes("--auto");
+      if (auto && dailyCapReached(store, config, Date.now())) return reply("daily-cap", false);
+      const id = store.queueAgentReview(
+        target,
+        auto ? "auto" : "manual",
+        Date.now(),
+        undefined,
+        choice,
+      );
       return id === undefined ? reply("already-queued", true) : reply("queued", true);
     }
     const id = parseId(target);

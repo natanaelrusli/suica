@@ -254,8 +254,12 @@ struct MainWindow: View {
         }
         // Cancelled when the window closes.
         .task { await window.runRefreshLoop(every: .seconds(30)) }
-        // A first run: no config file yet. Checked again each time the window opens.
-        .task { await onboarding.checkNeeded() }
+        // A first run: no config file yet. Checked again each time the window opens, and so are the
+        // re-reviews that only wait for a push to settle.
+        .task {
+            await onboarding.checkNeeded()
+            if !onboarding.needsSetup { await reviews.runWaitingRereviews() }
+        }
     }
 
     private var pages: some View {

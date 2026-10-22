@@ -876,7 +876,7 @@ export function queueAutomaticReviews(
 }
 
 /** True when automatic reviews in the last 24 hours reached `review.maxPerDay`. */
-function dailyCapReached(
+export function dailyCapReached(
   store: Pick<Store, "countAgentReviews">,
   config: Pick<Config, "review">,
   now: number,

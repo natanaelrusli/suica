@@ -14,6 +14,8 @@ struct MenuView: View {
     @State private var tabPicked = false
     /// The outcome of a Cancel pressed here; the Reviews page's own banner is not repeated.
     @State private var cancelNotice: String?
+    /// True for the first frame of an opening: the content then drops into place as the panel fades in.
+    @State private var dropped = false
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismiss) private var dismiss
     @Environment(\.motionLevel) private var motion
@@ -40,6 +42,14 @@ struct MenuView: View {
         }
         // Fixed, so the lists have room even with one row in them.
         .frame(width: 460, height: 640, alignment: .top)
+        // A keyframe animator here left the panel blank; a plain offset animates.
+        .offset(y: dropped ? -8 : 0)
+        .background(MenuPanelMotion(level: motion))
+        .onAppear {
+            guard motion == .full else { return }
+            dropped = true
+            DispatchQueue.main.async { withAnimation(.smooth(duration: 0.3)) { dropped = false } }
+        }
         .motion(value: onboarding.needsSetup)
         .motion(value: settings.showsPopoverCounters)
         .motion(value: model.errorText)
@@ -61,6 +71,7 @@ struct MenuView: View {
             // A message that arrived since the last refresh can change where the panel should open.
             if !tabPicked { tab = PanelTab.opening(badgeCount: model.badgeCount) }
             await window.refreshStatus()
+            await reviews.runWaitingRereviews()
         }
     }
 
