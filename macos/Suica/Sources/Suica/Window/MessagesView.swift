@@ -6,6 +6,7 @@ import SwiftUI
 struct MessagesView: View {
     @Bindable var window: WindowModel
     @State private var query = ""
+    @State private var confirmingClear = false
     @Environment(\.motionLevel) private var motion
 
     private var model: MenuModel { window.menu }
@@ -70,8 +71,20 @@ struct MessagesView: View {
                     }
                 }
                 if !recent.isEmpty {
-                    Section(Copy.recentHeading(recent.count)) {
+                    Section {
                         ForEach(recent) { row($0) }
+                    } header: {
+                        HStack {
+                            Text(Copy.recentHeading(recent.count))
+                            Spacer()
+                            // A search shows part of the list; the button clears all of it.
+                            if !searching {
+                                Button(Copy.clear) { confirmingClear = true }
+                                    .buttonStyle(.borderless)
+                                    .controlSize(.small)
+                                    .disabled(model.clearingRecent)
+                            }
+                        }
                     }
                 }
             } else if model.state != nil {
@@ -85,6 +98,12 @@ struct MessagesView: View {
         .motion(value: model.state?.teams)
         .motion(value: group)
         .task { await model.refresh() }
+        .confirmationDialog(Copy.clearRecentTitle, isPresented: $confirmingClear) {
+            Button(Copy.clear, role: .destructive) { Task { await model.clearRecent(group) } }
+            Button(Copy.cancel, role: .cancel) {}
+        } message: {
+            Text(Copy.clearRecentMessage)
+        }
         .toolbar {
             Button { Task { await model.refresh() } } label: {
                 Label(Copy.refresh, systemImage: "arrow.clockwise")

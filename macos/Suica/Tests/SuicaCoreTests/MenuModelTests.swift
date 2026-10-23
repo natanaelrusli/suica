@@ -30,6 +30,8 @@ actor FakeClient: AgentClient {
     private(set) var sendCalls: [Int] = []
     private(set) var skipCalls: [Int] = []
     private(set) var retryCalls: [Int] = []
+    private(set) var clearCalls: [Int] = []
+    private(set) var clearRecentCalls: [MessageGroup?] = []
     private(set) var pauseCalls: [Bool] = []
 
     init(states: [Result<AgentState, AgentError>]) { self.states = states }
@@ -65,6 +67,16 @@ actor FakeClient: AgentClient {
 
     func retry(id: Int) async throws(AgentError) -> ActionResult {
         retryCalls.append(id)
+        return try otherResult.get()
+    }
+
+    func clear(id: Int) async throws(AgentError) -> ActionResult {
+        clearCalls.append(id)
+        return try otherResult.get()
+    }
+
+    func clearRecent(_ group: MessageGroup?) async throws(AgentError) -> ActionResult {
+        clearRecentCalls.append(group)
         return try otherResult.get()
     }
 
@@ -296,4 +308,38 @@ func makeState(attention: [OutboxItem] = [], paused: Bool = false) -> AgentState
     await client.setSend(.failure(.timedOut))
     await model.send(item(3, "pending"))
     #expect(model.sentCount == 1)
+}
+
+@MainActor @Test func clearOnlyClearsFinishedMessagesAndRefreshes() async {
+    let client = FakeClient(states: [.success(makeState())])
+    await client.setOther(.success(ActionResult(code: "cleared")))
+    let model = MenuModel(client: client)
+    await model.clear(item(1, "pending"))
+    #expect(await client.clearCalls == [])
+    await model.clear(item(2, "sent"))
+    await model.clear(item(3, "failed"))
+    #expect(await client.clearCalls == [2, 3])
+    #expect(model.banner == Copy.flash(for: "cleared"))
+    await model.clearRecent(.others)
+    await model.clearRecent(nil)
+    #expect(await client.clearRecentCalls == [.others, nil])
+    #expect(!model.clearingRecent)
+    #expect(await client.stateCalls == 4)
+}
+
+@MainActor @Test func aFailedClearRecentShowsAPlainError() async {
+    let client = FakeClient(states: [.success(makeState())])
+    await client.setOther(.failure(.timedOut))
+    let model = MenuModel(client: client)
+    await model.clearRecent(.yours)
+    #expect(model.banner == Copy.agentTimedOut)
+}
+
+@Test func onlyAFailedMessageOffersClearAsItsAction() {
+    #expect(item(1, "failed").actions == [.clear])
+    #expect(item(1, "sent").actions.isEmpty)
+    #expect(item(1, "sent").clearable)
+    #expect(item(1, "dry-run").clearable)
+    #expect(!item(1, "pending").clearable)
+    #expect(!item(1, "sending").clearable)
 }

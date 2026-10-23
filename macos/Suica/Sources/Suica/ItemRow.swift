@@ -203,7 +203,7 @@ struct ItemRow: View {
         } else if !item.actions.isEmpty {
             HStack {
                 ForEach(Array(item.actions.enumerated()), id: \.offset) { _, action in
-                    if action == .skip {
+                    if action == .skip || action == .clear {
                         Button(label(for: action)) { onAction(action) }.disabled(busy)
                     } else {
                         Button(label(for: action)) { onAction(action) }
@@ -232,6 +232,7 @@ struct ItemRow: View {
         case .send: Copy.send
         case .skip: Copy.skip
         case .retry: Copy.retry
+        case .clear: Copy.clear
         }
     }
 }
@@ -254,9 +255,16 @@ struct OutboxItemRow: View {
                 case .send: model.requestSend(item)
                 case .skip: Task { await model.skip(item) }
                 case .retry: Task { await model.retry(item) }
+                case .clear: Task { await model.clear(item) }
                 }
             },
             onConfirm: { Task { await model.confirmSend() } },
-            onCancel: { model.cancelConfirmation() })
+            onCancel: { model.cancelConfirmation() }
+        )
+        .contextMenu {
+            if item.clearable {
+                Button(Copy.clear) { Task { await model.clear(item) } }
+            }
+        }
     }
 }

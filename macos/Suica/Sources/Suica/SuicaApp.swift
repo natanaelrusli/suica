@@ -8,6 +8,8 @@ private struct UnconfiguredClient: AgentClient {
     func send(id: Int) async throws(AgentError) -> ActionResult { throw AgentError.launchFailed }
     func skip(id: Int) async throws(AgentError) -> ActionResult { throw AgentError.launchFailed }
     func retry(id: Int) async throws(AgentError) -> ActionResult { throw AgentError.launchFailed }
+    func clear(id: Int) async throws(AgentError) -> ActionResult { throw AgentError.launchFailed }
+    func clearRecent(_ group: MessageGroup?) async throws(AgentError) -> ActionResult { throw AgentError.launchFailed }
     func setPaused(_ paused: Bool) async throws(AgentError) { throw AgentError.launchFailed }
 }
 

@@ -17,7 +17,7 @@ import type { TeamsGateway } from "./gateway.ts";
 import { planTeams } from "./plan.ts";
 import type { Templates } from "./templates.ts";
 import { ATTENTION_STATUSES, OUTBOX_STATUSES } from "./types.ts";
-import type { Intent, OutboxRow } from "./types.ts";
+import type { Intent, OutboxKind, OutboxRow } from "./types.ts";
 
 export interface TeamsService extends TeamsHooks {
   sendPending(id: number): Promise<SendPendingOutcome>;
@@ -29,6 +29,10 @@ export interface TeamsService extends TeamsHooks {
   list(all: boolean): OutboxRow[];
   skip(id: number): boolean;
   retry(id: number): boolean;
+  /** Hides a finished row from `list`; the row stays for stats. */
+  clear(id: number): boolean;
+  /** Hides every sent, skipped or dry-run row of these kinds from `list`; how many. */
+  clearRecent(kinds: readonly OutboxKind[]): number;
   /** Sends a fixed test line to the Owner's own notes chat; proves the MCP path end to end. */
   selfTest(): Promise<void>;
 }
@@ -90,9 +94,12 @@ export function createTeamsService(deps: ServiceDeps): TeamsService {
     sendPending: (id) => sendPending(dispatchDeps, id),
     draft: (intent, ownerName) => draftManual(dispatchDeps, intent, ownerName),
     sendManual: (intent, text) => sendManual(dispatchDeps, intent, text),
-    list: (all) => deps.store.listOutbox(all ? OUTBOX_STATUSES : ATTENTION_STATUSES),
+    list: (all) =>
+      deps.store.listOutbox(all ? OUTBOX_STATUSES : ATTENTION_STATUSES, { hideCleared: true }),
     skip: (id) => skipOutbox(deps.store, id, deps.now()),
     retry: (id) => retryOutbox(deps.store, id, deps.now()),
+    clear: (id) => deps.store.clearOutbox(id, deps.now()),
+    clearRecent: (kinds) => deps.store.clearRecentOutbox(kinds, deps.now()),
     selfTest: () =>
       deps.gateway.session(async (api) => {
         await api.sendMessage(SELF_CHAT_ID, SELF_TEST_TEXT);
