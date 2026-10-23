@@ -98,16 +98,17 @@ public struct OutboxItem: Codable, Equatable, Identifiable, Sendable {
     /// the Authors of MRs you reviewed. An unknown kind counts as someone else's MR.
     public var isAboutYourMR: Bool { ["nudge", "reminder", "rereview"].contains(kind) }
 
-    /// Finished messages can be cleared from the lists.
-    public var clearable: Bool { outcome != nil }
+    /// Finished messages can be cleared from the lists, and so can one stuck in sending once you
+    /// checked Teams: nothing else moves it on.
+    public var clearable: Bool { outcome != nil || state == .sending }
 
     public var actions: [ItemAction] {
         switch state {
         case .pending: [.send, .skip]
         case .unresolved: [.retry, .skip]
         case .queued: [.skip]
-        // Nothing else ends a failed message, so it says how to put it away.
-        case .failed: [.clear]
+        // Nothing else ends a failed or stuck message, so it says how to put it away.
+        case .failed, .sending: [.clear]
         default: []
         }
     }

@@ -335,11 +335,13 @@ func makeState(attention: [OutboxItem] = [], paused: Bool = false) -> AgentState
     #expect(model.banner == Copy.agentTimedOut)
 }
 
-@Test func onlyAFailedMessageOffersClearAsItsAction() {
+@Test func onlyAFailedOrStuckMessageOffersClearAsItsAction() {
     #expect(item(1, "failed").actions == [.clear])
+    #expect(item(1, "sending").actions == [.clear])
     #expect(item(1, "sent").actions.isEmpty)
     #expect(item(1, "sent").clearable)
     #expect(item(1, "dry-run").clearable)
     #expect(!item(1, "pending").clearable)
-    #expect(!item(1, "sending").clearable)
+    #expect(item(1, "sending").clearable)
+    #expect(!item(1, "queued").clearable)
 }

@@ -56,7 +56,7 @@ func rejectsGarbage(text: String) {
 
 @Test(arguments: [
     ("pending", [ItemAction.send, .skip]), ("unresolved", [.retry, .skip]), ("queued", [.skip]),
-    ("sent", []), ("failed", [.clear]), ("sending", []), ("skipped", []), ("dry-run", []),
+    ("sent", []), ("failed", [.clear]), ("sending", [.clear]), ("skipped", []), ("dry-run", []),
 ])
 func actionsFollowTheStatus(status: String, expected: [ItemAction]) {
     #expect(item(status: status).actions == expected)
