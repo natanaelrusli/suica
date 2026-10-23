@@ -98,6 +98,24 @@ private let stateJSON =
     #expect(await runner.invocations.allSatisfy { $0.timeout == 20 })
 }
 
+@Test func clearPassesTheIdOrTheGroup() async throws {
+    let runner = FakeRunner([
+        output(#"{"status":"cleared"}"#), output(#"{"status":"cleared"}"#), output(#"{"status":"nothing"}"#),
+        output(#"{"status":"cleared"}"#),
+    ])
+    let client = CLIAgentClient(config: config, runner: runner)
+    #expect(try await client.clear(id: 7).code == "cleared")
+    _ = try await client.clearRecent(.yours)
+    #expect(try await client.clearRecent(.others).code == "nothing")
+    _ = try await client.clearRecent(nil)
+    let calls = await runner.invocations.map { $0.arguments }
+    #expect(
+        calls == [
+            ["clear", "7", "--json"], ["clear", "yours", "--json"], ["clear", "others", "--json"],
+            ["clear", "all", "--json"],
+        ])
+}
+
 @Test func aNonZeroExitWithoutJsonFails() async {
     let client = CLIAgentClient(config: config, runner: FakeRunner([output("", exit: 3)]))
     await #expect(throws: AgentError.failed(exitCode: 3)) { try await client.send(id: 1) }

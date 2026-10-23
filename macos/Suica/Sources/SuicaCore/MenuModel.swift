@@ -10,6 +10,7 @@ public final class MenuModel {
     public private(set) var sentCount = 0
     public private(set) var busyIds: Set<Int> = []
     public private(set) var confirmation: OutboxItem?
+    public private(set) var clearingRecent = false
 
     @ObservationIgnored private let client: any AgentClient
     @ObservationIgnored private var latestRefresh = 0
@@ -94,6 +95,26 @@ public final class MenuModel {
         await perform(id: item.id) { (client) async throws(AgentError) -> ActionResult in
             try await client.retry(id: item.id)
         }
+    }
+
+    public func clear(_ item: OutboxItem) async {
+        guard item.clearable else { return }
+        await perform(id: item.id) { (client) async throws(AgentError) -> ActionResult in
+            try await client.clear(id: item.id)
+        }
+    }
+
+    /// Clears the Recent list of a group, or of both when nil.
+    public func clearRecent(_ group: MessageGroup?) async {
+        guard !clearingRecent else { return }
+        clearingRecent = true
+        do {
+            banner = Copy.flash(for: try await client.clearRecent(group).code)
+        } catch {
+            banner = Self.message(for: error)
+        }
+        clearingRecent = false
+        await refresh()
     }
 
     public func togglePause() async {

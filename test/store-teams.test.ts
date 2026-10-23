@@ -70,7 +70,7 @@ describe("schema v2", () => {
     store.close();
 
     const raw = new DatabaseSync(path);
-    expect(raw.prepare("PRAGMA user_version").get()?.["user_version"]).toBe(18);
+    expect(raw.prepare("PRAGMA user_version").get()?.["user_version"]).toBe(19);
     raw.close();
   });
 });
@@ -235,7 +235,7 @@ describe("Re-review ledger (schema 8)", () => {
     expect(store.loadTeams().rereviewMrs.size).toBe(1);
     store.close();
     const check = new DatabaseSync(path);
-    expect(check.prepare("PRAGMA user_version").get()?.["user_version"]).toBe(18);
+    expect(check.prepare("PRAGMA user_version").get()?.["user_version"]).toBe(19);
     check.close();
   });
 
@@ -287,6 +287,87 @@ describe("outbox transitions", () => {
     expect(ids[0]).toBeLessThan(ids[1] ?? 0);
     expect(store.listOutbox(["sent", "failed"])).toEqual([]);
     expect(store.getOutbox(9999)).toBeUndefined();
+  });
+});
+
+describe("clearing outbox rows", () => {
+  /** One row per status in `statuses`, in order; their ids. */
+  function rows(
+    store: ReturnType<typeof openStore>,
+    path: readonly (readonly ["queued" | "pending" | "sent" | "skipped" | "failed", string?])[],
+  ): number[] {
+    store.applyTeamsPlan(
+      teamsPlan({
+        intents: path.map(([, kind], slot) =>
+          kind === "notice"
+            ? intent(slot, {
+                dedupeKey: `notice:${slot}`,
+                kind: "notice",
+                variant: "notice.approved",
+              })
+            : intent(slot),
+        ),
+      }),
+      NOW,
+    );
+    const ids = store.listOutbox(["queued"]).map((row) => row.id);
+    path.forEach(([status], index) => {
+      const id = ids[index] ?? 0;
+      if (status === "queued") return;
+      store.transitionOutbox(id, "queued", "pending", { text: "halo" }, NOW);
+      if (status !== "pending") store.transitionOutbox(id, "pending", status, {}, NOW);
+    });
+    return ids;
+  }
+  const all = ["queued", "pending", "sent", "skipped", "failed"] as const;
+
+  it("clears one finished row from the hidden-cleared list and keeps it for everything else", () => {
+    const store = openStore(":memory:");
+    const [, pending, sent, , failed] = rows(store, [
+      ["queued"],
+      ["pending"],
+      ["sent"],
+      ["skipped"],
+      ["failed"],
+    ]);
+    expect(store.clearOutbox(sent ?? 0, NOW + 1)).toBe(true);
+    expect(store.clearOutbox(sent ?? 0, NOW + 2)).toBe(false);
+    expect(store.clearOutbox(failed ?? 0, NOW + 1)).toBe(true);
+    // A message still on its way cannot be cleared.
+    expect(store.clearOutbox(pending ?? 0, NOW + 1)).toBe(false);
+    expect(store.listOutbox(all, { hideCleared: true }).map((row) => row.status)).toEqual([
+      "queued",
+      "pending",
+      "skipped",
+    ]);
+    expect(store.listOutbox(all)).toHaveLength(5);
+  });
+
+  it("clears the Recent rows of the given kinds, never a failed or open one", () => {
+    const store = openStore(":memory:");
+    rows(store, [["sent"], ["skipped"], ["failed"], ["pending"], ["sent", "notice"]]);
+    expect(store.clearRecentOutbox(["nudge"], NOW + 1)).toBe(2);
+    expect(store.clearRecentOutbox(["nudge"], NOW + 2)).toBe(0);
+    expect(store.clearRecentOutbox([], NOW + 2)).toBe(0);
+    expect(
+      store.listOutbox(all, { hideCleared: true }).map((row) => [row.kind, row.status]),
+    ).toEqual([
+      ["nudge", "failed"],
+      ["nudge", "pending"],
+      ["notice", "sent"],
+    ]);
+  });
+
+  it("adds the cleared column to a schema 18 database", () => {
+    const path = tempDb();
+    openStore(path).close();
+    const raw = new DatabaseSync(path);
+    raw.exec("ALTER TABLE outbox DROP COLUMN cleared_at; PRAGMA user_version = 18;");
+    raw.close();
+    const store = openStore(path);
+    const [sent] = rows(store, [["sent"]]);
+    expect(store.clearOutbox(sent ?? 0, NOW)).toBe(true);
+    store.close();
   });
 });
 

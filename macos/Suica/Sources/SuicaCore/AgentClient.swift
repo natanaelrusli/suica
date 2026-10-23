@@ -228,6 +228,10 @@ public protocol AgentClient: Sendable {
     func send(id: Int) async throws(AgentError) -> ActionResult
     func skip(id: Int) async throws(AgentError) -> ActionResult
     func retry(id: Int) async throws(AgentError) -> ActionResult
+    /// Hides a finished message from the lists.
+    func clear(id: Int) async throws(AgentError) -> ActionResult
+    /// Hides every sent or skipped message of the group, or of both when nil.
+    func clearRecent(_ group: MessageGroup?) async throws(AgentError) -> ActionResult
     func setPaused(_ paused: Bool) async throws(AgentError)
 }
 
@@ -319,6 +323,20 @@ public struct CLIAgentClient: AgentClient {
 
     public func retry(id: Int) async throws(AgentError) -> ActionResult {
         try await action(["retry", String(id), "--json"], timeout: Self.shortTimeout)
+    }
+
+    public func clear(id: Int) async throws(AgentError) -> ActionResult {
+        try await action(["clear", String(id), "--json"], timeout: Self.shortTimeout)
+    }
+
+    public func clearRecent(_ group: MessageGroup?) async throws(AgentError) -> ActionResult {
+        let target =
+            switch group {
+            case .yours: "yours"
+            case .others: "others"
+            case nil: "all"
+            }
+        return try await action(["clear", target, "--json"], timeout: Self.shortTimeout)
     }
 
     public func setPaused(_ paused: Bool) async throws(AgentError) {

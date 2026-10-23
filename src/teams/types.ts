@@ -15,6 +15,8 @@ export type TemplateName = (typeof TEMPLATE_NAMES)[number];
 
 export const OUTBOX_KINDS = ["nudge", "reminder", "notice", "rereview"] as const;
 export type OutboxKind = (typeof OUTBOX_KINDS)[number];
+/** Messages to Reviewers of the Owner's own MRs; a notice goes to the Author of an MR they reviewed. */
+export const YOUR_MR_KINDS: readonly OutboxKind[] = ["nudge", "reminder", "rereview"];
 
 export const OUTBOX_STATUSES = [
   "queued",

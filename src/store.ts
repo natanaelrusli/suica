@@ -14,6 +14,7 @@ import { isOutboxKind, isOutboxStatus, isTemplateName } from "./teams/types.ts";
 import type {
   Intent,
   NudgeRecord,
+  OutboxKind,
   OutboxRow,
   OutboxStatus,
   PostedReview,
@@ -223,7 +224,12 @@ export interface Store {
   applyTeamsPlan(plan: TeamsPlan, now: number): number;
   /** Stores a message the Owner sends by hand, approved and `pending` until it is delivered; its id. */
   insertManualOutbox(intent: Intent, text: string, now: number): number;
-  listOutbox(statuses: readonly OutboxStatus[]): OutboxRow[];
+  /** Every row in `statuses`; with `hideCleared`, not the ones the Owner cleared. */
+  listOutbox(statuses: readonly OutboxStatus[], options?: { hideCleared?: boolean }): OutboxRow[];
+  /** Hides one finished row from the lists; false when it is not finished or already cleared. */
+  clearOutbox(id: number, now: number): boolean;
+  /** Hides every sent, skipped or dry-run row of these kinds; how many it cleared. */
+  clearRecentOutbox(kinds: readonly OutboxKind[], now: number): number;
   getOutbox(id: number): OutboxRow | undefined;
   /** Compare-and-set: true only for the one caller that found the row in `from`. */
   transitionOutbox(
@@ -298,7 +304,9 @@ export interface Store {
   close(): void;
 }
 
-const SCHEMA_VERSION = 18;
+const SCHEMA_VERSION = 19;
+/** When the Owner cleared a finished message from the lists; the row stays for stats and dedupe. */
+const SCHEMA_V19 = `ALTER TABLE outbox ADD COLUMN cleared_at INTEGER;`;
 /** The skill and model the Owner picked for one review. */
 const SCHEMA_V18_COLUMNS: readonly (readonly [string, string])[] = [
   ["skill", "TEXT"],
@@ -462,6 +470,8 @@ CREATE TABLE IF NOT EXISTS identity (
 `;
 const META_TEAMS_BASELINE = "teams_baseline_done";
 const FINISHED_STATUSES = ["sent", "skipped", "failed", "dry-run"] as const;
+/** Finished rows the app lists under Recent; a failed one stays under Needs attention. */
+const RECENT_STATUSES = ["sent", "skipped", "dry-run"] as const;
 const OUTBOX_RETENTION_MS = 90 * 24 * 3_600_000;
 const HISTORY_RETENTION_MS = 90 * 24 * 3_600_000;
 const TOKEN_USAGE_RETENTION_MS = 90 * 24 * 3_600_000;
@@ -676,6 +686,7 @@ function initSchema(db: DatabaseSync): void {
       }
     }
   }
+  if (version < 19 && !hasColumn(db, "outbox", "cleared_at")) db.exec(SCHEMA_V19);
   if (version !== SCHEMA_VERSION) db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 }
 
@@ -1354,13 +1365,36 @@ export function openStore(path: string): Store {
       return Number(result.lastInsertRowid);
     },
 
-    listOutbox(statuses) {
+    listOutbox(statuses, options) {
       if (statuses.length === 0) return [];
       const marks = statuses.map(() => "?").join(", ");
+      const hidden = options?.hideCleared === true ? " AND cleared_at IS NULL" : "";
       return db
-        .prepare(`SELECT * FROM outbox WHERE status IN (${marks}) ORDER BY id`)
+        .prepare(`SELECT * FROM outbox WHERE status IN (${marks})${hidden} ORDER BY id`)
         .all(...statuses)
         .map(toOutboxRow);
+    },
+
+    clearOutbox(id, now) {
+      const result = db
+        .prepare(
+          `UPDATE outbox SET cleared_at = ? WHERE id = ? AND cleared_at IS NULL
+             AND status IN (${FINISHED_STATUSES.map(() => "?").join(", ")})`,
+        )
+        .run(now, id, ...FINISHED_STATUSES);
+      return Number(result.changes) === 1;
+    },
+
+    clearRecentOutbox(kinds, now) {
+      if (kinds.length === 0) return 0;
+      const result = db
+        .prepare(
+          `UPDATE outbox SET cleared_at = ? WHERE cleared_at IS NULL
+             AND status IN (${RECENT_STATUSES.map(() => "?").join(", ")})
+             AND kind IN (${kinds.map(() => "?").join(", ")})`,
+        )
+        .run(now, ...RECENT_STATUSES, ...kinds);
+      return Number(result.changes);
     },
 
     getOutbox(id) {

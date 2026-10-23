@@ -60,7 +60,8 @@ import type { Runtime } from "./runtime.ts";
 import { RANKING_WINDOW, buildStats, localDayKey } from "./stats.ts";
 import { openStore } from "./store.ts";
 import { formatOutbox } from "./teams/format-outbox.ts";
-import { OUTBOX_STATUSES } from "./teams/types.ts";
+import { OUTBOX_KINDS, OUTBOX_STATUSES, YOUR_MR_KINDS } from "./teams/types.ts";
+import type { OutboxKind } from "./teams/types.ts";
 import { fetchMessageContext, parseMessageRequest } from "./teams/manual.ts";
 import { readChat } from "./office/chat.ts";
 import { geminiResumeId, sendToSession } from "./office/send.ts";
@@ -69,7 +70,7 @@ import { realProbe } from "./office/probe.ts";
 import { buildUsage } from "./usage.ts";
 
 const USAGE =
-  "usage: suica <once|status|state|stats|usage|office --json|office chat <agent> <sessionId> --json|office send <agent> <sessionId> --json (message on stdin)|pause|resume|pending [--all]|send <id> [--json]|skip <id> [--json]|retry <id> [--json]|selftest|message <key> --json (request on stdin)|reviews --json|mr <key> --json|mr approve <key> <sha> --json|mr comment <key> --json (body on stdin)|mr close <key> --json|mr merge <key> <sha> [--squash] [--remove-source-branch] [--when-pipeline-succeeds] --json (message on stdin)|review options [--cli <id>] --json|review queue <key> [--skill <name>] [--model <name>] [--auto] --json|review post <id> [--inline|--comment] --json|review discard <id> --json|review cancel <id> --json|fix list --json|fix queue <key> [--pipeline] --json|fix watch <key> --json|fix unwatch <key> --json|fix confirm <id> --json (edits on stdin)|fix retry <id> --json (note on stdin)|fix discard <id> --json|fix cancel <id> --json|fix replies <id> --json|config show --json|config set --json|templates show --json|templates set --json|gitlab check <host> --json|agent install [--json]|agent uninstall|agent restart --json>\n";
+  "usage: suica <once|status|state|stats|usage|office --json|office chat <agent> <sessionId> --json|office send <agent> <sessionId> --json (message on stdin)|pause|resume|pending [--all]|send <id> [--json]|skip <id> [--json]|retry <id> [--json]|clear <id|yours|others|all> [--json]|selftest|message <key> --json (request on stdin)|reviews --json|mr <key> --json|mr approve <key> <sha> --json|mr comment <key> --json (body on stdin)|mr close <key> --json|mr merge <key> <sha> [--squash] [--remove-source-branch] [--when-pipeline-succeeds] --json (message on stdin)|review options [--cli <id>] --json|review queue <key> [--skill <name>] [--model <name>] [--auto] --json|review post <id> [--inline|--comment] --json|review discard <id> --json|review cancel <id> --json|fix list --json|fix queue <key> [--pipeline] --json|fix watch <key> --json|fix unwatch <key> --json|fix confirm <id> --json (edits on stdin)|fix retry <id> --json (note on stdin)|fix discard <id> --json|fix cancel <id> --json|fix replies <id> --json|config show --json|config set --json|templates show --json|templates set --json|gitlab check <host> --json|agent install [--json]|agent uninstall|agent restart --json>\n";
 const TEAMS_DISABLED = "teams is disabled: set teams.enabled to true in the config\n";
 const SHOWN_WITH_ALL = 50;
 
@@ -84,7 +85,18 @@ const SIMPLE = new Set([
   "selftest",
   "pending",
 ]);
-const WITH_ID = new Set(["send", "skip", "retry"]);
+const WITH_ID = new Set(["send", "skip", "retry", "clear"]);
+const DONE_CODES: Readonly<Record<string, string>> = {
+  skip: "skipped",
+  retry: "retried",
+  clear: "cleared",
+};
+/** `suica clear <group>`: the kinds whose Recent rows it clears. */
+const CLEAR_GROUPS: ReadonlyMap<string, readonly OutboxKind[]> = new Map([
+  ["yours", YOUR_MR_KINDS],
+  ["others", OUTBOX_KINDS.filter((kind) => !YOUR_MR_KINDS.includes(kind))],
+  ["all", OUTBOX_KINDS],
+]);
 
 function parseId(value: string | undefined): number | undefined {
   return value !== undefined && /^\d+$/.test(value) ? Number(value) : undefined;
@@ -158,12 +170,20 @@ async function run(runtime: Runtime, command: string, argv: readonly string[]): 
       process.stdout.write("sent a test line to your own Teams notes chat\n");
       return 0;
     default: {
+      const json = argv.includes("--json");
+      const kinds = command === "clear" ? CLEAR_GROUPS.get(argv[1] ?? "") : undefined;
+      if (kinds !== undefined) {
+        const count = teams.clearRecent(kinds);
+        process.stdout.write(
+          json ? `${actionJson(count > 0 ? "cleared" : "nothing")}\n` : `cleared ${count}\n`,
+        );
+        return 0;
+      }
       const id = parseId(argv[1]);
       if (id === undefined) {
         process.stderr.write(USAGE);
         return 2;
       }
-      const json = argv.includes("--json");
       if (command === "send") {
         const outcome = await teams.sendPending(id);
         process.stdout.write(
@@ -171,9 +191,14 @@ async function run(runtime: Runtime, command: string, argv: readonly string[]): 
         );
         return outcome.status === "sent" ? 0 : 1;
       }
-      const done = command === "skip" ? teams.skip(id) : teams.retry(id);
+      const done =
+        command === "skip"
+          ? teams.skip(id)
+          : command === "retry"
+            ? teams.retry(id)
+            : teams.clear(id);
       if (json) {
-        const code = done ? (command === "skip" ? "skipped" : "retried") : "nothing";
+        const code = done ? (DONE_CODES[command] ?? "done") : "nothing";
         process.stdout.write(`${actionJson(code)}\n`);
       } else {
         process.stdout.write(`${command} #${id}: ${done ? "done" : "nothing to do"}\n`);

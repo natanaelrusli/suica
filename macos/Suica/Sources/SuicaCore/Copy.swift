@@ -14,6 +14,9 @@ public enum Copy {
     public static let send = "Send…"
     public static let skip = "Skip"
     public static let retry = "Retry"
+    public static let clear = "Clear"
+    public static let clearRecentTitle = "Clear the recent messages on this tab?"
+    public static let clearRecentMessage = "They stay in Statistics. Messages that need you are not cleared."
     public static let pause = "Pause polling"
     public static let resume = "Resume polling"
     public static let refresh = "Refresh"
@@ -1238,6 +1241,7 @@ public enum Copy {
         case "not-found": "Message not found."
         case "skipped": "Message skipped."
         case "retried": "Message queued again."
+        case "cleared": "Cleared."
         case "restarted": "Agent restarted."
         case "not-installed": agentNotInstalled
         case "nothing": "Nothing to do."

@@ -13,7 +13,7 @@ public enum ItemState: Equatable, Sendable {
 }
 
 public enum ItemAction: Equatable, Sendable {
-    case send, skip, retry
+    case send, skip, retry, clear
 }
 
 /// How a finished message ended, from the Owner's point of view.
@@ -98,11 +98,16 @@ public struct OutboxItem: Codable, Equatable, Identifiable, Sendable {
     /// the Authors of MRs you reviewed. An unknown kind counts as someone else's MR.
     public var isAboutYourMR: Bool { ["nudge", "reminder", "rereview"].contains(kind) }
 
+    /// Finished messages can be cleared from the lists.
+    public var clearable: Bool { outcome != nil }
+
     public var actions: [ItemAction] {
         switch state {
         case .pending: [.send, .skip]
         case .unresolved: [.retry, .skip]
         case .queued: [.skip]
+        // Nothing else ends a failed message, so it says how to put it away.
+        case .failed: [.clear]
         default: []
         }
     }
