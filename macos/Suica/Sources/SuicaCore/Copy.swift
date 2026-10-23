@@ -319,6 +319,26 @@ public enum Copy {
     public static let mergeRequests = "Merge requests"
     public static let myMergeRequests = "My MRs"
     public static let searchMyMRs = "Search my MRs"
+    public static let filter = "Filter"
+    public static let filterHelp = "Show only some of your MRs: by approval, pipeline or repository"
+    public static let filterApproval = "Approval"
+    public static let filterPipeline = "Pipeline"
+    public static let filterRepository = "Repository"
+    public static let searchRepositories = "Search repositories"
+    public static let noRepositoriesMatch = "No repository matches."
+    public static let clearFilters = "Clear filters"
+    public static let noMyMRsMatch = "None of your open MRs match."
+    public static func filterLabel(_ count: Int) -> String { count == 0 ? filter : "\(filter) (\(count))" }
+    public static func shownOf(_ shown: Int, _ total: Int) -> String { "\(shown) of \(total)" }
+    public static func filterStatus(_ status: MyMRFilter.Status) -> String {
+        switch status {
+        case .unapproved: "Unapproved"
+        case .approved: "Approved"
+        case .pipelinePassed: "Passed"
+        case .pipelineRunning: "Running"
+        case .pipelineFailed: "Failed"
+        }
+    }
     // Pipeline progress
     public static func pipelineNumber(_ iid: String) -> String { "Pipeline #\(iid)" }
     public static func pipelineJobsDone(_ done: Int, of total: Int) -> String {

@@ -557,6 +557,8 @@ public final class ReviewsModel {
     public private(set) var approvedCount = 0
     /// The page on screen; a refresh with nothing selected selects that page's first MR.
     public private(set) var scope: ReviewScope = .reviewing
+    /// The filters over My MRs; kept while the app runs, so they survive a page switch.
+    public var myFilter = MyMRFilter()
 
     @ObservationIgnored private let client: any ReviewsClient
     @ObservationIgnored private var latestRefresh = 0

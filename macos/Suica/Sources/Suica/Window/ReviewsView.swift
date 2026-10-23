@@ -67,7 +67,12 @@ struct ReviewsView: View {
         .motion(value: model.list)
         .motion(value: model.errorText)
         .modifier(ListTopBar(titleBar: titleBar) {
-            if scope == .reviewing, let list = model.list { tabBar(in: list) }
+            if let list = model.list {
+                switch scope {
+                case .reviewing: tabBar(in: list)
+                case .mine: MyMRFilterBar(filter: Bindable(model).myFilter, list: list, query: query)
+                }
+            }
         })
         .onChange(of: tab) { _, tab in
             guard let list = model.list else { return }
@@ -114,9 +119,11 @@ struct ReviewsView: View {
         let text = query.trimmingCharacters(in: .whitespaces)
         switch scope {
         case .mine:
-            let mine = list.yourMergeRequests(matching: query)
+            let mine = list.yourMergeRequests(matching: query, filter: model.myFilter)
             if mine.isEmpty {
-                Text(text.isEmpty ? Copy.noOpenMRsOfYours : Copy.noReviewsMatch(text))
+                Text(
+                    list.yourMergeRequests.isEmpty
+                        ? Copy.noOpenMRsOfYours : text.isEmpty ? Copy.noMyMRsMatch : Copy.noReviewsMatch(text))
                     .foregroundStyle(.secondary)
                     .listRowSeparator(.hidden)
             }
