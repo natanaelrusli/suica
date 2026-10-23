@@ -226,7 +226,7 @@ export interface Store {
   insertManualOutbox(intent: Intent, text: string, now: number): number;
   /** Every row in `statuses`; with `hideCleared`, not the ones the Owner cleared. */
   listOutbox(statuses: readonly OutboxStatus[], options?: { hideCleared?: boolean }): OutboxRow[];
-  /** Hides one finished row from the lists; false when it is not finished or already cleared. */
+  /** Hides one finished or stuck `sending` row from the lists; false when it is still open or already cleared. */
   clearOutbox(id: number, now: number): boolean;
   /** Hides every sent, skipped or dry-run row of these kinds; how many it cleared. */
   clearRecentOutbox(kinds: readonly OutboxKind[], now: number): number;
@@ -470,6 +470,11 @@ CREATE TABLE IF NOT EXISTS identity (
 `;
 const META_TEAMS_BASELINE = "teams_baseline_done";
 const FINISHED_STATUSES = ["sent", "skipped", "failed", "dry-run"] as const;
+/**
+ * Rows the Owner can clear: finished ones, and one stuck in `sending` (a send that crashed half way
+ * never leaves it), once they checked Teams.
+ */
+const CLEARABLE_STATUSES = [...FINISHED_STATUSES, "sending"] as const;
 /** Finished rows the app lists under Recent; a failed one stays under Needs attention. */
 const RECENT_STATUSES = ["sent", "skipped", "dry-run"] as const;
 const OUTBOX_RETENTION_MS = 90 * 24 * 3_600_000;
@@ -1307,7 +1312,8 @@ export function openStore(path: string): Store {
           }
         }
         db.prepare(
-          `DELETE FROM outbox WHERE updated_at < ? AND status IN (${FINISHED_STATUSES.map(() => "?").join(", ")})`,
+          `DELETE FROM outbox WHERE updated_at < ?
+             AND (status IN (${FINISHED_STATUSES.map(() => "?").join(", ")}) OR cleared_at IS NOT NULL)`,
         ).run(now - OUTBOX_RETENTION_MS, ...FINISHED_STATUSES);
         // The ledger is small and each poll rebuilds it whole, so it is replaced, not patched.
         db.exec("DELETE FROM rereview_mr; DELETE FROM rereview_reviewer;");
@@ -1379,9 +1385,9 @@ export function openStore(path: string): Store {
       const result = db
         .prepare(
           `UPDATE outbox SET cleared_at = ? WHERE id = ? AND cleared_at IS NULL
-             AND status IN (${FINISHED_STATUSES.map(() => "?").join(", ")})`,
+             AND status IN (${CLEARABLE_STATUSES.map(() => "?").join(", ")})`,
         )
-        .run(now, id, ...FINISHED_STATUSES);
+        .run(now, id, ...CLEARABLE_STATUSES);
       return Number(result.changes) === 1;
     },
 

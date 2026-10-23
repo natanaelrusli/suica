@@ -294,7 +294,10 @@ describe("clearing outbox rows", () => {
   /** One row per status in `statuses`, in order; their ids. */
   function rows(
     store: ReturnType<typeof openStore>,
-    path: readonly (readonly ["queued" | "pending" | "sent" | "skipped" | "failed", string?])[],
+    path: readonly (readonly [
+      "queued" | "pending" | "sending" | "sent" | "skipped" | "failed",
+      string?,
+    ])[],
   ): number[] {
     store.applyTeamsPlan(
       teamsPlan({
@@ -341,6 +344,17 @@ describe("clearing outbox rows", () => {
       "skipped",
     ]);
     expect(store.listOutbox(all)).toHaveLength(5);
+  });
+
+  it("clears a row stuck in sending, and prunes it 90 days after it got stuck", () => {
+    const store = openStore(":memory:");
+    const [stuck] = rows(store, [["sending"], ["sending"]]);
+    expect(store.clearOutbox(stuck ?? 0, NOW + 1)).toBe(true);
+    expect(store.listOutbox(["sending"], { hideCleared: true })).toHaveLength(1);
+    store.applyTeamsPlan(teamsPlan(), NOW + 91 * DAY);
+    // The cleared one is gone; the other is still nobody's call but the Owner's.
+    expect(store.listOutbox(["sending"]).map((row) => row.id)).not.toContain(stuck);
+    expect(store.listOutbox(["sending"])).toHaveLength(1);
   });
 
   it("clears the Recent rows of the given kinds, never a failed or open one", () => {
