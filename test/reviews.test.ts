@@ -8,6 +8,7 @@ import {
   buildReviewList,
   changedSinceReview,
   readyToApprove,
+  repeatLookup,
   fetchAllDiscussions,
   fetchMrDetail,
   MR_DETAIL_QUERY,
@@ -17,6 +18,8 @@ import {
 } from "../src/reviews.ts";
 import type { MergeRequest } from "../src/domain.ts";
 import type { AgentReviewRow } from "../src/store.ts";
+import { openStore } from "../src/store.ts";
+import type { LessonStore, NewOccurrence } from "../src/lesson-store.ts";
 import { mr, person, reviewer, snapshot } from "./builders.ts";
 import { thread } from "./fix-builders.ts";
 
@@ -203,8 +206,58 @@ const POSTED_NINE: AgentReviewRow = {
   updatedAt: 1792152200000,
 };
 
+/** The posted review of the golden: a Major and a Minor finding, both numbered 1. */
+const POSTED_NINE_FINDINGS: AgentReviewRow = {
+  ...POSTED_NINE,
+  body: "# Code review: g/p!9\n\n## Findings\n### Major\n1. `src/http.ts:12` — the client has no timeout.\n### Minor\n1. `src/log.ts:3` — a debug line is left in.",
+};
+
+function lessonOccurrence(sourceKey: string, mrKey: string): NewOccurrence {
+  return {
+    sourceKey,
+    source: "review",
+    mrKey,
+    mrTitle: "T",
+    mrUrl: "",
+    path: "src/http.ts",
+    line: 1,
+    severity: "Major",
+    title: "t",
+    text: "t",
+    outcome: "open",
+    at: 1,
+  };
+}
+
+/** A lesson of `scope` holding the given occurrences, as [sourceKey, mrKey]. */
+function seedLesson(
+  lessons: LessonStore,
+  title: string,
+  rows: readonly (readonly [string, string])[],
+  scope = "/w/acme",
+): number {
+  const id = lessons.createLesson({ scope, title, rule: "r", topics: [], globs: [] }, 1);
+  lessons.addOccurrences(rows.map(([key, mrKey]) => lessonOccurrence(key, mrKey)));
+  lessons.attach(
+    rows.map(([key]) => lessons.occurrenceBySource(key)?.id ?? 0),
+    id,
+    1,
+  );
+  return id;
+}
+
 describe("buildReviewList", () => {
   it("matches the golden contract", () => {
+    const store = openStore(":memory:");
+    // The posted review's Major finding repeats a lesson seen three times before in two repos;
+    // its Minor finding (key "1#2") is a lesson's only occurrence.
+    seedLesson(store.lessons, "HTTP clients need an explicit timeout", [
+      ["review:4:1", "g/p!9"],
+      ["review:1:2", "g/api!3"],
+      ["thread:g/web!5:d1", "g/web!5"],
+      ["review:2:1", "g/api!4"],
+    ]);
+    seedLesson(store.lessons, "Remove debug output", [["review:4:1#2", "g/p!9"]]);
     const list = buildReviewList(
       snapshot({
         reviewRequested: [
@@ -257,9 +310,9 @@ describe("buildReviewList", () => {
             updatedAt: 1792152000000,
           },
         ],
-        ["g/p!9", POSTED_NINE],
+        ["g/p!9", POSTED_NINE_FINDINGS],
       ]),
-      new Map([["g/p!9", POSTED_NINE]]),
+      new Map([["g/p!9", POSTED_NINE_FINDINGS]]),
       new Map([["g/p!9", { reason: "waiting", dueAt: 1792152800000 }]]),
       new Map([
         [
@@ -292,8 +345,96 @@ describe("buildReviewList", () => {
       ]),
       "minor",
       (key) => key !== "g/p!10",
+      repeatLookup(true, store.lessons),
     );
     expect(list).toEqual(golden("reviews.v1.json"));
+  });
+
+  const reviewOf = (key: string, id: number, body: string): AgentReviewRow => ({
+    ...POSTED_NINE,
+    id,
+    mrKey: key,
+    body,
+  });
+  const twoReviews = new Map([
+    ["g/p!7", reviewOf("g/p!7", 3, "## Findings\n1. `a.ts:1` — one.\n2. `b.ts:2` — two.")],
+    ["g/p!9", reviewOf("g/p!9", 4, "## Findings\n1. `c.ts:3` — three.")],
+  ]);
+  const twoMrs = snapshot({ reviewRequested: [mr(7), mr(9)] });
+
+  it("looks repeats up once per document, with every review's finding keys", () => {
+    const calls: string[][] = [];
+    const list = buildReviewList(
+      twoMrs,
+      twoReviews,
+      new Map(),
+      new Map(),
+      new Map(),
+      "minor",
+      () => true,
+      (keys) => {
+        calls.push([...keys]);
+        return new Map([
+          ["review:4:1", { lessonId: 2, title: "Lesson", before: 1, repos: ["g/q"] }],
+        ]);
+      },
+    );
+    expect(calls).toEqual([["review:3:1", "review:3:2", "review:4:1"]]);
+    expect(list.mergeRequests.map((each) => each.agentReview?.repeats)).toEqual([
+      [],
+      [{ finding: "1", lessonId: 2, title: "Lesson", before: 1, repos: ["g/q"] }],
+    ]);
+  });
+
+  it("a finding of a lone lesson, archived lesson or lesson without a scope carries no repeat", () => {
+    const store = openStore(":memory:");
+    seedLesson(store.lessons, "Lone", [["review:3:1", "g/p!7"]]);
+    const archived = seedLesson(store.lessons, "Archived", [
+      ["review:3:2", "g/p!7"],
+      ["review:1:1", "g/q!1"],
+    ]);
+    store.lessons.archive(archived, 2);
+    seedLesson(
+      store.lessons,
+      "Unscoped",
+      [
+        ["review:4:1", "g/p!9"],
+        ["review:1:2", "g/q!1"],
+      ],
+      "",
+    );
+    const list = buildReviewList(
+      twoMrs,
+      twoReviews,
+      new Map(),
+      new Map(),
+      new Map(),
+      "minor",
+      () => true,
+      repeatLookup(true, store.lessons),
+    );
+    expect(list.mergeRequests.map((each) => each.agentReview?.repeats)).toEqual([[], []]);
+  });
+
+  it("reads no lesson table while lessons are off", () => {
+    const untouchable = new Proxy({} as Pick<LessonStore, "repeatsBySource">, {
+      get: () => {
+        throw new Error("read the lesson tables");
+      },
+    });
+    const lookup = repeatLookup(false, untouchable);
+    expect(lookup).toBeUndefined();
+    const list = buildReviewList(
+      twoMrs,
+      twoReviews,
+      new Map(),
+      new Map(),
+      new Map(),
+      "minor",
+      () => true,
+      lookup,
+    );
+    expect(list.mergeRequests.map((each) => each.agentReview?.repeats)).toEqual([[], []]);
   });
 });
 

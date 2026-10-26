@@ -19,6 +19,7 @@ import { fixDir } from "../src/fix-runner.ts";
 import type { FixRow } from "../src/fix-store.ts";
 import type { Notification } from "../src/format.ts";
 import { createLogger } from "../src/log.ts";
+import { repeatLookup } from "../src/reviews.ts";
 import { openStore } from "../src/store.ts";
 import type { Store } from "../src/store.ts";
 import { thread } from "./fix-builders.ts";
@@ -510,7 +511,61 @@ describe("buildFixList", () => {
       },
       NOW - 200,
     );
+    // The first thread of g/p!7 repeats a lesson flagged once before, in g/api.
+    const lessonId = h.db.lessons.createLesson(
+      { scope: "/w/acme", title: "Name things for what they do", rule: "r", topics: [], globs: [] },
+      NOW,
+    );
+    const occurrence = (sourceKey: string, mrKey: string) => ({
+      sourceKey,
+      source: "thread" as const,
+      mrKey,
+      mrTitle: "T",
+      mrUrl: "",
+      path: null,
+      line: null,
+      severity: "",
+      title: "t",
+      text: "t",
+      outcome: "open" as const,
+      at: NOW,
+    });
+    h.db.lessons.addOccurrences([
+      occurrence(`thread:g/p!7:${D1}`, "g/p!7"),
+      occurrence("review:1:1", "g/api!2"),
+    ]);
+    h.db.lessons.attach(
+      [`thread:g/p!7:${D1}`, "review:1:1"].map(
+        (key) => h.db.lessons.occurrenceBySource(key)?.id ?? 0,
+      ),
+      lessonId,
+      NOW,
+    );
     const golden: unknown = JSON.parse(readFileSync("contracts/fixes.v1.json", "utf8"));
-    expect(JSON.parse(JSON.stringify(buildFixList(h.db.fixes.list(0))))).toEqual(golden);
+    expect(
+      JSON.parse(
+        JSON.stringify(buildFixList(h.db.fixes.list(0), repeatLookup(true, h.db.lessons))),
+      ),
+    ).toEqual(golden);
+  });
+
+  it("looks thread repeats up once for the whole list, and gives null without lessons", () => {
+    const h = harness();
+    h.ready();
+    h.db.fixes.queue("g/p!8", "auto", [thread(D2, "n2")], NOW);
+    const calls: string[][] = [];
+    const list = buildFixList(h.db.fixes.list(0), (keys) => {
+      calls.push([...keys]);
+      return new Map();
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toContain(`thread:g/p!8:${D2}`);
+    expect(calls[0]).toContain(`thread:g/p!7:${D1}`);
+    const threads = buildFixList(h.db.fixes.list(0)).fixes.flatMap((fix) => fix.threads);
+    expect(threads.length).toBeGreaterThan(1);
+    expect(threads.every((each) => each.repeat === null)).toBe(true);
+    expect(list.fixes.flatMap((fix) => fix.threads).every((each) => each.repeat === null)).toBe(
+      true,
+    );
   });
 });

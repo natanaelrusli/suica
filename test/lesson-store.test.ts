@@ -2,8 +2,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { afterEach, describe, expect, it } from "vitest";
-import { openLessonsReadOnly } from "../src/lesson-store.ts";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { createLessonStore, openLessonsReadOnly } from "../src/lesson-store.ts";
 import type { NewOccurrence } from "../src/lesson-store.ts";
 import { openStore } from "../src/store.ts";
 
@@ -155,5 +155,93 @@ describe("lesson store", () => {
     lessons.setRepoPath(id, "/w/p");
     expect(lessons.occurrenceBySource("k")?.repoPath).toBe("/w/p");
     store.close();
+  });
+
+  describe("repeatsBySource", () => {
+    /** One lesson of `scope` with the given occurrences: [sourceKey, mrKey] pairs. */
+    const seed = (
+      lessons: ReturnType<typeof openStore>["lessons"],
+      rows: readonly (readonly [string, string])[],
+      scope = "/w/acme",
+    ): number => {
+      const id = lessons.createLesson({ ...fields, scope, title: `L ${scope}` }, 1);
+      lessons.addOccurrences(rows.map(([key, mrKey]) => occurrence(key, { mrKey })));
+      lessons.attach(
+        rows.map(([key]) => lessons.occurrenceBySource(key)?.id ?? 0),
+        id,
+        2,
+      );
+      return id;
+    };
+
+    it("counts the other occurrences and their distinct repos, sorted", () => {
+      const { lessons } = openStore(":memory:");
+      const id = seed(lessons, [
+        ["review:9:1", "g/web!3"],
+        ["review:2:1", "g/api!1"],
+        ["thread:g/api!4:d", "g/api!4"],
+        ["review:5:2", "g/cli!8"],
+      ]);
+      const repeats = lessons.repeatsBySource(["review:9:1", "review:404:1"]);
+      expect([...repeats.entries()]).toEqual([
+        ["review:9:1", { lessonId: id, title: "L /w/acme", before: 3, repos: ["g/api", "g/cli"] }],
+      ]);
+    });
+
+    it("leaves out a lone occurrence, an archived lesson, a lesson with no scope and a pending one", () => {
+      const { lessons } = openStore(":memory:");
+      seed(lessons, [["lone", "g/a!1"]]);
+      const archived = seed(lessons, [
+        ["arch", "g/a!1"],
+        ["arch2", "g/a!2"],
+      ]);
+      lessons.archive(archived, 3);
+      seed(
+        lessons,
+        [
+          ["noscope", "g/a!1"],
+          ["noscope2", "g/a!2"],
+        ],
+        "",
+      );
+      lessons.addOccurrences([occurrence("pending")]);
+      expect(lessons.repeatsBySource(["lone", "arch", "noscope", "pending"]).size).toBe(0);
+      expect(lessons.repeatsBySource([]).size).toBe(0);
+    });
+
+    it("reads with one query however many keys it is given", () => {
+      const folder = mkdtempSync(join(tmpdir(), "suica-lessons-"));
+      folders.push(folder);
+      const path = join(folder, "state.db");
+      const store = openStore(path);
+      seed(store.lessons, [
+        ["a", "g/a!1"],
+        ["b", "g/b!1"],
+      ]);
+      store.close();
+      const db = new DatabaseSync(path);
+      const prepare = vi.spyOn(db, "prepare");
+      const keys = Array.from({ length: 200 }, (_, i) => `review:${String(i)}:1`);
+      expect(createLessonStore(db).repeatsBySource(["a", "b", ...keys]).size).toBe(2);
+      expect(prepare).toHaveBeenCalledTimes(1);
+      db.close();
+    });
+
+    it("is offered by the read-only reader, with countPending", () => {
+      const folder = mkdtempSync(join(tmpdir(), "suica-lessons-"));
+      folders.push(folder);
+      const path = join(folder, "state.db");
+      const store = openStore(path);
+      seed(store.lessons, [
+        ["a", "g/a!1"],
+        ["b", "g/b!1"],
+      ]);
+      store.lessons.addOccurrences([occurrence("pending")]);
+      store.close();
+      const reader = openLessonsReadOnly(path);
+      expect(reader?.repeatsBySource(["a"]).get("a")?.before).toBe(1);
+      expect(reader?.countPending()).toBe(1);
+      reader?.close();
+    });
   });
 });

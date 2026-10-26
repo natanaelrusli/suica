@@ -8,7 +8,10 @@ import type { FixPipeline, FixRow, FixThread } from "./fix-store.ts";
 import { clean, renderAlert } from "./format.ts";
 import type { PostRunner } from "./gitlab.ts";
 import type { ActivityLine } from "./sql-row.ts";
+import { threadSourceKey } from "./lesson-store.ts";
+import type { LessonRepeat } from "./lesson-store.ts";
 import { fetchMrDetail, parseMrKey } from "./reviews.ts";
+import type { RepeatLookup } from "./reviews.ts";
 import type { Store } from "./store.ts";
 
 export interface ConfirmDeps extends Pick<
@@ -398,13 +401,19 @@ export function recoverStaleConfirms(store: Store, now: number): number {
   return recovered;
 }
 
+/** A thread in `suica fix list --json`: the stored thread and the Lesson it repeats, if any. */
+export interface FixThreadJson extends FixThread {
+  /** Null when it repeats no Lesson, and while lessons are off. */
+  readonly repeat: LessonRepeat | null;
+}
+
 /** One fix in `suica fix list --json`. See contracts/fixes.v1.json. */
 export interface FixJson {
   readonly id: number;
   readonly mrKey: string;
   readonly mrTitle: string | null;
   readonly status: FixRow["status"];
-  readonly threads: readonly FixThread[];
+  readonly threads: readonly FixThreadJson[];
   /** The failed pipeline it fixes; null for a fix of threads only. */
   readonly pipeline: FixPipeline | null;
   readonly note: string;
@@ -427,13 +436,19 @@ export interface FixListJson {
   readonly fixes: readonly FixJson[];
 }
 
-export function toFixJson(row: FixRow): FixJson {
+export function toFixJson(
+  row: FixRow,
+  repeats: ReadonlyMap<string, LessonRepeat> = new Map(),
+): FixJson {
   return {
     id: row.id,
     mrKey: row.mrKey,
     mrTitle: row.mrTitle,
     status: row.status,
-    threads: row.threads,
+    threads: row.threads.map((thread) => ({
+      ...thread,
+      repeat: repeats.get(threadSourceKey(row.mrKey, thread.id)) ?? null,
+    })),
     pipeline: row.pipeline,
     note: row.note,
     baseSha: row.baseSha,
@@ -450,6 +465,11 @@ export function toFixJson(row: FixRow): FixJson {
   };
 }
 
-export function buildFixList(rows: readonly FixRow[]): FixListJson {
-  return { version: 1, fixes: rows.map(toFixJson) };
+/** `repeats` is called once for every thread of the list; leave it out while lessons are off. */
+export function buildFixList(rows: readonly FixRow[], repeats?: RepeatLookup): FixListJson {
+  const keys = rows.flatMap((row) =>
+    row.threads.map((thread) => threadSourceKey(row.mrKey, thread.id)),
+  );
+  const found = repeats === undefined || keys.length === 0 ? new Map() : repeats(keys);
+  return { version: 1, fixes: rows.map((row) => toFixJson(row, found)) };
 }

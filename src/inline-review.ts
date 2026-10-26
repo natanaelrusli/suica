@@ -105,6 +105,22 @@ export function extractFindings(markdown: string): Finding[] {
   return findings;
 }
 
+/**
+ * Each finding's number, made unique within the review: numbered lists under each severity both
+ * start at 1, so a number already used becomes `<number>#<position>` (1-based among all findings).
+ * The Lesson occurrence keys of a review's findings are built from these.
+ */
+export function uniqueFindingNumbers(findings: readonly Pick<Finding, "number">[]): string[] {
+  const used = new Set<string>();
+  return findings.map((finding, index) => {
+    const number = used.has(finding.number)
+      ? `${finding.number}#${String(index + 1)}`
+      : finding.number;
+    used.add(number);
+    return number;
+  });
+}
+
 /** How many findings a review lists under one severity; "" for those under no severity subheading. */
 export interface FindingCount {
   readonly severity: string;

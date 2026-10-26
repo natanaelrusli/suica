@@ -34,6 +34,7 @@ import {
   fetchFixDetail,
   fetchMrDetail,
   parseMrKey,
+  repeatLookup,
   resolveOwnThreads,
 } from "./reviews.ts";
 import {
@@ -335,6 +336,7 @@ async function reviewsJson(): Promise<number> {
       store.fixes.latestByMr(),
       config.review.approveWhen,
       (key) => isWatched(key, choices, config),
+      repeatLookup(config.lessons.enabled, store.lessons),
     );
     process.stdout.write(`${JSON.stringify(document)}\n`);
     return 0;
@@ -482,7 +484,12 @@ async function fixCommand(argv: readonly string[]): Promise<number> {
   try {
     if (action === "list") {
       process.stdout.write(
-        `${JSON.stringify(buildFixList(store.fixes.list(Date.now() - FIX_LIST_DAYS_MS)))}\n`,
+        `${JSON.stringify(
+          buildFixList(
+            store.fixes.list(Date.now() - FIX_LIST_DAYS_MS),
+            repeatLookup(config.lessons.enabled, store.lessons),
+          ),
+        )}\n`,
       );
       return 0;
     }

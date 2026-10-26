@@ -1,7 +1,8 @@
 import { findingThreads } from "../agent-fix.ts";
 import type { Snapshot } from "../domain.ts";
 import type { FixThread } from "../fix-store.ts";
-import { extractFindings } from "../inline-review.ts";
+import { extractFindings, uniqueFindingNumbers } from "../inline-review.ts";
+import { reviewSourceKey, threadSourceKey } from "../lesson-store.ts";
 import type { NewOccurrence, Outcome } from "../lesson-store.ts";
 import type { Logger } from "../log.ts";
 import type { MrDetailJson } from "../reviews.ts";
@@ -124,15 +125,11 @@ export function occurrencesFromReview(
   outcomes: { mrKey: string; path: string; title: string; outcome: Outcome }[];
 } {
   if (row.body === null) return { add: [], outcomes: [] };
-  const used = new Set<string>();
-  const add = extractFindings(row.body).map((finding, index): NewOccurrence => {
-    // Numbered lists under each severity both start at 1: a repeated number takes its position.
-    const number = used.has(finding.number)
-      ? `${finding.number}#${String(index + 1)}`
-      : finding.number;
-    used.add(number);
+  const findings = extractFindings(row.body);
+  const numbers = uniqueFindingNumbers(findings);
+  const add = findings.map((finding, index): NewOccurrence => {
     return {
-      sourceKey: `review:${String(row.id)}:${number}`,
+      sourceKey: reviewSourceKey(row.id, numbers[index] ?? finding.number),
       source: "review",
       mrKey: row.mrKey,
       mrTitle: row.mrTitle ?? row.mrKey,
@@ -156,10 +153,6 @@ export function threadOutcome(thread: FixThread): Outcome {
   return thread.action === "reply" ? "replied" : "open";
 }
 
-function threadKey(mrKey: string, discussionId: string): string {
-  return `thread:${mrKey}:${discussionId}`;
-}
-
 /** Each Finding Thread's first note as an occurrence. */
 export function occurrencesFromThreads(
   mr: { key: string; title: string; url: string },
@@ -171,7 +164,7 @@ export function occurrencesFromThreads(
     if (first === undefined) return [];
     return [
       {
-        sourceKey: threadKey(mr.key, thread.id),
+        sourceKey: threadSourceKey(mr.key, thread.id),
         source: "thread",
         mrKey: mr.key,
         mrTitle: mr.title,
@@ -222,7 +215,7 @@ function fixOutcomes(store: Store): Map<string, Outcome> {
   for (const row of store.fixes.list(0).reverse()) {
     for (const thread of row.threads) {
       if (thread.action !== null)
-        outcomes.set(threadKey(row.mrKey, thread.id), threadOutcome(thread));
+        outcomes.set(threadSourceKey(row.mrKey, thread.id), threadOutcome(thread));
     }
   }
   return outcomes;
@@ -296,7 +289,7 @@ export async function collectOpenThreads(
     read.add(mr.key);
     const now = deps.now();
     for (const discussion of detail.discussions) {
-      const key = threadKey(mr.key, discussion.id);
+      const key = threadSourceKey(mr.key, discussion.id);
       const stored = store.lessons.occurrenceBySource(key);
       if (stored === undefined) continue;
       const outcome = discussion.resolved ? "resolved" : (fixed.get(key) ?? stored.outcome);

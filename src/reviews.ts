@@ -5,7 +5,10 @@ import type { MergeRequest, Person, Pipeline, Reviewer, Snapshot } from "./domai
 import { FetchFailure } from "./gitlab.ts";
 import type { GraphqlRunner, PostRunner, RestRunner } from "./gitlab.ts";
 import { approves } from "./approval-judge.ts";
+import { extractFindings, uniqueFindingNumbers } from "./inline-review.ts";
 import type { ApproveWhen } from "./inline-review.ts";
+import { reviewSourceKey } from "./lesson-store.ts";
+import type { LessonRepeat, LessonStore } from "./lesson-store.ts";
 import type { Logger } from "./log.ts";
 import type { FixRow, FixStatus } from "./fix-store.ts";
 import type { ActivityLine, AgentReviewRow, AgentReviewStatus } from "./store.ts";
@@ -33,6 +36,25 @@ export interface AgentReviewJson {
   /** Epoch milliseconds. */
   readonly createdAt: number;
   readonly updatedAt: number;
+  /** Its findings that repeat a Lesson, in the review's order; empty while lessons are off. */
+  readonly repeats: readonly RepeatJson[];
+}
+
+/** A finding of an Agent Review that repeats a Lesson seen before. */
+export interface RepeatJson extends LessonRepeat {
+  /** The finding's number in the review; a number used twice gets `#<position>` (1-based). */
+  readonly finding: string;
+}
+
+/** The Lessons some occurrences repeat, by source key; one store read for the whole document. */
+export type RepeatLookup = (sourceKeys: readonly string[]) => ReadonlyMap<string, LessonRepeat>;
+
+/** The store's lookup, or undefined while lessons are off so no lesson table is read. */
+export function repeatLookup(
+  enabled: boolean,
+  lessons: Pick<LessonStore, "repeatsBySource">,
+): RepeatLookup | undefined {
+  return enabled ? (keys) => lessons.repeatsBySource(keys) : undefined;
 }
 
 /** One running review in `ReviewActivityJson`. */
@@ -167,7 +189,19 @@ export interface YourMrJson {
   readonly watched: boolean;
 }
 
-function toAgentReviewJson(row: AgentReviewRow): AgentReviewJson {
+/** The occurrence key of each finding of the review, with the finding's number. */
+function findingKeys(row: AgentReviewRow): { finding: string; sourceKey: string }[] {
+  if (row.body === null) return [];
+  return uniqueFindingNumbers(extractFindings(row.body)).map((finding) => ({
+    finding,
+    sourceKey: reviewSourceKey(row.id, finding),
+  }));
+}
+
+function toAgentReviewJson(
+  row: AgentReviewRow,
+  repeats: readonly RepeatJson[] = [],
+): AgentReviewJson {
   return {
     id: row.id,
     status: row.status,
@@ -182,7 +216,29 @@ function toAgentReviewJson(row: AgentReviewRow): AgentReviewJson {
     activity: row.activity,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
+    repeats,
   };
+}
+
+/** Each review's repeats, by review id, from one lookup of all their findings. */
+function repeatsOf(
+  rows: readonly AgentReviewRow[],
+  lookup: RepeatLookup | undefined,
+): Map<number, RepeatJson[]> {
+  const out = new Map<number, RepeatJson[]>();
+  if (lookup === undefined) return out;
+  const keyed = rows.map((row) => ({ id: row.id, keys: findingKeys(row) }));
+  const all = keyed.flatMap((each) => each.keys.map((key) => key.sourceKey));
+  if (all.length === 0) return out;
+  const found = lookup(all);
+  for (const { id, keys } of keyed) {
+    const repeats = keys.flatMap(({ finding, sourceKey }) => {
+      const lesson = found.get(sourceKey);
+      return lesson === undefined ? [] : [{ finding, ...lesson }];
+    });
+    out.set(id, repeats);
+  }
+  return out;
 }
 
 export const OPEN_STATUSES: readonly AgentReviewStatus[] = [
@@ -231,7 +287,13 @@ export function buildReviewList(
   fixes: ReadonlyMap<string, FixRow> = new Map(),
   approveWhen: ApproveWhen = "minor",
   watched: (key: string) => boolean = () => true,
+  repeats?: RepeatLookup,
 ): ReviewListJson {
+  const shown = snapshot.reviewRequested.flatMap((mr) => {
+    const latest = agentReviews.get(mr.key);
+    return latest === undefined ? [] : [latest];
+  });
+  const repeatsById = repeatsOf(shown, repeats);
   return {
     version: 1,
     me: snapshot.me,
@@ -273,7 +335,8 @@ export function buildReviewList(
         createdAt: mr.createdAt,
         author: mr.author,
         reviewers: mr.reviewers,
-        agentReview: latest === undefined ? null : toAgentReviewJson(latest),
+        agentReview:
+          latest === undefined ? null : toAgentReviewJson(latest, repeatsById.get(latest.id)),
         // Once you approved, a change is yours to look at; the list stops offering a re-review.
         changedSinceReview: approvedByMe ? null : changedSinceReview(mr, latest, bases.get(mr.key)),
         agentReviewPosted: bases.get(mr.key)?.status === "posted",

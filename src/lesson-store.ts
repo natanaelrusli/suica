@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
+import { projectOfMrKey } from "./lessons/scopes.ts";
 import { integer, nullableInteger, nullableText, text } from "./sql-row.ts";
 import type { Row } from "./sql-row.ts";
 
@@ -46,6 +47,26 @@ export interface LessonRow {
   readonly updatedAt: number;
 }
 
+/** A finding that repeats a Lesson: the Lesson and its other occurrences. */
+export interface LessonRepeat {
+  readonly lessonId: number;
+  readonly title: string;
+  /** The Lesson's occurrences other than this one. */
+  readonly before: number;
+  /** The distinct projects (`group/project`) of those other occurrences, sorted. */
+  readonly repos: readonly string[];
+}
+
+/** The occurrence key of an Agent Review finding; `finding` as `uniqueFindingNumbers` gives it. */
+export function reviewSourceKey(reviewId: number, finding: string): string {
+  return `review:${String(reviewId)}:${finding}`;
+}
+
+/** The occurrence key of a Finding Thread. */
+export function threadSourceKey(mrKey: string, discussionId: string): string {
+  return `thread:${mrKey}:${discussionId}`;
+}
+
 export interface LessonStore {
   /** Returns how many rows were inserted; a source key already stored is ignored. */
   addOccurrences(rows: readonly NewOccurrence[]): number;
@@ -57,6 +78,11 @@ export interface LessonStore {
   /** The MRs with due occurrences that have no lesson, the one with the oldest first. */
   pendingMrKeys(now: number): string[];
   countPending(): number;
+  /**
+   * For each key whose occurrence belongs to an unarchived Lesson of a scope that has other
+   * occurrences, that Lesson; keys without one are left out. One query, whatever the key count.
+   */
+  repeatsBySource(sourceKeys: readonly string[]): Map<string, LessonRepeat>;
   /** Counts a failed distilling attempt and holds the rows back until `retryAt`. */
   failBatch(ids: readonly number[], retryAt: number): void;
   createLesson(
@@ -88,7 +114,10 @@ export interface LessonStore {
 }
 
 /** What a reader of the lessons file may do; `db` is its read-only handle. */
-export type LessonReader = Pick<LessonStore, "lessons" | "lesson" | "occurrences" | "links"> & {
+export type LessonReader = Pick<
+  LessonStore,
+  "lessons" | "lesson" | "occurrences" | "links" | "countPending" | "repeatsBySource"
+> & {
   readonly db: DatabaseSync;
   close(): void;
 };
@@ -162,7 +191,10 @@ function placeholders(count: number): string {
   return Array.from({ length: count }, () => "?").join(", ");
 }
 
-type Reads = Pick<LessonStore, "lessons" | "lesson" | "occurrences" | "links">;
+type Reads = Pick<
+  LessonStore,
+  "lessons" | "lesson" | "occurrences" | "links" | "countPending" | "repeatsBySource"
+>;
 
 function createReads(db: DatabaseSync): Reads {
   return {
@@ -192,6 +224,48 @@ function createReads(db: DatabaseSync): Reads {
         )
         .all(lessonId, lessonId, lessonId)
         .map((row) => integer(row, "other"));
+    },
+    countPending() {
+      const row = db
+        .prepare("SELECT COUNT(*) AS n FROM lesson_occurrence WHERE lesson_id IS NULL")
+        .get();
+      return row === undefined ? 0 : integer(row, "n");
+    },
+    repeatsBySource(sourceKeys) {
+      const out = new Map<string, LessonRepeat>();
+      const keys = [...new Set(sourceKeys)];
+      if (keys.length === 0) return out;
+      // json_each takes the keys as one parameter, so no key count reaches SQLite's variable limit.
+      const rows = db
+        .prepare(
+          `SELECT o.source_key, l.id, l.title, other.mr_key
+           FROM json_each(?) AS k
+           JOIN lesson_occurrence o ON o.source_key = k.value
+           JOIN lesson l ON l.id = o.lesson_id AND l.archived = 0 AND l.scope <> ''
+           JOIN lesson_occurrence other ON other.lesson_id = l.id AND other.id <> o.id
+           ORDER BY o.source_key`,
+        )
+        .all(JSON.stringify(keys));
+      const found = new Map<string, { lessonId: number; title: string; mrKeys: string[] }>();
+      for (const row of rows) {
+        const key = text(row, "source_key");
+        const entry = found.get(key) ?? {
+          lessonId: integer(row, "id"),
+          title: text(row, "title"),
+          mrKeys: [],
+        };
+        entry.mrKeys.push(text(row, "mr_key"));
+        found.set(key, entry);
+      }
+      for (const [key, { lessonId, title, mrKeys }] of found) {
+        out.set(key, {
+          lessonId,
+          title,
+          before: mrKeys.length,
+          repos: [...new Set(mrKeys.map(projectOfMrKey))].sort(),
+        });
+      }
+      return out;
     },
   };
 }
@@ -290,12 +364,6 @@ export function createLessonStore(db: DatabaseSync): LessonStore {
         )
         .all(now)
         .map((row) => text(row, "mr_key"));
-    },
-    countPending() {
-      const row = db
-        .prepare("SELECT COUNT(*) AS n FROM lesson_occurrence WHERE lesson_id IS NULL")
-        .get();
-      return row === undefined ? 0 : integer(row, "n");
     },
     failBatch(ids, retryAt) {
       if (ids.length === 0) return;
