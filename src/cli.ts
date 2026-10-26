@@ -1,5 +1,5 @@
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { installAgent, plistPath, uninstallAgent } from "./agent-install.ts";
 import { buildStatus, loadStatusInput, readServiceStatus, restartService } from "./agent-status.ts";
 import { actionJson, buildAgentState } from "./agent-state.ts";
@@ -19,6 +19,14 @@ import {
 import { checkGitlab } from "./gitlab-check.ts";
 import { openLessonsReadOnly } from "./lesson-store.ts";
 import { readScopeCache } from "./lessons/hook.ts";
+import {
+  applyInstall,
+  applyUninstall,
+  lessonsStatus,
+  mcpCommands,
+  planInstall,
+} from "./lessons/install.ts";
+import type { LessonsPaths } from "./lessons/install.ts";
 import { serveLessons } from "./lessons/mcp-server.ts";
 import { scanScopes } from "./lessons/scopes.ts";
 import { MODEL_CLI_CHOICES, detectModelClis, resolveModelCli } from "./model-cli.ts";
@@ -74,7 +82,7 @@ import { realProbe } from "./office/probe.ts";
 import { buildUsage } from "./usage.ts";
 
 const USAGE =
-  "usage: suica <once|status|state|stats|usage|office --json|office chat <agent> <sessionId> --json|office send <agent> <sessionId> --json (message on stdin)|pause|resume|pending [--all]|send <id> [--json]|skip <id> [--json]|retry <id> [--json]|clear <id|yours|others|all> [--json]|selftest|message <key> --json (request on stdin)|reviews --json|mr <key> --json|mr approve <key> <sha> --json|mr comment <key> --json (body on stdin)|mr close <key> --json|mr merge <key> <sha> [--squash] [--remove-source-branch] [--when-pipeline-succeeds] --json (message on stdin)|review options [--cli <id>] --json|review queue <key> [--skill <name>] [--model <name>] [--auto] --json|review post <id> [--inline|--comment] --json|review discard <id> --json|review cancel <id> --json|fix list --json|fix queue <key> [--pipeline] --json|fix watch <key> --json|fix unwatch <key> --json|fix confirm <id> --json (edits on stdin)|fix retry <id> --json (note on stdin)|fix discard <id> --json|fix cancel <id> --json|fix replies <id> --json|config show --json|config set --json|templates show --json|templates set --json|gitlab check <host> --json|lessons mcp|agent install [--json]|agent uninstall|agent restart --json>\n";
+  "usage: suica <once|status|state|stats|usage|office --json|office chat <agent> <sessionId> --json|office send <agent> <sessionId> --json (message on stdin)|pause|resume|pending [--all]|send <id> [--json]|skip <id> [--json]|retry <id> [--json]|clear <id|yours|others|all> [--json]|selftest|message <key> --json (request on stdin)|reviews --json|mr <key> --json|mr approve <key> <sha> --json|mr comment <key> --json (body on stdin)|mr close <key> --json|mr merge <key> <sha> [--squash] [--remove-source-branch] [--when-pipeline-succeeds] --json (message on stdin)|review options [--cli <id>] --json|review queue <key> [--skill <name>] [--model <name>] [--auto] --json|review post <id> [--inline|--comment] --json|review discard <id> --json|review cancel <id> --json|fix list --json|fix queue <key> [--pipeline] --json|fix watch <key> --json|fix unwatch <key> --json|fix confirm <id> --json (edits on stdin)|fix retry <id> --json (note on stdin)|fix discard <id> --json|fix cancel <id> --json|fix replies <id> --json|config show --json|config set --json|templates show --json|templates set --json|gitlab check <host> --json|lessons mcp|lessons install [--yes] [--json]|lessons uninstall [--json]|lessons status --json|agent install [--json]|agent uninstall|agent restart --json>\n";
 const TEAMS_DISABLED = "teams is disabled: set teams.enabled to true in the config\n";
 const SHOWN_WITH_ALL = 50;
 
@@ -795,6 +803,69 @@ async function lessonsMcp(): Promise<number> {
   return 0;
 }
 
+function lessonsPaths(): LessonsPaths {
+  return {
+    node: process.execPath,
+    cli: join(import.meta.dirname, "cli.ts"),
+    hook: join(import.meta.dirname, "lessons-hook.ts"),
+  };
+}
+
+/** The folders searched for claude and codex; SUICA_CLI_DIRS replaces them (tests, odd installs). */
+function lessonsClis() {
+  const override = process.env["SUICA_CLI_DIRS"];
+  return detectModelClis(override === undefined ? undefined : override.split(delimiter));
+}
+
+/** `suica lessons install`: without `--yes` only prints the plan and exits 1. */
+async function installLessonsCommand(yes: boolean, json: boolean): Promise<number> {
+  const home = homedir();
+  const paths = lessonsPaths();
+  const clis = lessonsClis();
+  const plan = planInstall(home, clis);
+  if (!yes) {
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({ version: 1, status: "needs-confirmation", plan })}\n`,
+      );
+    } else {
+      const lines = [
+        `would edit ${plan.settingsPath}, adding these hooks (command: "${paths.node}" "${paths.hook}"):`,
+        ...plan.hooks.map(
+          (hook) => `  ${hook.event}${hook.matcher === "" ? "" : ` (${hook.matcher})`}`,
+        ),
+        ...plan.mcp.flatMap((id) => mcpCommands(id, paths).map((line) => `would run: ${line}`)),
+        "run again with --yes to apply",
+      ];
+      process.stdout.write(`${lines.join("\n")}\n`);
+    }
+    return 1;
+  }
+  const result = await applyInstall(home, defaultExec, clis, paths);
+  if (json) {
+    process.stdout.write(`${JSON.stringify({ version: 1, ...result })}\n`);
+  } else if (result.status === "invalid-settings") {
+    process.stderr.write(`${result.settingsPath} is not a JSON object; left unchanged\n`);
+  } else {
+    process.stdout.write(
+      `hooks ${result.changed ? "installed in" : "already in"} ${result.settingsPath}; registered: ${result.registered.join(", ") || "none"}; skipped: ${result.skipped.join(", ") || "none"}${result.failed.length > 0 ? `; failed: ${result.failed.join(", ")}` : ""}\n`,
+    );
+  }
+  return result.status === "installed" ? 0 : 1;
+}
+
+async function uninstallLessonsCommand(json: boolean): Promise<number> {
+  const result = await applyUninstall(homedir(), defaultExec, lessonsClis(), lessonsPaths());
+  if (json) process.stdout.write(`${JSON.stringify({ version: 1, ...result })}\n`);
+  else if (result.status === "invalid-settings")
+    process.stderr.write("settings.json is not a JSON object; left unchanged\n");
+  else
+    process.stdout.write(
+      `removed the hooks: ${result.hookRemoved}; unregistered: ${result.removed.join(", ") || "none"}\n`,
+    );
+  return result.status === "uninstalled" ? 0 : 1;
+}
+
 async function main(argv: readonly string[]): Promise<number> {
   const command = argv[0];
   if (
@@ -889,6 +960,18 @@ async function main(argv: readonly string[]): Promise<number> {
   }
   if (command === "lessons") {
     if (argv[1] === "mcp" && argv.length === 2) return lessonsMcp();
+    const flags = argv.slice(2);
+    const json = flags.includes("--json");
+    const known = (allowed: readonly string[]) => flags.every((flag) => allowed.includes(flag));
+    if (argv[1] === "install" && known(["--yes", "--json"])) {
+      return installLessonsCommand(flags.includes("--yes"), json);
+    }
+    if (argv[1] === "uninstall" && known(["--json"])) return uninstallLessonsCommand(json);
+    if (argv[1] === "status" && json && flags.length === 1) {
+      const status = await lessonsStatus(homedir(), defaultExec, lessonsClis());
+      process.stdout.write(`${JSON.stringify({ version: 1, ...status })}\n`);
+      return 0;
+    }
     process.stderr.write(USAGE);
     return 2;
   }
