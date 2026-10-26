@@ -128,4 +128,19 @@ describe("lesson store", () => {
     expect(() => reader?.db.exec("INSERT INTO lesson_link (a, b) VALUES (1, 2)")).toThrow();
     reader?.close();
   });
+
+  it("allLessons spans scopes, unlink drops a link and setRepoPath updates a row", () => {
+    const { lessons } = openStore(":memory:");
+    const a = lessons.createLesson({ ...fields, scope: "" }, 1);
+    const b = lessons.createLesson(fields, 1);
+    lessons.archive(b, 2);
+    expect(lessons.allLessons().map((l) => l.id)).toEqual([a, b]);
+    lessons.link(a, b);
+    lessons.unlink(b, a);
+    expect(lessons.links(a)).toEqual([]);
+    lessons.addOccurrences([occurrence("k")]);
+    const id = lessons.occurrenceBySource("k")?.id ?? 0;
+    lessons.setRepoPath(id, "/w/p");
+    expect(lessons.occurrenceBySource("k")?.repoPath).toBe("/w/p");
+  });
 });

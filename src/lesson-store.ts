@@ -69,6 +69,11 @@ export interface LessonStore {
   occurrences(lessonId: number): OccurrenceRow[];
   occurrenceBySource(sourceKey: string): OccurrenceRow | undefined;
   setScope(lessonId: number, scope: string, at: number): void;
+  /** Every lesson of every scope, scope "" and archived ones included. */
+  allLessons(): LessonRow[];
+  setRepoPath(occurrenceId: number, repoPath: string | null): void;
+  /** Removes the link between `a` and `b`, if any. */
+  unlink(a: number, b: number): void;
   /** Undirected and idempotent. */
   link(a: number, b: number): void;
   links(lessonId: number): number[];
@@ -334,6 +339,21 @@ export function createLessonStore(db: DatabaseSync): LessonStore {
         scope,
         at,
         lessonId,
+      );
+    },
+    allLessons() {
+      return db.prepare("SELECT * FROM lesson ORDER BY id").all().map(toLesson);
+    },
+    setRepoPath(occurrenceId, repoPath) {
+      db.prepare("UPDATE lesson_occurrence SET repo_path = ? WHERE id = ?").run(
+        repoPath,
+        occurrenceId,
+      );
+    },
+    unlink(a, b) {
+      db.prepare("DELETE FROM lesson_link WHERE a = ? AND b = ?").run(
+        Math.min(a, b),
+        Math.max(a, b),
       );
     },
     link(a, b) {

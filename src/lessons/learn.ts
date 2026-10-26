@@ -8,6 +8,7 @@ import type { LessonRow, LessonStore, OccurrenceRow } from "../lesson-store.ts";
 import type { MrDetailJson } from "../reviews.ts";
 import { backfillThreads, collectOpenThreads, collectReviews } from "./collect.ts";
 import type { CollectOptions } from "./collect.ts";
+import { remapScopes, sameScopeMap } from "./remap.ts";
 import { projectOfMrKey, scanScopes, scopeForProject } from "./scopes.ts";
 import type { ScopeMap } from "./scopes.ts";
 
@@ -247,7 +248,11 @@ export function createLessonLearner(deps: LearnerDeps): LessonLearner {
     const key = JSON.stringify(config.lessons.scopes);
     const now = deps.now();
     if (map === undefined || key !== scannedFor || now - scannedAt >= HOUR_MS) {
-      map = (deps.scan ?? scanScopes)(config.lessons.scopes, config.gitlab.hostname);
+      const scanned = (deps.scan ?? scanScopes)(config.lessons.scopes, config.gitlab.hostname);
+      if (map === undefined || !sameScopeMap(map, scanned)) {
+        remapScopes(store.lessons, scanned, deps.now());
+      }
+      map = scanned;
       scannedFor = key;
       scannedAt = now;
       deps.onScan?.(map);
