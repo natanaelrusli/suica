@@ -52,6 +52,8 @@ export interface PollDeps {
   readonly recheckApprovals?: (snapshot: Snapshot) => void;
   /** Queues Agent Fixes for the Owner's MRs after the commit; `previous` is from before the poll. May throw. */
   readonly queueFixes?: (snapshot: Snapshot, previous: PreviousState) => Promise<void>;
+  /** Reads the Finding Threads of the Owner's MRs for Lessons; `previous` is from before the poll. Never throws. */
+  readonly collectLessons?: (snapshot: Snapshot, previous: PreviousState) => Promise<void>;
   /** Tells the Owner about failed pipelines of their MRs and queues Pipeline Fixes. Never throws. */
   readonly watchPipelines?: (snapshot: Snapshot) => Promise<void>;
   /**
@@ -302,6 +304,7 @@ async function runPoll(deps: PollDeps, start: number): Promise<PollOutcome> {
   queueReviews(deps, snapshot, previous.baselineDone ? events : []);
   recheckApprovals(deps, snapshot);
   await queueFixes(deps, snapshot, previous);
+  if (previous.baselineDone) await deps.collectLessons?.(snapshot, previous);
   await deps.watchPipelines?.(snapshot);
   await runTeams(deps, snapshot, previous);
   await lookUpNames(deps);

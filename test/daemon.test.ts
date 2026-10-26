@@ -63,4 +63,25 @@ describe("runDaemon", () => {
       "polling paused",
     ]);
   });
+
+  it("starts the work beside the loop after every poll, failed ones too", async () => {
+    const controller = new AbortController();
+    const order: string[] = [];
+    await runDaemon({
+      poll: () => {
+        order.push("poll");
+        return Promise.resolve(order.length > 1 ? "ok" : "failed");
+      },
+      afterPoll: () => order.push("after"),
+      readIdleSeconds: () => Promise.resolve(0),
+      polling,
+      sleep: () => {
+        if (order.length >= 4) controller.abort();
+        return Promise.resolve();
+      },
+      log,
+      signal: controller.signal,
+    });
+    expect(order).toEqual(["poll", "after", "poll", "after"]);
+  });
 });

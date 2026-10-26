@@ -50,9 +50,12 @@ export interface LessonStore {
   /** Returns how many rows were inserted; a source key already stored is ignored. */
   addOccurrences(rows: readonly NewOccurrence[]): number;
   setOutcome(sourceKey: string, outcome: Outcome, at: number): void;
+  /** The newest occurrence at `path` of the MR whose title matches, ignoring case and outer spaces. */
   findOccurrenceByLocation(mrKey: string, path: string, title: string): OccurrenceRow | undefined;
-  /** Occurrences with no lesson that are due, oldest first. */
-  pendingOccurrences(now: number, limit: number): OccurrenceRow[];
+  /** Occurrences with no lesson that are due, oldest first; only `mrKey`'s when given. */
+  pendingOccurrences(now: number, limit: number, mrKey?: string): OccurrenceRow[];
+  /** The MRs with due occurrences that have no lesson, the one with the oldest first. */
+  pendingMrKeys(now: number): string[];
   countPending(): number;
   /** Counts a failed distilling attempt and holds the rows back until `retryAt`. */
   failBatch(ids: readonly number[], retryAt: number): void;
@@ -244,21 +247,32 @@ export function createLessonStore(db: DatabaseSync): LessonStore {
     },
     findOccurrenceByLocation(mrKey, path, title) {
       return occurrenceBy(
-        "mr_key = ? AND path = ? AND title = ? ORDER BY id DESC",
+        "mr_key = ? AND path = ? AND lower(trim(title)) = lower(trim(?)) ORDER BY id DESC",
         mrKey,
         path,
         title,
       );
     },
-    pendingOccurrences(now, limit) {
+    pendingOccurrences(now, limit, mrKey) {
+      const ofMr = mrKey === undefined ? "" : " AND mr_key = ?";
       return db
         .prepare(
           `SELECT ${OCCURRENCE_COLUMNS} FROM lesson_occurrence
-           WHERE lesson_id IS NULL AND (retry_at IS NULL OR retry_at <= ?)
+           WHERE lesson_id IS NULL AND (retry_at IS NULL OR retry_at <= ?)${ofMr}
            ORDER BY at, id LIMIT ?`,
         )
-        .all(now, limit)
+        .all(now, ...(mrKey === undefined ? [] : [mrKey]), limit)
         .map(toOccurrence);
+    },
+    pendingMrKeys(now) {
+      return db
+        .prepare(
+          `SELECT mr_key FROM lesson_occurrence
+           WHERE lesson_id IS NULL AND (retry_at IS NULL OR retry_at <= ?)
+           GROUP BY mr_key ORDER BY MIN(at), MIN(id)`,
+        )
+        .all(now)
+        .map((row) => text(row, "mr_key"));
     },
     countPending() {
       const row = db

@@ -267,6 +267,8 @@ export interface Store {
   appendAgentReviewActivity(id: number, at: number, text: string): void;
   nextQueuedAgentReview(): AgentReviewRow | undefined;
   getAgentReview(id: number): AgentReviewRow | undefined;
+  /** Every review after `id`, of any status, oldest first. */
+  agentReviewsAfter(id: number): AgentReviewRow[];
   /** The newest review of each MR. */
   latestAgentReviews(): Map<string, AgentReviewRow>;
   /** The newest posted or discarded review of each MR: what a re-review follows. */
@@ -1069,6 +1071,13 @@ export function openStore(path: string): Store {
     getAgentReview(id) {
       const row = db.prepare("SELECT * FROM agent_review WHERE id = ?").get(id);
       return row === undefined ? undefined : toAgentReview(row);
+    },
+
+    agentReviewsAfter(id) {
+      return db
+        .prepare("SELECT * FROM agent_review WHERE id > ? ORDER BY id")
+        .all(id)
+        .map(toAgentReview);
     },
 
     latestAgentReviews() {

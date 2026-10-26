@@ -1,5 +1,6 @@
+import { writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { defaultStatePath, loadConfig } from "./config.ts";
 import type { Config } from "./config.ts";
 import { queueAutomaticFixes } from "./agent-fix.ts";
@@ -23,6 +24,8 @@ import {
   glabText,
   glabRunner,
 } from "./gitlab.ts";
+import { createLessonLearner } from "./lessons/learn.ts";
+import type { LessonLearner } from "./lessons/learn.ts";
 import { createLogger } from "./log.ts";
 import type { Logger } from "./log.ts";
 import { loadAlerts } from "./alerts.ts";
@@ -54,6 +57,8 @@ export interface Runtime {
   readonly reviews: ReviewWorker;
   /** Runs queued Agent Fixes, one at a time; only the daemon ticks it. */
   readonly fixes: ReviewWorker;
+  /** Learns Lessons from findings; the daemon ticks it after each poll. */
+  readonly lessons: LessonLearner;
   /** The state database's path; Agent Fix checkouts live beside it. */
   readonly statePath: string;
   poll(): Promise<PollStatus>;
@@ -159,6 +164,29 @@ export function createRuntime(configPath: string, signal?: AbortSignal): Runtime
     ...(signal === undefined ? {} : { signal }),
   });
 
+  // Does nothing at all, GitLab and model included, while `lessons.enabled` is false.
+  const lessons = createLessonLearner({
+    store,
+    config,
+    exec: defaultExec,
+    log,
+    now: Date.now,
+    busy: () => reviews.busy() || fixes.busy(),
+    detail: (key) => fetchFixDetail(run, glabRest(config.gitlab), key),
+    onScan: (map) => {
+      try {
+        writeFileSync(join(dirname(statePath), "lesson-scopes.json"), JSON.stringify(map), {
+          mode: 0o600,
+        });
+      } catch (error) {
+        log.warn("lesson scopes not written", {
+          reason: error instanceof Error ? error.name : "unknown",
+        });
+      }
+    },
+    ...(signal === undefined ? {} : { signal }),
+  });
+
   const deps: PollDeps = {
     fetchSnapshot: () => fetchSnapshot(run),
     lookupPerson: (username) => fetchPerson(glabRest(config.gitlab), username),
@@ -187,6 +215,7 @@ export function createRuntime(configPath: string, signal?: AbortSignal): Runtime
         snapshot,
         previous.seenNotes,
       ),
+    collectLessons: (snapshot, previous) => lessons.collectThreads(snapshot, previous.seenNotes),
     watchPipelines: (snapshot) =>
       watchPipelines({ store, config, notifier, alerts, log, now: Date.now }, snapshot),
     failures: createFailureTracker(),
@@ -195,5 +224,15 @@ export function createRuntime(configPath: string, signal?: AbortSignal): Runtime
     now: Date.now,
     ...(teams === undefined ? {} : { teams }),
   };
-  return { config, store, log, teams, reviews, fixes, statePath, poll: () => pollOnce(deps) };
+  return {
+    config,
+    store,
+    log,
+    teams,
+    reviews,
+    fixes,
+    lessons,
+    statePath,
+    poll: () => pollOnce(deps),
+  };
 }

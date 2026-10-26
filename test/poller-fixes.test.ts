@@ -8,7 +8,9 @@ import type { Snapshot } from "../src/domain.ts";
 import type { PreviousState } from "../src/events.ts";
 import { ME, mr, note, person, snapshot } from "./builders.ts";
 
-function harness(queueFixes: (snapshot: Snapshot, previous: PreviousState) => Promise<void>) {
+type AfterPoll = (snapshot: Snapshot, previous: PreviousState) => Promise<void>;
+
+function harness(queueFixes: AfterPoll, collectLessons?: AfterPoll) {
   let current: Snapshot = snapshot();
   const logs: string[] = [];
   const deps: PollDeps = {
@@ -22,6 +24,7 @@ function harness(queueFixes: (snapshot: Snapshot, previous: PreviousState) => Pr
       notifications: { summaryThreshold: 4, ignoreAuthors: [] },
     },
     queueFixes,
+    ...(collectLessons === undefined ? {} : { collectLessons }),
     now: () => 0,
   };
   return {
@@ -52,5 +55,20 @@ describe("Agent Fix after a poll", () => {
     await h.poll();
     expect(await h.poll()).toBe("ok");
     expect(h.logs.some((line) => line.includes("agent fix not queued"))).toBe(true);
+  });
+
+  it("hands each snapshot after the baseline to the Lessons collection", async () => {
+    const seen: string[][] = [];
+    const h = harness(
+      () => Promise.resolve(),
+      (_snap, previous) => {
+        seen.push([...previous.seenNotes]);
+        return Promise.resolve();
+      },
+    );
+    h.set(snapshot({ authored: [mr(7, { author: ME, notes: [note("n1", person("bob"))] })] }));
+    await h.poll();
+    await h.poll();
+    expect(seen).toEqual([["n1"]]);
   });
 });

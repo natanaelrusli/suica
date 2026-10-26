@@ -60,6 +60,10 @@ async function main(): Promise<void> {
         runtime.fixes.tick();
         return status;
       },
+      // Learning waits for reviews and fixes, and runs beside the loop.
+      afterPoll: () => {
+        void runtime.lessons.tick();
+      },
       readIdleSeconds: () => readIdleSeconds(),
       polling: runtime.config.polling,
       sleep: abortableSleep,
@@ -69,6 +73,7 @@ async function main(): Promise<void> {
   } finally {
     await runtime.reviews.idle();
     await runtime.fixes.idle();
+    await runtime.lessons.idle();
     runtime.store.close();
   }
   runtime.log.info("daemon stopped", {

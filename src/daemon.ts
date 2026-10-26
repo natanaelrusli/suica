@@ -5,6 +5,8 @@ import { nextDelaySeconds } from "./scheduler.ts";
 
 export interface DaemonDeps {
   readonly poll: () => Promise<PollStatus>;
+  /** Starts work that runs beside the loop after each poll, such as learning Lessons; not awaited. */
+  readonly afterPoll?: () => void;
   readonly readIdleSeconds: () => Promise<number>;
   readonly polling: Config["polling"];
   readonly sleep: (ms: number, signal: AbortSignal) => Promise<void>;
@@ -67,6 +69,7 @@ export async function runDaemon(deps: DaemonDeps): Promise<void> {
   let paused = false;
   while (!deps.signal.aborted) {
     const status = await pollSafely(deps);
+    deps.afterPoll?.();
     // Pausing is the Owner's action in another process; the loop sees it on its next poll.
     if ((status === "paused") !== paused) {
       paused = status === "paused";
