@@ -251,8 +251,10 @@ export function shouldReadStdin(stdin: { readonly isTTY?: boolean }): boolean {
 }
 
 /**
- * The scope map the daemon caches after each scan (`lesson-scopes.json`, a `ScopeMap`), with
- * repos of scopes no longer configured left out; undefined when missing or malformed.
+ * The scope map the daemon caches after each scan (`lesson-scopes.json`, a `ScopeMap`); undefined
+ * when missing or malformed. Each repo's scope is recomputed from the current config as the
+ * deepest configured folder holding it, and a repo under none is left out, so a folder the Owner
+ * just added (or nested) takes effect before the daemon scans again.
  */
 export function readScopeCache(path: string, scopes: readonly string[]): ScopeMap | undefined {
   let raw: unknown;
@@ -262,7 +264,15 @@ export function readScopeCache(path: string, scopes: readonly string[]): ScopeMa
     return undefined;
   }
   if (!isRecord(raw) || !Array.isArray(raw["repos"])) return undefined;
-  const configured = new Set(scopes.map((s) => resolve(s)));
+  const configured = [...new Set(scopes.filter((s) => s !== "").map((s) => resolve(s)))];
+  const deepest = (dir: string): string | undefined => {
+    let best: string | undefined;
+    for (const scope of configured) {
+      const inside = dir === scope || dir.startsWith(scope === sep ? sep : scope + sep);
+      if (inside && (best === undefined || scope.length > best.length)) best = scope;
+    }
+    return best;
+  };
   const repos: ScopedRepo[] = [];
   for (const entry of raw["repos"] as unknown[]) {
     if (!isRecord(entry)) return undefined;
@@ -270,8 +280,10 @@ export function readScopeCache(path: string, scopes: readonly string[]): ScopeMa
     if (typeof scope !== "string" || typeof dir !== "string" || typeof project !== "string") {
       return undefined;
     }
-    if (!isAbsolute(dir) || !configured.has(scope)) continue;
-    repos.push({ scope, dir, project });
+    if (!isAbsolute(dir)) continue;
+    const current = deepest(resolve(dir));
+    if (current === undefined) continue;
+    repos.push({ scope: current, dir, project });
   }
   return { repos };
 }

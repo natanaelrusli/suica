@@ -482,6 +482,20 @@ describe("readScopeCache", () => {
     expect(readScopeCache(path, [scope])).toEqual(map);
   });
 
+  it("gives each cached repo the deepest configured folder holding it", () => {
+    const path = join(dir, "lesson-scopes.json");
+    const parent = join(dir, "work");
+    const nested = join(parent, "team");
+    const inNested = { scope: parent, dir: join(nested, "api"), project: "t/api" };
+    const inParent = { scope: parent, dir: join(parent, "web"), project: "t/web" };
+    const outside = { scope: parent, dir: join(dir, "elsewhere", "x"), project: "t/x" };
+    writeFileSync(path, JSON.stringify({ repos: [inNested, inParent, outside] }));
+    expect(readScopeCache(path, [parent, `${nested}/`])).toEqual({
+      repos: [{ ...inNested, scope: nested }, inParent],
+    });
+    expect(readScopeCache(path, [nested])).toEqual({ repos: [{ ...inNested, scope: nested }] });
+  });
+
   it("a missing or malformed cache reads as nothing", () => {
     const path = join(dir, "lesson-scopes.json");
     expect(readScopeCache(path, [scope])).toBeUndefined();
