@@ -129,6 +129,11 @@ Config file: `~/.config/suica/config.yaml` (override the path with `SUICA_CONFIG
 | `fix.effort`                       | `medium`                         | How hard the CLI thinks during a fix, as for `review.effort`    |
 | `fix.timeoutMinutes`               | `20`                             | A fix run is stopped after this long                            |
 | `fix.maxPerDay`                    | `10`                             | At most this many automatic fixes in 24 hours; fixes you start yourself do not count |
+| `lessons.enabled`                  | `false`                          | Learn from the reviews you post: lessons that keep coming back are kept and shown to the agent that reviews next |
+| `lessons.scopes`                   | `[]`                             | Folders (`~` allowed, at most 20): only repositories under them feed and use lessons; empty means every repository |
+| `lessons.vaultPath`                | none                             | Folder, such as an Obsidian vault, the lessons are also written to as Markdown |
+| `lessons.perFile`                  | `5`                              | At most this many lessons shown to a review for one changed file (1 to 20) |
+| `lessons.perSession`               | `5`                              | At most this many lessons shown to one review (1 to 20) |
 | `office.agents`                    | `[claude, codex, gemini]`        | Which Coding Agents the Office looks for on this Mac |
 | `office.custom`                    | `[]`                             | More Coding Agents, one entry each: `name\|process\|log glob\|cwd key\|activity key` (the program's name, a JSONL log pattern such as `~/.aider/*.jsonl`, and the dotted keys of the working folder and the activity in a log line) |
 | `statePath`                        | `~/Library/Application Support/suica/state.db` | SQLite state file |

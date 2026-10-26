@@ -23,7 +23,7 @@ describe("CONFIG_FIELDS", () => {
     const fromFields = CONFIG_FIELDS.map((field) => field.path.join(".")).sort();
     expect(fromFields).toEqual(fromSchema);
     expect(new Set(fromFields).size).toBe(fromFields.length);
-    expect(fromFields).toHaveLength(54);
+    expect(fromFields).toHaveLength(59);
   });
 
   it("gives enum fields the schema's options", () => {
@@ -38,6 +38,20 @@ describe("CONFIG_FIELDS", () => {
     for (const field of CONFIG_FIELDS) {
       expect(field.options !== undefined).toBe(field.type === "enum" || field.type === "level");
     }
+  });
+
+  it("describes the lessons settings in a Lessons section", () => {
+    const lessons = CONFIG_FIELDS.filter((field) => field.path[0] === "lessons");
+    expect(lessons.map((field) => [field.path.join("."), field.type])).toEqual([
+      ["lessons.enabled", "bool"],
+      ["lessons.scopes", "stringList"],
+      ["lessons.vaultPath", "string"],
+      ["lessons.perFile", "int"],
+      ["lessons.perSession", "int"],
+    ]);
+    expect(lessons.find((field) => field.path[1] === "vaultPath")?.format).toBe("path");
+    expect(lessons.find((field) => field.path[1] === "perFile")?.max).toBe(20);
+    expect(lessons.find((field) => field.path[1] === "perSession")?.max).toBe(20);
   });
 
   it("lists the review effort as a level from low to max", () => {

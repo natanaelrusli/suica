@@ -42,6 +42,7 @@ describe("parseConfig", () => {
         agentName: "Suica",
       },
       model: { cli: "auto" },
+      lessons: { enabled: false, scopes: [], perFile: 5, perSession: 5 },
       office: { agents: ["claude", "codex", "gemini"], custom: [] },
       review: {
         auto: true,
@@ -318,5 +319,35 @@ describe("office config", () => {
 
   it("rejects an unknown key under office", () => {
     expect(() => parseConfig(`${MINIMAL}office:\n  rooms: 3\n`)).toThrow(/rooms/);
+  });
+});
+
+describe("lessons", () => {
+  const home = homedir();
+
+  it("defaults to off with 5 per file and per session", () => {
+    expect(parseConfig(MINIMAL).lessons).toEqual({
+      enabled: false,
+      scopes: [],
+      perFile: 5,
+      perSession: 5,
+    });
+  });
+
+  it("lessons.scopes and lessons.vaultPath expand ~", () => {
+    const config = parseConfig(
+      `${MINIMAL}lessons:\n  scopes:\n    - ~/work/a\n    - /abs/b\n  vaultPath: ~/vault\n`,
+    );
+    expect(config.lessons.scopes).toEqual([join(home, "work", "a"), "/abs/b"]);
+    expect(config.lessons.vaultPath).toBe(join(home, "vault"));
+  });
+
+  it("rejects perFile and perSession outside 1 to 20 and more than 20 scopes", () => {
+    for (const bad of [{ perFile: 21 }, { perSession: 0 }, { perFile: 1.5 }, { extra: 1 }]) {
+      expect(validateConfig({ gitlab: { hostname: "h" }, lessons: bad }).ok).toBe(false);
+    }
+    const many = Array.from({ length: 21 }, (_, index) => `/s${index}`);
+    expect(validateConfig({ gitlab: { hostname: "h" }, lessons: { scopes: many } }).ok).toBe(false);
+    expect(validateConfig({ gitlab: { hostname: "h" }, lessons: { perFile: 20 } }).ok).toBe(true);
   });
 });

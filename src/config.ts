@@ -17,6 +17,8 @@ const positiveInt = z.number().int().positive();
 /** review.approveRules end up in a prompt: a few short lines. */
 const APPROVE_RULES_MAX = 20;
 const APPROVE_RULE_MAX = 500;
+/** lessons.scopes: folders, a few. */
+const LESSON_SCOPES_MAX = 20;
 
 /** Passed as one argument after --model / -m; a leading letter or digit keeps it from being a flag. */
 export const MODEL_NAME = /^[A-Za-z0-9][\w.:[\]/-]*$/;
@@ -150,6 +152,20 @@ export const configSchema = z
       })
       .strict()
       .default({}),
+    // Review lessons: what reviews keep teaching, shown to the Owner as a Lesson Book.
+    lessons: z
+      .object({
+        enabled: z.boolean().default(false),
+        // Folders whose repositories' MRs count for lessons; empty means every repository.
+        scopes: z.array(z.string().min(1)).max(LESSON_SCOPES_MAX).default([]),
+        // A folder (an Obsidian vault, say) the lessons are also written to as Markdown.
+        vaultPath: z.string().min(1).optional(),
+        // How many lessons one file and one session show at most.
+        perFile: z.number().int().min(1).max(20).default(5),
+        perSession: z.number().int().min(1).max(20).default(5),
+      })
+      .strict()
+      .default({}),
     office: z
       .object({
         // Which built-in adapters look for Coding Agents on this Mac.
@@ -209,7 +225,7 @@ export function expandHome(path: string): string {
  * folder named `~` there. Expanded once at load time; the editor keeps the text as typed.
  */
 function expandPaths(config: Config): Config {
-  const { gitlab, teams, statePath } = config;
+  const { gitlab, teams, lessons, statePath } = config;
   return {
     ...config,
     gitlab: { ...gitlab, glabPath: expandHome(gitlab.glabPath) },
@@ -219,6 +235,11 @@ function expandPaths(config: Config): Config {
       ...(teams.templatesPath === undefined
         ? {}
         : { templatesPath: expandHome(teams.templatesPath) }),
+    },
+    lessons: {
+      ...lessons,
+      scopes: lessons.scopes.map(expandHome),
+      ...(lessons.vaultPath === undefined ? {} : { vaultPath: expandHome(lessons.vaultPath) }),
     },
     ...(statePath === undefined ? {} : { statePath: expandHome(statePath) }),
   };
