@@ -158,14 +158,18 @@ describe("lesson store", () => {
   });
 
   describe("repeatsBySource", () => {
-    /** One lesson of `scope` with the given occurrences: [sourceKey, mrKey] pairs. */
+    /** One lesson of `scope` with the given occurrences: [sourceKey, mrKey, at?] rows. */
     const seed = (
       lessons: ReturnType<typeof openStore>["lessons"],
-      rows: readonly (readonly [string, string])[],
+      rows: readonly (readonly [string, string, number?])[],
       scope = "/w/acme",
     ): number => {
       const id = lessons.createLesson({ ...fields, scope, title: `L ${scope}` }, 1);
-      lessons.addOccurrences(rows.map(([key, mrKey]) => occurrence(key, { mrKey })));
+      lessons.addOccurrences(
+        rows.map(([key, mrKey, at]) =>
+          occurrence(key, { mrKey, ...(at === undefined ? {} : { at }) }),
+        ),
+      );
       lessons.attach(
         rows.map(([key]) => lessons.occurrenceBySource(key)?.id ?? 0),
         id,
@@ -174,18 +178,48 @@ describe("lesson store", () => {
       return id;
     };
 
-    it("counts the other occurrences and their distinct repos, sorted", () => {
+    it("counts the earlier occurrences of other MRs and their distinct repos, sorted", () => {
       const { lessons } = openStore(":memory:");
       const id = seed(lessons, [
-        ["review:9:1", "g/web!3"],
-        ["review:2:1", "g/api!1"],
-        ["thread:g/api!4:d", "g/api!4"],
-        ["review:5:2", "g/cli!8"],
+        ["review:9:1", "g/web!3", 50],
+        ["review:2:1", "g/api!1", 10],
+        ["thread:g/api!4:d", "g/api!4", 20],
+        ["review:5:2", "g/cli!8", 30],
       ]);
       const repeats = lessons.repeatsBySource(["review:9:1", "review:404:1"]);
       expect([...repeats.entries()]).toEqual([
         ["review:9:1", { lessonId: id, title: "L /w/acme", before: 3, repos: ["g/api", "g/cli"] }],
       ]);
+    });
+
+    it("does not count sibling findings of the same MR", () => {
+      const { lessons } = openStore(":memory:");
+      seed(lessons, [
+        ["review:1:1", "g/api!1", 10],
+        ["review:1:2", "g/api!1", 10],
+        ["review:1:3", "g/api!1", 10],
+      ]);
+      expect(lessons.repeatsBySource(["review:1:1", "review:1:2", "review:1:3"]).size).toBe(0);
+    });
+
+    it("does not count occurrences that came later, and breaks a time tie by insertion order", () => {
+      const { lessons } = openStore(":memory:");
+      const id = seed(lessons, [
+        ["old", "g/api!1", 10],
+        ["tie-a", "g/api!2", 20],
+        ["tie-b", "g/web!3", 20],
+        ["new", "g/cli!4", 30],
+      ]);
+      const repeats = lessons.repeatsBySource(["old", "tie-a", "tie-b", "new"]);
+      expect(repeats.has("old")).toBe(false);
+      expect(repeats.get("tie-a")).toEqual({
+        lessonId: id,
+        title: "L /w/acme",
+        before: 1,
+        repos: ["g/api"],
+      });
+      expect(repeats.get("tie-b")?.before).toBe(2);
+      expect(repeats.get("new")).toMatchObject({ before: 3, repos: ["g/api", "g/web"] });
     });
 
     it("leaves out a lone occurrence, an archived lesson, a lesson with no scope and a pending one", () => {
@@ -222,7 +256,7 @@ describe("lesson store", () => {
       const db = new DatabaseSync(path);
       const prepare = vi.spyOn(db, "prepare");
       const keys = Array.from({ length: 200 }, (_, i) => `review:${String(i)}:1`);
-      expect(createLessonStore(db).repeatsBySource(["a", "b", ...keys]).size).toBe(2);
+      expect(createLessonStore(db).repeatsBySource(["a", "b", ...keys]).size).toBe(1);
       expect(prepare).toHaveBeenCalledTimes(1);
       db.close();
     });
@@ -239,7 +273,7 @@ describe("lesson store", () => {
       store.lessons.addOccurrences([occurrence("pending")]);
       store.close();
       const reader = openLessonsReadOnly(path);
-      expect(reader?.repeatsBySource(["a"]).get("a")?.before).toBe(1);
+      expect(reader?.repeatsBySource(["b"]).get("b")?.before).toBe(1);
       expect(reader?.countPending()).toBe(1);
       reader?.close();
     });

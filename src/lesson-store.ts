@@ -51,9 +51,9 @@ export interface LessonRow {
 export interface LessonRepeat {
   readonly lessonId: number;
   readonly title: string;
-  /** The Lesson's occurrences other than this one. */
+  /** The Lesson's occurrences from other MRs that came before this one (time, then id). */
   readonly before: number;
-  /** The distinct projects (`group/project`) of those other occurrences, sorted. */
+  /** The distinct projects (`group/project`) of those earlier occurrences, sorted. */
   readonly repos: readonly string[];
 }
 
@@ -79,8 +79,9 @@ export interface LessonStore {
   pendingMrKeys(now: number): string[];
   countPending(): number;
   /**
-   * For each key whose occurrence belongs to an unarchived Lesson of a scope that has other
-   * occurrences, that Lesson; keys without one are left out. One query, whatever the key count.
+   * For each key whose occurrence belongs to an unarchived Lesson of a scope that has an earlier
+   * occurrence from another MR, that Lesson; keys without one are left out. Siblings of the same
+   * MR and later findings never count. One query, whatever the key count.
    */
   repeatsBySource(sourceKeys: readonly string[]): Map<string, LessonRepeat>;
   /** Counts a failed distilling attempt and holds the rows back until `retryAt`. */
@@ -242,7 +243,8 @@ function createReads(db: DatabaseSync): Reads {
            FROM json_each(?) AS k
            JOIN lesson_occurrence o ON o.source_key = k.value
            JOIN lesson l ON l.id = o.lesson_id AND l.archived = 0 AND l.scope <> ''
-           JOIN lesson_occurrence other ON other.lesson_id = l.id AND other.id <> o.id
+           JOIN lesson_occurrence other ON other.lesson_id = l.id AND other.mr_key <> o.mr_key
+             AND (other.at < o.at OR (other.at = o.at AND other.id < o.id))
            ORDER BY o.source_key`,
         )
         .all(JSON.stringify(keys));

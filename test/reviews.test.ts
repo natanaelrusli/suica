@@ -250,12 +250,13 @@ describe("buildReviewList", () => {
   it("matches the golden contract", () => {
     const store = openStore(":memory:");
     // The posted review's Major finding repeats a lesson seen three times before in two repos;
-    // its Minor finding (key "1#2") is a lesson's only occurrence.
+    // its Minor finding (key "1#2") is a lesson's only occurrence. Same time, so the earlier
+    // rows count as before it.
     seedLesson(store.lessons, "HTTP clients need an explicit timeout", [
-      ["review:4:1", "g/p!9"],
       ["review:1:2", "g/api!3"],
       ["thread:g/web!5:d1", "g/web!5"],
       ["review:2:1", "g/api!4"],
+      ["review:4:1", "g/p!9"],
     ]);
     seedLesson(store.lessons, "Remove debug output", [["review:4:1#2", "g/p!9"]]);
     const list = buildReviewList(

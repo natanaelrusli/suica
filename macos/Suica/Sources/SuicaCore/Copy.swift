@@ -1548,7 +1548,7 @@ extension Copy {
         return names.isEmpty ? "Flagged \(times) before" : "Flagged \(times) before, in \(names.joined(separator: ", "))"
     }
     public static let repeatedFindings = "Repeated findings"
-    public static let repeatedFindingsHint = "Findings of this review that earlier reviews flagged too. Only you see this."
+    public static let repeatedFindingsHint = "Findings of this review that reviews of earlier MRs flagged too. Only you see this."
     public static func findingLabel(_ number: String) -> String { "Finding \(number)" }
     public static let openLesson = "Open lesson"
     public static let allScopes = "All scopes"

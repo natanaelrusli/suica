@@ -516,7 +516,7 @@ describe("buildFixList", () => {
       { scope: "/w/acme", title: "Name things for what they do", rule: "r", topics: [], globs: [] },
       NOW,
     );
-    const occurrence = (sourceKey: string, mrKey: string) => ({
+    const occurrence = (sourceKey: string, mrKey: string, at = NOW) => ({
       sourceKey,
       source: "thread" as const,
       mrKey,
@@ -528,11 +528,11 @@ describe("buildFixList", () => {
       title: "t",
       text: "t",
       outcome: "open" as const,
-      at: NOW,
+      at,
     });
     h.db.lessons.addOccurrences([
       occurrence(`thread:g/p!7:${D1}`, "g/p!7"),
-      occurrence("review:1:1", "g/api!2"),
+      occurrence("review:1:1", "g/api!2", NOW - 1000),
     ]);
     h.db.lessons.attach(
       [`thread:g/p!7:${D1}`, "review:1:1"].map(

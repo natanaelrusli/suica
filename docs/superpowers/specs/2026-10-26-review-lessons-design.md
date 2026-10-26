@@ -89,7 +89,7 @@ The Lessons must reach the agent before it writes the change: a hook on the edit
 
 ## The Owner
 
-- **Repeat marker**: an Agent Review whose finding matched an existing Lesson shows, under that finding in MR detail, "Flagged N times before, in `repo-a`, `repo-b`" with a link to the Lesson. On the Owner's own MR, the same shows on the Finding Thread in the fix view. Nothing is added to what Suica posts to GitLab or Teams (_my call_: the Lessons are the Owner's, not the Author's).
+- **Repeat marker**: an Agent Review whose finding matched an existing Lesson shows, under that finding in MR detail, "Flagged N times before, in `repo-a`, `repo-b`" with a link to the Lesson. N counts only earlier occurrences from other MRs (time, then insertion order); sibling findings of the same MR and later ones never count. On the Owner's own MR, the same shows on the Finding Thread in the fix view. Nothing is added to what Suica posts to GitLab or Teams (_my call_: the Lessons are the Owner's, not the Author's).
 - **Lessons view** in the app window: Lessons of each scope ranked by weight, filterable by Topic and repo, searchable; a Lesson opens to its rule and every occurrence with links to the MRs. The Owner can merge two Lessons that are the same, or archive one that is wrong (archived Lessons are not handed to agents and not exported) (_my call_: the only hand edits, so a bad model grouping is fixable).
 - No new macOS notification (_my call_: the marker sits where the Owner already reads findings).
 
