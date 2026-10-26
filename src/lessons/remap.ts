@@ -16,7 +16,11 @@ export function sameScopeMap(a: ScopeMap, b: ScopeMap): boolean {
 /**
  * Brings every Lesson in step with `map`: a Lesson's scope follows the repos of its occurrences,
  * one spread over several scopes is split into one Lesson per scope, and one with no occurrence in
- * any scope drops to scope "". Links never cross scopes. Safe to run again.
+ * any scope drops to scope "". Occurrences whose repo is unmapped never stay in a Lesson that
+ * reaches a scope: they move to a scope-"" copy. Links never cross scopes. Safe to run again.
+ *
+ * `split` counts the Lessons created for a further real scope; `orphaned` counts the Lessons that
+ * newly ended in scope "" (a Lesson dropped there, or a scope-"" copy created).
  */
 export function remapScopes(
   store: LessonStore,
@@ -26,23 +30,31 @@ export function remapScopes(
   let split = 0;
   let orphaned = 0;
   store.transaction(() => {
+    // Unattached occurrences only learn their repo path.
+    const pending = store.pendingOccurrences(Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER);
+    for (const row of pending) {
+      const repo = scopeForProject(map, projectOfMrKey(row.mrKey));
+      if (repo !== undefined && row.repoPath !== repo.dir) store.setRepoPath(row.id, repo.dir);
+    }
     for (const lesson of store.allLessons()) {
       const groups = new Map<string, OccurrenceRow[]>();
       for (const row of store.occurrences(lesson.id)) {
         const repo = scopeForProject(map, projectOfMrKey(row.mrKey));
-        if (repo === undefined) continue;
-        if (row.repoPath !== repo.dir) store.setRepoPath(row.id, repo.dir);
-        const list = groups.get(repo.scope) ?? [];
-        list.push(row);
-        groups.set(repo.scope, list);
+        if (repo !== undefined && row.repoPath !== repo.dir) store.setRepoPath(row.id, repo.dir);
+        const scope = repo?.scope ?? "";
+        groups.set(scope, [...(groups.get(scope) ?? []), row]);
       }
-      const ranked = [...groups.entries()].sort(
-        (a, b) => b[1].length - a[1].length || (a[0] < b[0] ? -1 : 1),
-      );
-      const keep = ranked[0]?.[0] ?? "";
+      // Scope "" never competes in the vote.
+      const real = [...groups.entries()]
+        .filter(([scope]) => scope !== "")
+        .sort((a, b) => b[1].length - a[1].length || (a[0] < b[0] ? -1 : 1));
+      const keep = real[0]?.[0] ?? "";
       if (keep === "" && lesson.scope !== "") orphaned += 1;
       if (keep !== lesson.scope) store.setScope(lesson.id, keep, at);
-      for (const [scope, rows] of ranked.slice(1)) {
+      const copies: [string, OccurrenceRow[]][] = real.slice(1);
+      const unmapped = groups.get("");
+      if (keep !== "" && unmapped !== undefined) copies.push(["", unmapped]);
+      for (const [scope, rows] of copies) {
         const copy = store.createLesson(
           {
             scope,
@@ -59,7 +71,8 @@ export function remapScopes(
           copy,
           at,
         );
-        split += 1;
+        if (scope === "") orphaned += 1;
+        else split += 1;
       }
     }
     const scopeOf = new Map(store.allLessons().map((each) => [each.id, each.scope]));

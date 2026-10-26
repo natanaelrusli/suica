@@ -130,7 +130,8 @@ describe("lesson store", () => {
   });
 
   it("allLessons spans scopes, unlink drops a link and setRepoPath updates a row", () => {
-    const { lessons } = openStore(":memory:");
+    const store = openStore(":memory:");
+    const { lessons } = store;
     const a = lessons.createLesson({ ...fields, scope: "" }, 1);
     const b = lessons.createLesson(fields, 1);
     lessons.archive(b, 2);
@@ -142,5 +143,6 @@ describe("lesson store", () => {
     const id = lessons.occurrenceBySource("k")?.id ?? 0;
     lessons.setRepoPath(id, "/w/p");
     expect(lessons.occurrenceBySource("k")?.repoPath).toBe("/w/p");
+    store.close();
   });
 });

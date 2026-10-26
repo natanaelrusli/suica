@@ -170,4 +170,129 @@ describe("remapping scopes", () => {
     await learner.tick();
     expect(s.lessons.lesson(id)?.scope).toBe("/w/d");
   });
+
+  it("a lesson with mapped and unmapped occurrences sheds the unmapped into a scope-less copy", () => {
+    const s = db();
+    const id = lessonOf(s, "/w", ["g/a", "g/a", "g/gone"]);
+    const other = lessonOf(s, "/w", ["g/a"], "o");
+    s.lessons.link(id, other);
+    expect(remapScopes(s.lessons, { repos: [repo("/w", "g/a")] }, 5)).toEqual({
+      split: 0,
+      orphaned: 1,
+    });
+    expect(s.lessons.lesson(id)?.scope).toBe("/w");
+    expect(s.lessons.occurrences(id).map((o) => o.mrKey)).toEqual(["g/a!1", "g/a!1"]);
+    const copies = s.lessons.allLessons().filter((l) => l.scope === "" && l.id !== id);
+    expect(copies).toHaveLength(1);
+    expect(copies[0]).toMatchObject({
+      title: "Title",
+      rule: "Rule",
+      topics: ["a"],
+      globs: ["*.ts"],
+    });
+    expect(s.lessons.occurrences(copies[0]?.id ?? 0).map((o) => o.mrKey)).toEqual(["g/gone!1"]);
+    expect(s.lessons.links(copies[0]?.id ?? 0)).toEqual([]);
+    expect(s.lessons.links(id)).toEqual([other]);
+    const before = JSON.stringify(s.lessons.allLessons());
+    expect(remapScopes(s.lessons, { repos: [repo("/w", "g/a")] }, 9)).toEqual({
+      split: 0,
+      orphaned: 0,
+    });
+    expect(JSON.stringify(s.lessons.allLessons())).toBe(before);
+  });
+
+  it("an archived lesson's scope-less copy is archived", () => {
+    const s = db();
+    const id = lessonOf(s, "/w", ["g/a", "g/gone"]);
+    s.lessons.archive(id, 2);
+    remapScopes(s.lessons, { repos: [repo("/w", "g/a")] }, 5);
+    const copy = s.lessons.allLessons().find((l) => l.scope === "");
+    expect(copy?.archived).toBe(true);
+  });
+
+  it("a lesson that is entirely unmapped is left alone on a second run", () => {
+    const s = db();
+    const id = lessonOf(s, "/w", ["g/gone", "g/gone2"]);
+    expect(remapScopes(s.lessons, { repos: [] }, 5)).toEqual({ split: 0, orphaned: 1 });
+    expect(remapScopes(s.lessons, { repos: [] }, 6)).toEqual({ split: 0, orphaned: 0 });
+    expect(s.lessons.allLessons()).toHaveLength(1);
+    expect(s.lessons.lesson(id)?.scope).toBe("");
+  });
+
+  it("a lesson over three scopes splits into three", () => {
+    const s = db();
+    const id = lessonOf(s, "/w", ["g/a", "g/b", "g/b", "g/c"]);
+    const map = { repos: [repo("/w/a", "g/a"), repo("/w/b", "g/b"), repo("/w/c", "g/c")] };
+    expect(remapScopes(s.lessons, map, 5)).toEqual({ split: 2, orphaned: 0 });
+    expect(s.lessons.lesson(id)?.scope).toBe("/w/b");
+    expect(s.lessons.lessons("/w/a")).toHaveLength(1);
+    expect(s.lessons.lessons("/w/c")).toHaveLength(1);
+  });
+
+  it("pending occurrences only get their repo path refreshed", () => {
+    const s = db();
+    s.lessons.addOccurrences([occ("p1", "g/a"), occ("p2", "g/gone")]);
+    remapScopes(s.lessons, { repos: [repo("/w", "g/a")] }, 5);
+    expect(s.lessons.occurrenceBySource("p1")).toMatchObject({ lessonId: null, repoPath: "/w/a" });
+    expect(s.lessons.occurrenceBySource("p2")).toMatchObject({ lessonId: null, repoPath: null });
+    expect(s.lessons.allLessons()).toEqual([]);
+  });
+
+  it("a failure midway leaves nothing partly applied", () => {
+    const s = db();
+    const first = lessonOf(s, "/w", ["g/a"], "f");
+    const second = lessonOf(s, "/w", ["g/a", "g/b"], "s");
+    const failing = {
+      ...s.lessons,
+      createLesson: () => {
+        throw new Error("boom");
+      },
+    };
+    const map = { repos: [repo("/w/x", "g/a"), repo("/w/y", "g/b")] };
+    expect(() => {
+      remapScopes(failing, map, 5);
+    }).toThrow("boom");
+    expect(s.lessons.lesson(first)?.scope).toBe("/w");
+    expect(s.lessons.lesson(second)?.scope).toBe("/w");
+    expect(s.lessons.allLessons()).toHaveLength(2);
+    expect(s.lessons.occurrenceBySource("f:g/a:0")?.repoPath).toBeNull();
+  });
+
+  describe("the learner and an empty scan", () => {
+    const run = async (
+      scopes: string,
+      scanned: ScopeMap,
+    ): Promise<{ scope: string | undefined; warns: string[] }> => {
+      const s = db();
+      const id = lessonOf(s, "/w", ["g/a"]);
+      const warns: string[] = [];
+      const learner = createLessonLearner({
+        store: s,
+        config: parseConfig(
+          `gitlab:\n  hostname: gitlab.example\nmodel:\n  cli: claude\nlessons:\n  enabled: true\n  scopes: ${scopes}\n`,
+        ),
+        log: createLogger({ write: (line) => warns.push(line) }),
+        now: () => 1_000_000_000_000,
+        exec: () => Promise.reject(new Error("no")),
+        detectClis: () => [],
+        busy: () => true,
+        detail: () => Promise.reject(new Error("no")),
+        scan: () => scanned,
+      });
+      await learner.tick();
+      return { scope: s.lessons.lesson(id)?.scope, warns: warns.filter((w) => w.includes("warn")) };
+    };
+
+    it("skips the remap and warns when scopes are set but the scan found no repo", async () => {
+      const out = await run('["/w"]', { repos: [] });
+      expect(out.scope).toBe("/w");
+      expect(out.warns).toHaveLength(1);
+    });
+
+    it("remaps when no scopes are configured", async () => {
+      const out = await run("[]", { repos: [] });
+      expect(out.scope).toBe("");
+      expect(out.warns).toHaveLength(0);
+    });
+  });
 });

@@ -239,6 +239,8 @@ export function createLessonLearner(deps: LearnerDeps): LessonLearner {
   const { store, config, log } = deps;
   const read = new Set<string>();
   let map: ScopeMap | undefined;
+  /** The map the Lessons were last remapped to. */
+  let applied: ScopeMap | undefined;
   let scannedFor = "";
   let scannedAt = 0;
   let announced = false;
@@ -249,8 +251,12 @@ export function createLessonLearner(deps: LearnerDeps): LessonLearner {
     const now = deps.now();
     if (map === undefined || key !== scannedFor || now - scannedAt >= HOUR_MS) {
       const scanned = (deps.scan ?? scanScopes)(config.lessons.scopes, config.gitlab.hostname);
-      if (map === undefined || !sameScopeMap(map, scanned)) {
+      if (config.lessons.scopes.length > 0 && scanned.repos.length === 0) {
+        // A scan that found nothing may be an unmounted workspace: do not split on it.
+        log.warn("lessons scan found no repositories; scopes left as they were");
+      } else if (applied === undefined || !sameScopeMap(applied, scanned)) {
         remapScopes(store.lessons, scanned, deps.now());
+        applied = scanned;
       }
       map = scanned;
       scannedFor = key;
