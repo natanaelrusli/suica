@@ -271,8 +271,6 @@ private struct LessonRow: View {
 private struct LessonDetailView: View {
     let lesson: LessonDetail
     let model: LessonsModel
-    @State private var confirmingArchive = false
-    @State private var mergeTarget: LessonSummary?
     @Environment(\.openURL) private var openURL
 
     private var candidates: [LessonSummary] { model.list?.mergeCandidates(for: lesson) ?? [] }
@@ -299,22 +297,11 @@ private struct LessonDetailView: View {
         .environment(\.openURL, OpenURLAction { url in
             DisplayText.safeURL(url.absoluteString) == nil ? .discarded : .systemAction
         })
-        .confirmationDialog(Copy.archiveLessonTitle, isPresented: $confirmingArchive) {
-            Button(Copy.archiveLesson, role: .destructive) { Task { await model.archive(lesson.id) } }
-            Button(Copy.cancel, role: .cancel) {}
-        } message: {
-            Text(Copy.archiveLessonMessage)
-        }
-        .confirmationDialog(
-            Copy.mergeLessonTitle(lesson.title, into: mergeTarget?.title ?? ""),
-            isPresented: Binding(get: { mergeTarget != nil }, set: { if !$0 { mergeTarget = nil } }),
-            presenting: mergeTarget
-        ) { target in
-            Button(Copy.mergeLessonAction, role: .destructive) { Task { await model.merge(lesson.id, into: target.id) } }
-            Button(Copy.cancel, role: .cancel) {}
-        } message: { _ in
-            Text(Copy.mergeLessonMessage)
-        }
+    }
+
+    /// Each dialog hangs on its own button: two dialogs on one view may never present.
+    private var mergeRequest: LessonMergeRequest? {
+        model.mergeRequest.flatMap { $0.gone.id == lesson.id ? $0 : nil }
     }
 
     private var header: some View {
@@ -329,14 +316,38 @@ private struct LessonDetailView: View {
                 Menu(Copy.mergeLessonInto) {
                     if candidates.isEmpty { Text(Copy.noMergeCandidates) }
                     ForEach(candidates) { candidate in
-                        Button(DisplayText.clean(candidate.title, max: 100)) { mergeTarget = candidate }
+                        Button(DisplayText.clean(candidate.title, max: 100)) {
+                            model.mergeRequest = LessonMergeRequest(gone: lesson, keep: candidate)
+                        }
                     }
                 }
                 .fixedSize()
                 .disabled(model.busy || candidates.isEmpty)
                 .help(Copy.mergeLessonHelp)
-                Button(Copy.archiveLesson, role: .destructive) { confirmingArchive = true }
+                .confirmationDialog(
+                    Copy.mergeLessonTitle(lesson.title, into: mergeRequest?.keep.title ?? ""),
+                    isPresented: Binding(get: { mergeRequest != nil }, set: { if !$0 { model.mergeRequest = nil } }),
+                    presenting: mergeRequest
+                ) { request in
+                    Button(Copy.mergeLessonAction, role: .destructive) {
+                        Task { await model.merge(request.gone.id, into: request.keep.id) }
+                    }
+                    Button(Copy.cancel, role: .cancel) {}
+                } message: { _ in
+                    Text(Copy.mergeLessonMessage)
+                }
+                Button(Copy.archiveLesson, role: .destructive) { model.archiveRequest = lesson.id }
                     .disabled(model.busy || lesson.archived)
+                    .confirmationDialog(
+                        Copy.archiveLessonTitle,
+                        isPresented: Binding(
+                            get: { model.archiveRequest == lesson.id }, set: { if !$0 { model.archiveRequest = nil } })
+                    ) {
+                        Button(Copy.archiveLesson, role: .destructive) { Task { await model.archive(lesson.id) } }
+                        Button(Copy.cancel, role: .cancel) {}
+                    } message: {
+                        Text(Copy.archiveLessonMessage)
+                    }
             }
             HStack(spacing: 6) {
                 if lesson.archived { Badge(text: Copy.lessonArchived, tint: .gray, symbol: "archivebox") }
@@ -526,18 +537,33 @@ struct LessonsAgentSetupSection: View {
             statusRow(Copy.lessonsClaudeMCP, model.setup?.claude)
             statusRow(Copy.lessonsCodexMCP, model.setup?.codex)
             HStack(spacing: 8) {
-                if model.install != .idle || model.setupBusy {
+                if model.setupIsBusy {
                     ProgressView().controlSize(.small).accessibilityLabel(Copy.lessonsWorking)
                 }
                 Spacer()
-                Button(Copy.lessonsRemove, role: .destructive) { confirmingRemove = true }
-                    .disabled(!installedAny || model.install != .idle || model.setupBusy)
+                // Each dialog hangs on its own button: two dialogs on one view may never present.
+                Button(Copy.lessonsRemove, role: .destructive) { model.removeRequested = true }
+                    .disabled(!model.canRemove)
+                    .confirmationDialog(Copy.lessonsRemoveTitle, isPresented: Bindable(model).removeRequested) {
+                        Button(Copy.lessonsRemoveAction, role: .destructive) { Task { await model.uninstall() } }
+                        Button(Copy.cancel, role: .cancel) {}
+                    } message: {
+                        Text(Copy.lessonsRemoveMessage)
+                    }
                 Button(Copy.lessonsInstall) { Task { await model.beginInstall() } }
-                    .disabled(model.install != .idle || model.setupBusy)
+                    .disabled(!model.canInstall)
+                    // Install moves the model to installing before its task starts, and closing the
+                    // dialog only parks the plan: SwiftUI may close it before or after the button runs.
+                    .confirmationDialog(Copy.lessonsInstallTitle, isPresented: confirming, presenting: plan) { _ in
+                        Button(Copy.lessonsInstallAction) { model.confirmInstall() }
+                        Button(Copy.cancel, role: .cancel) { model.cancelInstall() }
+                    } message: { plan in
+                        Text(Copy.lessonsInstallPlan(plan))
+                    }
             }
             LabeledContent {
                 Button(Copy.lessonsExportNow) { Task { await model.exportVault() } }
-                    .disabled(vaultPath == nil || model.setupBusy)
+                    .disabled(vaultPath == nil || model.setupIsBusy)
             } label: {
                 Text(Copy.lessonsVault)
                 Text(vaultPath.map { DisplayText.clean($0, max: 200) } ?? Copy.lessonsExportNeedsVault)
@@ -550,23 +576,7 @@ struct LessonsAgentSetupSection: View {
         }
         .motion(value: model.setupNotice)
         .task { await model.refreshSetup() }
-        // Install moves the model to installing before its task starts, and closing the dialog
-        // only parks the plan: SwiftUI may close it before or after running the button.
-        .confirmationDialog(Copy.lessonsInstallTitle, isPresented: confirming, presenting: plan) { _ in
-            Button(Copy.lessonsInstallAction) { model.confirmInstall() }
-            Button(Copy.cancel, role: .cancel) { model.cancelInstall() }
-        } message: { plan in
-            Text(Copy.lessonsInstallPlan(plan))
-        }
-        .confirmationDialog(Copy.lessonsRemoveTitle, isPresented: $confirmingRemove) {
-            Button(Copy.lessonsRemoveAction, role: .destructive) { Task { await model.uninstall() } }
-            Button(Copy.cancel, role: .cancel) {}
-        } message: {
-            Text(Copy.lessonsRemoveMessage)
-        }
     }
-
-    @State private var confirmingRemove = false
 
     /// The plan while the dialog shows it.
     private var plan: LessonsInstallPlan? {
@@ -577,10 +587,6 @@ struct LessonsAgentSetupSection: View {
         Binding(get: { plan != nil }, set: { if !$0 { model.installDialogClosed() } })
     }
 
-    private var installedAny: Bool {
-        guard let setup = model.setup else { return false }
-        return setup.hook || setup.claude || setup.codex
-    }
 
     private func statusRow(_ title: String, _ installed: Bool?) -> some View {
         LabeledContent(title) {

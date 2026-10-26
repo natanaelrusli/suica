@@ -587,6 +587,17 @@ public protocol LessonsClient: Sendable {
 
 // MARK: - Model
 
+/// Merging `gone` into `keep`, once you confirm.
+public struct LessonMergeRequest: Equatable, Sendable {
+    public let gone: LessonDetail
+    public let keep: LessonSummary
+
+    public init(gone: LessonDetail, keep: LessonSummary) {
+        self.gone = gone
+        self.keep = keep
+    }
+}
+
 /// Where Install… is: asking the agent for its plan, showing it, waiting for your answer after the
 /// dialog closed, or installing.
 public enum LessonsInstallStep: Equatable, Sendable {
@@ -628,6 +639,13 @@ public final class LessonsModel {
     /// The hook and MCP servers; nil until read.
     public private(set) var setup: LessonsSetupStatus?
     public private(set) var install: LessonsInstallStep = .idle
+    /// A lesson waiting for you to confirm Archive; set by the Archive button, read by its dialog.
+    public var archiveRequest: Int?
+    /// Merge into…'s pick, waiting for you to confirm.
+    public var mergeRequest: LessonMergeRequest?
+    /// Remove was pressed and waits for you to confirm.
+    public var removeRequested = false
+
     /// The status is being read.
     public private(set) var setupLoading = false
     /// Why the last status read failed; nil once one succeeds.
@@ -647,6 +665,19 @@ public final class LessonsModel {
 
     public func dismissBanner() { banner = nil }
     public func dismissSetupNotice() { setupNotice = nil }
+
+    /// Something is being installed, removed, exported or planned. A plan whose dialog closed
+    /// without an answer (`.dismissed`) is not busy: Install starts over.
+    public var setupIsBusy: Bool { install == .planning || install == .installing || setupBusy }
+
+    /// Install… can be pressed.
+    public var canInstall: Bool { !setupIsBusy }
+
+    /// Remove can be pressed: something of Suica's is installed and nothing else runs.
+    public var canRemove: Bool {
+        guard !setupIsBusy, let setup else { return false }
+        return setup.hook || setup.claude || setup.codex
+    }
 
     /// The scopes and Lessons the filter keeps.
     public var shownScopes: [LessonScope] { list?.scopes(matching: filter) ?? [] }

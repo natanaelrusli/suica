@@ -538,3 +538,36 @@ actor FailingStatusClient: LessonsClient {
     #expect(Copy.lessonFlaggedCount(1) == "flagged once")
     #expect(Copy.lessonFlaggedCount(3) == "flagged 3 times")
 }
+
+@MainActor @Test func aDialogClosedWithoutAnAnswerLeavesInstallAndRemoveAvailable() async throws {
+    let client = FakeLessonsClient(list: listDocument([acme]))
+    await client.setInstalls([try reply(planJSON), try reply(planJSON), try reply(installedJSON)])
+    await client.setStatus(LessonsSetupStatus(hook: true, claude: false, codex: false))
+    let model = LessonsModel(client: client)
+    await model.refreshSetup()
+    #expect(model.canInstall && model.canRemove && !model.setupIsBusy)
+    await model.beginInstall()
+    model.installDialogClosed()
+    guard case .dismissed = model.install else {
+        Issue.record("expected dismissed, got \(model.install)")
+        return
+    }
+    #expect(!model.setupIsBusy && model.canInstall && model.canRemove)
+    await model.beginInstall()
+    guard case .confirming = model.install else {
+        Issue.record("expected a fresh plan, got \(model.install)")
+        return
+    }
+    let task = model.confirmInstall()
+    #expect(model.setupIsBusy && !model.canInstall && !model.canRemove)
+    await task?.value
+    #expect(!model.setupIsBusy)
+    #expect(await client.calls.filter { $0 == "install" }.count == 2)
+}
+
+@MainActor @Test func removeNeedsSomethingInstalled() async {
+    let model = LessonsModel(client: FakeLessonsClient(list: listDocument([acme])))
+    #expect(!model.canRemove)
+    await model.refreshSetup()
+    #expect(!model.canRemove && model.canInstall)
+}
