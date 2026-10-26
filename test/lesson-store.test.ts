@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import { openLessonsReadOnly } from "../src/lesson-store.ts";
 import type { NewOccurrence } from "../src/lesson-store.ts";
@@ -113,6 +114,16 @@ describe("lesson store", () => {
     const folder = mkdtempSync(join(tmpdir(), "suica-lessons-"));
     folders.push(folder);
     expect(openLessonsReadOnly(join(folder, "none.db"))).toBeUndefined();
+  });
+
+  it("openLessonsReadOnly returns undefined for a database without the lesson table", () => {
+    const folder = mkdtempSync(join(tmpdir(), "suica-lessons-"));
+    folders.push(folder);
+    const path = join(folder, "old.db");
+    const db = new DatabaseSync(path);
+    db.exec("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
+    db.close();
+    expect(openLessonsReadOnly(path)).toBeUndefined();
   });
 
   it("openLessonsReadOnly refuses writes", () => {

@@ -408,5 +408,18 @@ export function openLessonsReadOnly(statePath: string): LessonReader | undefined
   } catch {
     return undefined;
   }
+  // A database from before the lessons tables (or not Suica's at all) has nothing to read.
+  try {
+    const table = db
+      .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'lesson'")
+      .get();
+    if (table === undefined) {
+      db.close();
+      return undefined;
+    }
+  } catch {
+    db.close();
+    return undefined;
+  }
   return { ...createReads(db), db, close: () => db.close() };
 }
