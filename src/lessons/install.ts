@@ -1,6 +1,7 @@
 import {
   chmodSync,
-  existsSync,
+  lstatSync,
+  realpathSync,
   mkdirSync,
   renameSync,
   readFileSync,
@@ -9,13 +10,13 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
+import { execFailure } from "../exec.ts";
 import type { Exec } from "../exec.ts";
 import type { DetectedCli } from "../model-cli.ts";
 
 /** `suica lessons install|uninstall|status`: the Claude Code hooks and the MCP server registrations. */
 
 export const MCP_NAME = "suica-lessons";
-const HOOK_MARKER = "lessons-hook.ts";
 const CLI_TIMEOUT_MS = 30_000;
 const HOOK_TIMEOUT_SECONDS = 5;
 
@@ -37,11 +38,27 @@ const HOOKS: readonly HookSpec[] = [
   { event: "PreToolUse", matcher: "Write|Edit|MultiEdit" },
 ];
 
+/** settings.json cannot be read (permissions, a folder in its place). */
+export class UnreadableSettings extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "UnreadableSettings";
+  }
+}
+
 export interface InstallPlan {
   readonly settingsPath: string;
   readonly hooks: readonly { event: string; matcher: string }[];
   readonly mcp: readonly ("claude" | "codex")[];
+  /** The hook command written into settings.json. */
+  readonly command: string;
+  /** Every CLI call that would run, in order: each `remove` precedes its `add`. */
+  readonly commands: readonly string[];
+  readonly note: string;
 }
+
+const REWRITE_NOTE =
+  "settings.json is rewritten as formatted JSON: its keys and hooks are kept, but comments and unusual spacing are not.";
 
 export interface LessonsPaths {
   readonly node: string;
@@ -55,16 +72,38 @@ export function settingsPathFor(home: string): string {
   return join(home, ".claude", "settings.json");
 }
 
-export function hookCommand(paths: LessonsPaths): string {
-  return `"${paths.node}" "${paths.hook}"`;
+/** Single quotes keep spaces, `"`, `$` and backticks literal; an inner `'` becomes `'\\''`. */
+function shellQuote(path: string): string {
+  return `'${path.replaceAll("'", "'\\''")}'`;
 }
 
-export function planInstall(home: string, clis: readonly DetectedCli[]): InstallPlan {
+export function hookCommand(paths: LessonsPaths): string {
+  return `${shellQuote(paths.node)} ${shellQuote(paths.hook)}`;
+}
+
+const SINGLE_QUOTED = String.raw`'(?:[^']|'\\'')*'`;
+/** Our shape: the current single-quoted form, or the earlier double-quoted one. */
+const OUR_COMMAND = new RegExp(
+  `^(?:${SINGLE_QUOTED} '(?:[^']|'\\\\'')*/src/lessons-hook\\.ts'|"[^"]*" "[^"]*/src/lessons-hook\\.ts")$`,
+);
+
+export function planInstall(
+  home: string,
+  clis: readonly DetectedCli[],
+  paths: LessonsPaths,
+): InstallPlan {
   const installed = (id: string) => clis.some((cli) => cli.id === id && cli.path !== null);
+  const mcp = (["claude", "codex"] as const).filter(installed);
   return {
     settingsPath: settingsPathFor(home),
     hooks: HOOKS.map((hook) => ({ ...hook })),
-    mcp: (["claude", "codex"] as const).filter(installed),
+    mcp,
+    command: hookCommand(paths),
+    commands: mcp.flatMap((id) => {
+      const { remove, add } = mcpArgs(id, paths);
+      return [`${id} ${remove.join(" ")}`, `${id} ${add.join(" ")}`];
+    }),
+    note: REWRITE_NOTE,
   };
 }
 
@@ -91,6 +130,8 @@ function detectIndent(text: string): string {
   return found?.[1] ?? "  ";
 }
 
+// The file is re-serialised, so comments-free JSON is kept as the same value but its text may be
+// reformatted (indentation and trailing newline are preserved).
 function render(settings: Json, original: string | undefined): string {
   const indent = original === undefined ? "  " : detectIndent(original);
   const newline = original === undefined || original.endsWith("\n") ? "\n" : "";
@@ -98,11 +139,10 @@ function render(settings: Json, original: string | undefined): string {
 }
 
 function isOurs(hook: unknown, command?: string): boolean {
-  return (
-    isObject(hook) &&
-    typeof hook["command"] === "string" &&
-    (hook["command"].includes(HOOK_MARKER) || hook["command"] === command)
-  );
+  if (!isObject(hook) || hook["type"] !== "command" || typeof hook["command"] !== "string") {
+    return false;
+  }
+  return hook["command"] === command || OUR_COMMAND.test(hook["command"]);
 }
 
 function matcherOf(group: Json): string {
@@ -123,50 +163,36 @@ function groupsOf(hooks: Json, event: string): unknown[] | undefined {
   return groups as unknown[];
 }
 
-/** Our entry for `command`, placed where the first of our old entries for the event sat. */
+/**
+ * Our own group per event, never merged into a user's: an old group made only of our entries is
+ * replaced where it stood, ours inside a mixed group are dropped, and a new group is appended
+ * when none was there.
+ */
 export function installHooks(settingsText: string | undefined, command: string): string {
   const settings = settingsText === undefined ? {} : parseSettings(settingsText);
   const hooks = hooksOf(settings) ?? {};
   for (const spec of HOOKS) {
     const entry = { type: "command", command, timeout: HOOK_TIMEOUT_SECONDS };
-    const groups = groupsOf(hooks, spec.event) ?? [];
+    const fresh =
+      spec.matcher === "" ? { hooks: [entry] } : { matcher: spec.matcher, hooks: [entry] };
     const next: unknown[] = [];
     let placed = false;
-    for (const group of groups) {
+    for (const group of groupsOf(hooks, spec.event) ?? []) {
       if (!isObject(group) || !Array.isArray(group["hooks"])) {
         next.push(group);
         continue;
       }
-      const members: unknown[] = [];
-      let touched = false;
-      for (const hook of group["hooks"] as unknown[]) {
-        if (!isOurs(hook)) {
-          members.push(hook);
-          continue;
-        }
-        touched = true;
-        if (!placed && matcherOf(group) === spec.matcher) {
-          members.push(entry);
-          placed = true;
-        }
-      }
-      // A group we emptied goes; one the user left empty stays.
-      if (touched && members.length === 0) continue;
-      next.push(touched ? { ...group, hooks: members } : group);
-    }
-    if (!placed) {
-      const target = next.find(
-        (group): group is Json =>
-          isObject(group) && Array.isArray(group["hooks"]) && matcherOf(group) === spec.matcher,
-      );
-      if (target !== undefined) {
-        (target["hooks"] as unknown[]).push(entry);
-      } else {
-        next.push(
-          spec.matcher === "" ? { hooks: [entry] } : { matcher: spec.matcher, hooks: [entry] },
-        );
+      const members = (group["hooks"] as unknown[]).filter((hook) => !isOurs(hook, command));
+      if (members.length === (group["hooks"] as unknown[]).length) {
+        next.push(group);
+      } else if (members.length > 0) {
+        next.push({ ...group, hooks: members });
+      } else if (!placed && matcherOf(group) === spec.matcher) {
+        next.push(fresh);
+        placed = true;
       }
     }
+    if (!placed) next.push(fresh);
     hooks[spec.event] = next;
   }
   settings["hooks"] = hooks;
@@ -212,7 +238,7 @@ export function uninstallHooks(settingsText: string, command: string): string {
   return render(settings, settingsText);
 }
 
-function hasAllHooks(settingsText: string): boolean {
+function hasAllHooks(settingsText: string, command: string): boolean {
   const hooks = hooksOf(parseSettings(settingsText));
   if (hooks === undefined) return false;
   return HOOKS.every((spec) =>
@@ -221,33 +247,75 @@ function hasAllHooks(settingsText: string): boolean {
         isObject(group) &&
         matcherOf(group) === spec.matcher &&
         Array.isArray(group["hooks"]) &&
-        (group["hooks"] as unknown[]).some((hook) => isOurs(hook)),
+        (group["hooks"] as unknown[]).some(
+          (hook) => isOurs(hook) && isObject(hook) && hook["command"] === command,
+        ),
     ),
   );
 }
 
-/** Temp file in the same folder, then rename; keeps the file's mode (0600 for a new file). */
-export function writeSettingsAtomic(path: string, text: string): void {
-  const existing = existsSync(path);
-  const mode = existing ? statSync(path).mode & 0o777 : 0o600;
-  mkdirSync(dirname(path), { recursive: true });
-  const temp = join(dirname(path), `.settings.json.${process.pid}.${Date.now()}.tmp`);
+/**
+ * Where settings.json really lives: a symlink (dotfiles) is followed so the link stays a link.
+ * A link to nothing is refused rather than creating its target.
+ */
+function resolveTarget(path: string): string {
+  let info;
   try {
-    writeFileSync(temp, text, { mode });
+    info = lstatSync(path);
+  } catch (error) {
+    if (execFailure(error).code === "ENOENT") return path;
+    throw new UnreadableSettings(String(error));
+  }
+  if (!info.isSymbolicLink()) return path;
+  try {
+    return realpathSync(path);
+  } catch {
+    throw new InvalidSettings("settings.json is a symlink to a file that does not exist");
+  }
+}
+
+/** Temp file in the target's folder, then rename; keeps the target's mode (0600 for a new file). */
+export function writeSettingsAtomic(path: string, text: string): void {
+  const target = resolveTarget(path);
+  let mode = 0o600;
+  try {
+    mode = statSync(target).mode & 0o777;
+  } catch {
+    // A new file.
+  }
+  mkdirSync(dirname(target), { recursive: true });
+  const temp = join(dirname(target), `.settings.json.${process.pid}.${Date.now()}.tmp`);
+  try {
+    writeFileSync(temp, text, { mode, flag: "wx" });
     chmodSync(temp, mode);
-    renameSync(temp, path);
+    renameSync(temp, target);
   } catch (error) {
     rmSync(temp, { force: true });
     throw error;
   }
 }
 
+/** The text of settings.json, undefined when absent; other failures become UnreadableSettings. */
 function readSettings(path: string): string | undefined {
-  return existsSync(path) ? readFileSync(path, "utf8") : undefined;
+  const target = resolveTarget(path);
+  try {
+    return readFileSync(target, "utf8");
+  } catch (error) {
+    if (execFailure(error).code === "ENOENT") return undefined;
+    throw new UnreadableSettings(String(error));
+  }
+}
+
+type SettingsError = "invalid-settings" | "unreadable-settings";
+
+function settingsError(error: unknown): SettingsError {
+  if (error instanceof InvalidSettings) return "invalid-settings";
+  if (error instanceof UnreadableSettings) return "unreadable-settings";
+  throw error;
 }
 
 export interface InstallResult {
-  readonly status: "installed" | "invalid-settings";
+  readonly status: "installed" | "partial" | SettingsError;
   readonly settingsPath: string;
   /** False when settings.json already had exactly our entries. */
   readonly changed: boolean;
@@ -264,11 +332,6 @@ function mcpArgs(id: "claude" | "codex", paths: LessonsPaths): { remove: string[
   };
 }
 
-export function mcpCommands(id: "claude" | "codex", paths: LessonsPaths): string[] {
-  const { add } = mcpArgs(id, paths);
-  return [`${id} ${add.join(" ")}`];
-}
-
 function pathOf(clis: readonly DetectedCli[], id: string): string | null {
   return clis.find((cli) => cli.id === id)?.path ?? null;
 }
@@ -281,25 +344,23 @@ export async function applyInstall(
   paths: LessonsPaths,
 ): Promise<InstallResult> {
   const settingsPath = settingsPathFor(home);
-  const current = readSettings(settingsPath);
+  const refused = (status: SettingsError): InstallResult => ({
+    status,
+    settingsPath,
+    changed: false,
+    registered: [],
+    skipped: [],
+    failed: [],
+  });
+  let current: string | undefined;
   let next: string;
   try {
+    current = readSettings(settingsPath);
     next = installHooks(current, hookCommand(paths));
+    if (next !== current) writeSettingsAtomic(settingsPath, next);
   } catch (error) {
-    if (error instanceof InvalidSettings) {
-      return {
-        status: "invalid-settings",
-        settingsPath,
-        changed: false,
-        registered: [],
-        skipped: [],
-        failed: [],
-      };
-    }
-    throw error;
+    return refused(settingsError(error));
   }
-  const changed = next !== current;
-  if (changed) writeSettingsAtomic(settingsPath, next);
   const registered: string[] = [];
   const skipped: string[] = [];
   const failed: string[] = [];
@@ -323,13 +384,29 @@ export async function applyInstall(
     }
   }
   if (pathOf(clis, "gemini") !== null) skipped.push("gemini");
-  return { status: "installed", settingsPath, changed, registered, skipped, failed };
+  return {
+    status: failed.length > 0 ? "partial" : "installed",
+    settingsPath,
+    changed: next !== current,
+    registered,
+    skipped,
+    failed,
+  };
 }
 
 export interface UninstallResult {
-  readonly status: "uninstalled" | "invalid-settings";
+  readonly status: "uninstalled" | "partial" | SettingsError;
   readonly hookRemoved: boolean;
   readonly removed: readonly string[];
+  readonly failed: readonly string[];
+}
+
+/** A `remove` that failed only because the server was not registered. */
+function wasNotRegistered(error: unknown): boolean {
+  const text = `${execFailure(error).stderr ?? ""}\n${error instanceof Error ? error.message : ""}`;
+  return /not found|no mcp server|no server|does not exist|not registered|unknown server/i.test(
+    text,
+  );
 }
 
 export async function applyUninstall(
@@ -339,33 +416,32 @@ export async function applyUninstall(
   paths: LessonsPaths,
 ): Promise<UninstallResult> {
   const settingsPath = settingsPathFor(home);
-  const current = readSettings(settingsPath);
   let hookRemoved = false;
-  if (current !== undefined) {
-    try {
+  try {
+    const current = readSettings(settingsPath);
+    if (current !== undefined) {
       const next = uninstallHooks(current, hookCommand(paths));
       if (next !== current) {
         writeSettingsAtomic(settingsPath, next);
         hookRemoved = true;
       }
-    } catch (error) {
-      if (error instanceof InvalidSettings)
-        return { status: "invalid-settings", hookRemoved: false, removed: [] };
-      throw error;
     }
+  } catch (error) {
+    return { status: settingsError(error), hookRemoved: false, removed: [], failed: [] };
   }
   const removed: string[] = [];
+  const failed: string[] = [];
   for (const id of ["claude", "codex"] as const) {
     const bin = pathOf(clis, id);
     if (bin === null) continue;
     try {
       await exec(bin, mcpArgs(id, paths).remove, { timeoutMs: CLI_TIMEOUT_MS });
       removed.push(id);
-    } catch {
-      // Not registered.
+    } catch (error) {
+      if (!wasNotRegistered(error)) failed.push(id);
     }
   }
-  return { status: "uninstalled", hookRemoved, removed };
+  return { status: failed.length > 0 ? "partial" : "uninstalled", hookRemoved, removed, failed };
 }
 
 export interface LessonsStatus {
@@ -377,22 +453,23 @@ async function registered(exec: Exec, bin: string | null): Promise<boolean> {
   if (bin === null) return false;
   try {
     const { stdout } = await exec(bin, ["mcp", "list"], { timeoutMs: CLI_TIMEOUT_MS });
-    return stdout.split("\n").some((line) => line.trimStart().startsWith(MCP_NAME));
+    return stdout.split("\n").some((line) => line.trimStart().split(/[\s:]/)[0] === MCP_NAME);
   } catch {
     return false;
   }
 }
 
-/** Best effort: anything that cannot be read counts as not installed. */
+/** Best effort: anything that cannot be read counts as not installed. `hook` needs this install's command. */
 export async function lessonsStatus(
   home: string,
   exec: Exec,
   clis: readonly DetectedCli[],
+  paths: LessonsPaths,
 ): Promise<LessonsStatus> {
   let hook = false;
   try {
     const text = readSettings(settingsPathFor(home));
-    hook = text !== undefined && hasAllHooks(text);
+    hook = text !== undefined && hasAllHooks(text, hookCommand(paths));
   } catch {
     hook = false;
   }

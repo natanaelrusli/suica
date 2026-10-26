@@ -19,13 +19,7 @@ import {
 import { checkGitlab } from "./gitlab-check.ts";
 import { openLessonsReadOnly } from "./lesson-store.ts";
 import { readScopeCache } from "./lessons/hook.ts";
-import {
-  applyInstall,
-  applyUninstall,
-  lessonsStatus,
-  mcpCommands,
-  planInstall,
-} from "./lessons/install.ts";
+import { applyInstall, applyUninstall, lessonsStatus, planInstall } from "./lessons/install.ts";
 import type { LessonsPaths } from "./lessons/install.ts";
 import { serveLessons } from "./lessons/mcp-server.ts";
 import { scanScopes } from "./lessons/scopes.ts";
@@ -814,7 +808,8 @@ function lessonsPaths(): LessonsPaths {
 /** The folders searched for claude and codex; SUICA_CLI_DIRS replaces them (tests, odd installs). */
 function lessonsClis() {
   const override = process.env["SUICA_CLI_DIRS"];
-  return detectModelClis(override === undefined ? undefined : override.split(delimiter));
+  const dirs = override?.split(delimiter).filter((dir) => dir !== "");
+  return detectModelClis(dirs);
 }
 
 /** `suica lessons install`: without `--yes` only prints the plan and exits 1. */
@@ -822,7 +817,7 @@ async function installLessonsCommand(yes: boolean, json: boolean): Promise<numbe
   const home = homedir();
   const paths = lessonsPaths();
   const clis = lessonsClis();
-  const plan = planInstall(home, clis);
+  const plan = planInstall(home, clis, paths);
   if (!yes) {
     if (json) {
       process.stdout.write(
@@ -830,11 +825,12 @@ async function installLessonsCommand(yes: boolean, json: boolean): Promise<numbe
       );
     } else {
       const lines = [
-        `would edit ${plan.settingsPath}, adding these hooks (command: "${paths.node}" "${paths.hook}"):`,
+        `would edit ${plan.settingsPath}, adding these hooks (command: ${plan.command}):`,
         ...plan.hooks.map(
           (hook) => `  ${hook.event}${hook.matcher === "" ? "" : ` (${hook.matcher})`}`,
         ),
-        ...plan.mcp.flatMap((id) => mcpCommands(id, paths).map((line) => `would run: ${line}`)),
+        ...plan.commands.map((line) => `would run: ${line}`),
+        plan.note,
         "run again with --yes to apply",
       ];
       process.stdout.write(`${lines.join("\n")}\n`);
@@ -844,8 +840,10 @@ async function installLessonsCommand(yes: boolean, json: boolean): Promise<numbe
   const result = await applyInstall(home, defaultExec, clis, paths);
   if (json) {
     process.stdout.write(`${JSON.stringify({ version: 1, ...result })}\n`);
-  } else if (result.status === "invalid-settings") {
-    process.stderr.write(`${result.settingsPath} is not a JSON object; left unchanged\n`);
+  } else if (result.status === "invalid-settings" || result.status === "unreadable-settings") {
+    process.stderr.write(
+      `${result.settingsPath} cannot be used (${result.status}); left unchanged\n`,
+    );
   } else {
     process.stdout.write(
       `hooks ${result.changed ? "installed in" : "already in"} ${result.settingsPath}; registered: ${result.registered.join(", ") || "none"}; skipped: ${result.skipped.join(", ") || "none"}${result.failed.length > 0 ? `; failed: ${result.failed.join(", ")}` : ""}\n`,
@@ -857,11 +855,11 @@ async function installLessonsCommand(yes: boolean, json: boolean): Promise<numbe
 async function uninstallLessonsCommand(json: boolean): Promise<number> {
   const result = await applyUninstall(homedir(), defaultExec, lessonsClis(), lessonsPaths());
   if (json) process.stdout.write(`${JSON.stringify({ version: 1, ...result })}\n`);
-  else if (result.status === "invalid-settings")
-    process.stderr.write("settings.json is not a JSON object; left unchanged\n");
+  else if (result.status === "invalid-settings" || result.status === "unreadable-settings")
+    process.stderr.write(`settings.json cannot be used (${result.status}); left unchanged\n`);
   else
     process.stdout.write(
-      `removed the hooks: ${result.hookRemoved}; unregistered: ${result.removed.join(", ") || "none"}\n`,
+      `removed the hooks: ${result.hookRemoved}; unregistered: ${result.removed.join(", ") || "none"}${result.failed.length > 0 ? `; failed: ${result.failed.join(", ")}` : ""}\n`,
     );
   return result.status === "uninstalled" ? 0 : 1;
 }
@@ -968,7 +966,7 @@ async function main(argv: readonly string[]): Promise<number> {
     }
     if (argv[1] === "uninstall" && known(["--json"])) return uninstallLessonsCommand(json);
     if (argv[1] === "status" && json && flags.length === 1) {
-      const status = await lessonsStatus(homedir(), defaultExec, lessonsClis());
+      const status = await lessonsStatus(homedir(), defaultExec, lessonsClis(), lessonsPaths());
       process.stdout.write(`${JSON.stringify({ version: 1, ...status })}\n`);
       return 0;
     }

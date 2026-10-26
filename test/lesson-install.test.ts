@@ -1,6 +1,9 @@
 import { spawnSync } from "node:child_process";
 import {
   existsSync,
+  lstatSync,
+  readlinkSync,
+  symlinkSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -20,6 +23,7 @@ import {
   applyUninstall,
   installHooks,
   lessonsStatus,
+  hookCommand,
   planInstall,
   uninstallHooks,
   writeSettingsAtomic,
@@ -50,12 +54,16 @@ const cli = (id: "claude" | "codex" | "gemini", found: boolean): DetectedCli => 
   path: found ? `/bin/${id}` : null,
 });
 
+function home0(path: string): string {
+  return join(path, "..");
+}
+
 function recorder(failing: (args: readonly string[]) => boolean = () => false) {
   const calls: { file: string; args: readonly string[]; timeoutMs: number }[] = [];
   const exec: Exec = (file, args, options) => {
     calls.push({ file, args, timeoutMs: options.timeoutMs });
     return failing(args)
-      ? Promise.reject(new Error("exit 1"))
+      ? Promise.reject(new Error("exit 1: server not found"))
       : Promise.resolve({ stdout: "", stderr: "" });
   };
   return { exec, calls };
@@ -87,8 +95,9 @@ describe("installHooks", () => {
     expect(hooks["SessionStart"]).toEqual([{ hooks: [ours] }]);
     expect(hooks["PreToolUse"]).toEqual([{ matcher: "Write|Edit|MultiEdit", hooks: [ours] }]);
     expect(hooks["PostToolUse"]).toEqual([
-      { matcher: "Read", hooks: [user, ours] },
+      { matcher: "Read", hooks: [user] },
       { matcher: "Bash", hooks: [user] },
+      { matcher: "Read", hooks: [ours] },
     ]);
   });
 
@@ -230,6 +239,8 @@ describe("applyInstall", () => {
     const { exec } = recorder((args) => args[1] === "add");
     const result = await applyInstall(temp(), exec, [cli("claude", true)], paths);
     expect(result.failed).toEqual(["claude"]);
+    expect(result.status).toBe("partial");
+    expect(existsSync(join(home0(result.settingsPath), "settings.json"))).toBe(true);
   });
 
   it("refuses settings that are not JSON, leaving the file and the CLIs untouched", async () => {
@@ -286,20 +297,25 @@ describe("applyUninstall and lessonsStatus", () => {
     const clis = [cli("claude", true), cli("codex", true)];
     const list: Exec = (file) =>
       file === "/bin/claude"
-        ? Promise.resolve({ stdout: "other: x\nsuica-lessons: /n/node - Connected\n", stderr: "" })
+        ? Promise.resolve({
+            stdout: "other: x\nnot-suica-lessons: y\nsuica-lessons: /n/node - Connected\n",
+            stderr: "",
+          })
         : Promise.reject(new Error("boom"));
-    expect(await lessonsStatus(home, list, clis)).toEqual({
+    expect(await lessonsStatus(home, list, clis, paths)).toEqual({
       hook: false,
       mcp: { claude: true, codex: false },
     });
     await applyInstall(home, recorder().exec, [], paths);
-    expect((await lessonsStatus(home, list, [])).hook).toBe(true);
+    expect((await lessonsStatus(home, list, [], paths)).hook).toBe(true);
+    const moved = { ...paths, hook: "/elsewhere/src/lessons-hook.ts" };
+    expect((await lessonsStatus(home, list, [], moved)).hook).toBe(false);
   });
 });
 
 describe("planInstall", () => {
   it("lists the three hooks and the CLIs that would be registered", () => {
-    const plan = planInstall("/h", [cli("claude", true), cli("codex", false)]);
+    const plan = planInstall("/h", [cli("claude", true), cli("codex", false)], paths);
     expect(plan.settingsPath).toBe("/h/.claude/settings.json");
     expect(plan.hooks.map((h) => h.event)).toEqual(["SessionStart", "PostToolUse", "PreToolUse"]);
     expect(plan.mcp).toEqual(["claude"]);
@@ -345,6 +361,33 @@ describe("suica lessons (CLI)", () => {
     expect(readFileSync(join(home, ".claude", "settings.json"), "utf8")).toBe("not json");
   }, 20_000);
 
+  it("a failed add exits 1 with status partial and the hooks still written", () => {
+    const home = temp();
+    const bin = join(home, "bin");
+    mkdirSync(bin);
+    writeFileSync(join(bin, "claude"), '#!/bin/sh\n[ "$2" = add ] && exit 3\nexit 0\n', {
+      mode: 0o755,
+    });
+    const result = suica(home, "install", "--yes", "--json");
+    expect(result.status).toBe(1);
+    expect(JSON.parse(result.stdout)).toMatchObject({ status: "partial", failed: ["claude"] });
+    expect(readFileSync(join(home, ".claude", "settings.json"), "utf8")).toContain(
+      "lessons-hook.ts",
+    );
+  }, 20_000);
+
+  it("uninstall exits 1 with status partial when a remove fails for another reason", () => {
+    const home = temp();
+    const bin = join(home, "bin");
+    mkdirSync(bin);
+    writeFileSync(join(bin, "claude"), "#!/bin/sh\necho 'permission denied' >&2\nexit 3\n", {
+      mode: 0o755,
+    });
+    const result = suica(home, "uninstall", "--json");
+    expect(result.status).toBe(1);
+    expect(JSON.parse(result.stdout)).toMatchObject({ status: "partial", failed: ["claude"] });
+  }, 20_000);
+
   it("install --yes then status and uninstall work against a temp home", () => {
     const home = temp();
     const installed = suica(home, "install", "--yes", "--json");
@@ -364,4 +407,156 @@ describe("suica lessons (CLI)", () => {
       "lessons-hook.ts",
     );
   }, 20_000);
+});
+
+describe("fix round 1", () => {
+  const mention = { type: "command", command: "grep -r lessons-hook.ts ~/notes" };
+
+  it("a user hook that merely mentions the file name survives install and uninstall", () => {
+    const before = JSON.stringify({ hooks: { SessionStart: [{ hooks: [mention] }] } });
+    const installed = installHooks(before, COMMAND);
+    expect(installed).toContain("grep -r lessons-hook.ts");
+    const back = JSON.parse(uninstallHooks(installed, COMMAND)) as object;
+    expect(back).toEqual({ hooks: { SessionStart: [{ hooks: [mention] }] } });
+  });
+
+  it("our previous entry with a different install path is replaced", () => {
+    const old = installHooks(undefined, '"/old dir/node" "/old dir/src/lessons-hook.ts"');
+    const text = installHooks(old, hookCommand(paths));
+    expect(text).not.toContain("old dir");
+    expect(text.split("lessons-hook.ts").length - 1).toBe(3);
+    const gone = JSON.parse(uninstallHooks(old, hookCommand(paths))) as object;
+    expect(gone).toEqual({});
+  });
+
+  it("never merges into a user's group, and uninstall leaves their empty structures alone", () => {
+    const user = { type: "command", command: "echo hi" };
+    const before = {
+      hooks: {
+        PostToolUse: [
+          { matcher: "Read", hooks: [user] },
+          { matcher: "Read", hooks: [] },
+        ],
+        Stop: [],
+      },
+      model: "opus",
+    };
+    const installed = JSON.parse(installHooks(JSON.stringify(before), COMMAND)) as typeof before;
+    expect(installed.hooks.PostToolUse[0]).toEqual({ matcher: "Read", hooks: [user] });
+    expect(installed.hooks.PostToolUse).toHaveLength(3);
+    expect(JSON.parse(uninstallHooks(JSON.stringify(installed), COMMAND))).toEqual(before);
+  });
+
+  it("uninstall removes our entry from a mixed group left by an older install", () => {
+    const user = { type: "command", command: "echo hi" };
+    const text = JSON.stringify({ hooks: { SessionStart: [{ hooks: [user, ours] }] } });
+    expect(JSON.parse(uninstallHooks(text, COMMAND))).toEqual({
+      hooks: { SessionStart: [{ hooks: [user] }] },
+    });
+  });
+
+  it("quotes paths with spaces, quotes, dollars and backticks so they round-trip", () => {
+    const odd: LessonsPaths = {
+      node: "/a b/it's/node",
+      cli: "/c",
+      hook: '/x "y" $HOME `z`/it\'s/src/lessons-hook.ts',
+    };
+    const command = hookCommand(odd);
+    expect(command).toBe("'/a b/it'\\''s/node' '/x \"y\" $HOME `z`/it'\\''s/src/lessons-hook.ts'");
+    const once = installHooks(undefined, command);
+    expect(installHooks(once, command)).toBe(once);
+    const moved = installHooks(once, hookCommand(paths));
+    expect(moved.split("lessons-hook.ts").length - 1).toBe(3);
+    expect(moved).not.toContain("$HOME");
+    expect(JSON.parse(uninstallHooks(once, command))).toEqual({});
+  });
+
+  it("round-trips a typical file to the same JSON value", () => {
+    const typical = {
+      model: "opus",
+      permissions: { allow: ["Bash(ls)"] },
+      hooks: { Stop: [{ hooks: [{ type: "command", command: "x" }] }] },
+    };
+    const text = installHooks(JSON.stringify(typical, null, 2) + "\n", hookCommand(paths));
+    expect(JSON.parse(uninstallHooks(text, hookCommand(paths)))).toEqual(typical);
+  });
+
+  it("writes through a symlinked settings.json and keeps the link", () => {
+    const home = temp();
+    mkdirSync(join(home, ".claude"));
+    mkdirSync(join(home, "dotfiles"));
+    const target = join(home, "dotfiles", "settings.json");
+    writeFileSync(target, '{"model":"opus"}\n');
+    chmodSync(target, 0o640);
+    const link = join(home, ".claude", "settings.json");
+    symlinkSync(target, link);
+    writeSettingsAtomic(link, '{"new":1}\n');
+    expect(lstatSync(link).isSymbolicLink()).toBe(true);
+    expect(readlinkSync(link)).toBe(target);
+    expect(readFileSync(target, "utf8")).toBe('{"new":1}\n');
+    expect(statSync(target).mode & 0o777).toBe(0o640);
+    expect(readdirSync(join(home, "dotfiles"))).toEqual(["settings.json"]);
+  });
+
+  it("treats a dangling symlink as an error and writes nothing", async () => {
+    const home = temp();
+    mkdirSync(join(home, ".claude"));
+    const link = join(home, ".claude", "settings.json");
+    symlinkSync(join(home, "missing.json"), link);
+    const { exec, calls } = recorder();
+    const result = await applyInstall(home, exec, [cli("claude", true)], paths);
+    expect(result.status).toBe("invalid-settings");
+    expect(existsSync(join(home, "missing.json"))).toBe(false);
+    expect(calls).toEqual([]);
+    expect((await applyUninstall(home, exec, [], paths)).status).toBe("invalid-settings");
+  });
+
+  it("an unreadable settings path (a folder) is an error result, not a crash", async () => {
+    const home = temp();
+    mkdirSync(join(home, ".claude", "settings.json"), { recursive: true });
+    const result = await applyInstall(home, recorder().exec, [], paths);
+    expect(result.status).toBe("unreadable-settings");
+    expect((await applyUninstall(home, recorder().exec, [], paths)).status).toBe(
+      "unreadable-settings",
+    );
+  });
+
+  it("uninstall ignores not-found removes but reports other failures as partial", async () => {
+    const home = temp();
+    const notFound: Exec = () =>
+      Promise.reject(
+        Object.assign(new Error("Command failed"), {
+          stderr: "No MCP server found with name: suica-lessons",
+        }),
+      );
+    const clean = await applyUninstall(home, notFound, [cli("claude", true)], paths);
+    expect(clean).toMatchObject({ status: "uninstalled", failed: [] });
+    const broken: Exec = () =>
+      Promise.reject(Object.assign(new Error("Command failed"), { stderr: "permission denied" }));
+    const bad = await applyUninstall(
+      home,
+      broken,
+      [cli("claude", true), cli("codex", true)],
+      paths,
+    );
+    expect(bad).toMatchObject({ status: "partial", failed: ["claude", "codex"] });
+  });
+
+  it("the plan lists the removes before each add, the file and the reformatting note", () => {
+    const plan = planInstall("/h", [cli("claude", true), cli("codex", true)], paths);
+    expect(plan.commands).toEqual([
+      "claude mcp remove --scope user suica-lessons",
+      "claude mcp add --scope user suica-lessons -- /n/node /i/src/cli.ts lessons mcp",
+      "codex mcp remove suica-lessons",
+      "codex mcp add suica-lessons -- /n/node /i/src/cli.ts lessons mcp",
+    ]);
+    expect(plan.note).toMatch(/formatted JSON/);
+  });
+
+  it("status ignores a differently named server", async () => {
+    const list: Exec = () => Promise.resolve({ stdout: "suica-lessons-old: x\n", stderr: "" });
+    expect((await lessonsStatus(temp(), list, [cli("claude", true)], paths)).mcp.claude).toBe(
+      false,
+    );
+  });
 });
