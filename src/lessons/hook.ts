@@ -95,20 +95,34 @@ interface Target {
   readonly file?: string;
 }
 
+/**
+ * The lesson scope an absolute path belongs to: its repository's scope, else (a folder in a scope
+ * but outside its repos) the deepest configured scope folder holding it. `scan` is called only
+ * when needed. Shared with the MCP server so both resolve scopes alike.
+ */
+export function resolveScope(
+  path: string,
+  scopes: readonly string[],
+  scan: () => ScopeMap,
+): { readonly scope: string; readonly repo?: ScopedRepo } | undefined {
+  const absolute = resolve(path);
+  const repo = repoForPath(scan(), absolute);
+  if (repo !== undefined) return { scope: repo.scope, repo };
+  let best: string | undefined;
+  for (const raw of scopes) {
+    const scope = resolve(raw);
+    const inside = absolute === scope || absolute.startsWith(scope + sep);
+    if (inside && (best === undefined || scope.length > best.length)) best = scope;
+  }
+  return best === undefined ? undefined : { scope: best };
+}
+
 function target(input: HookInput, deps: HookDeps): Target | undefined {
   if (input.hook_event_name === "SessionStart") {
     const cwd = absolutePath(input.cwd, "");
     if (cwd === undefined) return undefined;
-    const repo = repoForPath(deps.scan(), cwd);
-    if (repo !== undefined) return { scope: repo.scope };
-    // A session in a scope folder but outside its repos: the deepest configured scope holding it.
-    let best: string | undefined;
-    for (const raw of deps.config.scopes) {
-      const scope = resolve(raw);
-      const inside = cwd === scope || cwd.startsWith(scope + sep);
-      if (inside && (best === undefined || scope.length > best.length)) best = scope;
-    }
-    return best === undefined ? undefined : { scope: best };
+    const found = resolveScope(cwd, deps.config.scopes, deps.scan);
+    return found === undefined ? undefined : { scope: found.scope };
   }
   const tools = FILE_TOOLS[input.hook_event_name] ?? [];
   if (input.tool_name === undefined || !tools.includes(input.tool_name)) return undefined;

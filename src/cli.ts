@@ -1,5 +1,5 @@
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { installAgent, plistPath, uninstallAgent } from "./agent-install.ts";
 import { buildStatus, loadStatusInput, readServiceStatus, restartService } from "./agent-status.ts";
 import { actionJson, buildAgentState } from "./agent-state.ts";
@@ -17,6 +17,10 @@ import {
   glabRunner,
 } from "./gitlab.ts";
 import { checkGitlab } from "./gitlab-check.ts";
+import { openLessonsReadOnly } from "./lesson-store.ts";
+import { readScopeCache } from "./lessons/hook.ts";
+import { serveLessons } from "./lessons/mcp-server.ts";
+import { scanScopes } from "./lessons/scopes.ts";
 import { MODEL_CLI_CHOICES, detectModelClis, resolveModelCli } from "./model-cli.ts";
 import { buildReviewOptions, listSkills } from "./review-options.ts";
 import { closeMergeRequest, commentOnMergeRequest, mergeMergeRequest } from "./mr-actions.ts";
@@ -70,7 +74,7 @@ import { realProbe } from "./office/probe.ts";
 import { buildUsage } from "./usage.ts";
 
 const USAGE =
-  "usage: suica <once|status|state|stats|usage|office --json|office chat <agent> <sessionId> --json|office send <agent> <sessionId> --json (message on stdin)|pause|resume|pending [--all]|send <id> [--json]|skip <id> [--json]|retry <id> [--json]|clear <id|yours|others|all> [--json]|selftest|message <key> --json (request on stdin)|reviews --json|mr <key> --json|mr approve <key> <sha> --json|mr comment <key> --json (body on stdin)|mr close <key> --json|mr merge <key> <sha> [--squash] [--remove-source-branch] [--when-pipeline-succeeds] --json (message on stdin)|review options [--cli <id>] --json|review queue <key> [--skill <name>] [--model <name>] [--auto] --json|review post <id> [--inline|--comment] --json|review discard <id> --json|review cancel <id> --json|fix list --json|fix queue <key> [--pipeline] --json|fix watch <key> --json|fix unwatch <key> --json|fix confirm <id> --json (edits on stdin)|fix retry <id> --json (note on stdin)|fix discard <id> --json|fix cancel <id> --json|fix replies <id> --json|config show --json|config set --json|templates show --json|templates set --json|gitlab check <host> --json|agent install [--json]|agent uninstall|agent restart --json>\n";
+  "usage: suica <once|status|state|stats|usage|office --json|office chat <agent> <sessionId> --json|office send <agent> <sessionId> --json (message on stdin)|pause|resume|pending [--all]|send <id> [--json]|skip <id> [--json]|retry <id> [--json]|clear <id|yours|others|all> [--json]|selftest|message <key> --json (request on stdin)|reviews --json|mr <key> --json|mr approve <key> <sha> --json|mr comment <key> --json (body on stdin)|mr close <key> --json|mr merge <key> <sha> [--squash] [--remove-source-branch] [--when-pipeline-succeeds] --json (message on stdin)|review options [--cli <id>] --json|review queue <key> [--skill <name>] [--model <name>] [--auto] --json|review post <id> [--inline|--comment] --json|review discard <id> --json|review cancel <id> --json|fix list --json|fix queue <key> [--pipeline] --json|fix watch <key> --json|fix unwatch <key> --json|fix confirm <id> --json (edits on stdin)|fix retry <id> --json (note on stdin)|fix discard <id> --json|fix cancel <id> --json|fix replies <id> --json|config show --json|config set --json|templates show --json|templates set --json|gitlab check <host> --json|lessons mcp|agent install [--json]|agent uninstall|agent restart --json>\n";
 const TEAMS_DISABLED = "teams is disabled: set teams.enabled to true in the config\n";
 const SHOWN_WITH_ALL = 50;
 
@@ -770,6 +774,27 @@ async function templatesCommand(action: string | undefined): Promise<number> {
   return reply(saveTemplate(directory, request));
 }
 
+/** `suica lessons mcp`: the lessons MCP server on stdio until stdin closes; stdout is JSON-RPC only. */
+async function lessonsMcp(): Promise<number> {
+  const path = defaultConfigPath();
+  await serveLessons(process.stdin, process.stdout, {
+    config: () => loadConfig(path).lessons,
+    openReader: () => openLessonsReadOnly(loadConfig(path).statePath ?? defaultStatePath()),
+    scan: () => {
+      const config = loadConfig(path);
+      const statePath = config.statePath ?? defaultStatePath();
+      const { scopes } = config.lessons;
+      // The daemon normally provides the cache after each scan; without it the folders are walked.
+      return (
+        readScopeCache(join(dirname(statePath), "lesson-scopes.json"), scopes) ??
+        scanScopes(scopes, config.gitlab.hostname)
+      );
+    },
+    now: () => Date.now(),
+  });
+  return 0;
+}
+
 async function main(argv: readonly string[]): Promise<number> {
   const command = argv[0];
   if (
@@ -861,6 +886,11 @@ async function main(argv: readonly string[]): Promise<number> {
     const result = await checkGitlab(host, defaultExec);
     process.stdout.write(`${JSON.stringify(result)}\n`);
     return result.status === "ok" ? 0 : 1;
+  }
+  if (command === "lessons") {
+    if (argv[1] === "mcp" && argv.length === 2) return lessonsMcp();
+    process.stderr.write(USAGE);
+    return 2;
   }
   if (command === "agent") {
     if (argv[1] === "restart" && argv.includes("--json")) return restartAgent();
