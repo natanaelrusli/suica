@@ -14,7 +14,7 @@ import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { LessonReader, NewOccurrence } from "../src/lesson-store.ts";
 import { openLessonsReadOnly } from "../src/lesson-store.ts";
-import { answerHook, fileSeenStore, readScopeCache } from "../src/lessons/hook.ts";
+import { answerHook, fileSeenStore, readScopeCache, shouldReadStdin } from "../src/lessons/hook.ts";
 import type { HookDeps, SeenStore } from "../src/lessons/hook.ts";
 import { scanScopes } from "../src/lessons/scopes.ts";
 import type { ScopeMap } from "../src/lessons/scopes.ts";
@@ -81,7 +81,27 @@ function memorySeen(): SeenStore & { readonly data: Map<string, Set<number>> } {
       for (const each of ids) set.add(each);
       data.set(id, set);
     },
+    reset: (id) => {
+      data.delete(id);
+    },
   };
+}
+
+/** Adds one Major lesson in `lessonScope` matching every file. */
+function addLesson(lessonScope: string, title: string): number {
+  const store = openStore(statePath);
+  const id = store.lessons.createLesson(
+    { scope: lessonScope, title, rule: `${title} rule.`, topics: [], globs: ["**"] },
+    NOW,
+  );
+  store.lessons.addOccurrences([occurrence(`review:${title}`, "Major", 9)]);
+  store.lessons.attach([store.lessons.occurrenceBySource(`review:${title}`)?.id ?? 0], id, NOW);
+  store.close();
+  return id;
+}
+
+function start(cwd: string, extra: Record<string, unknown> = {}): Record<string, unknown> {
+  return { hook_event_name: "SessionStart", session_id: "s1", cwd, ...extra };
 }
 
 function deps(extra: Partial<HookDeps> = {}): HookDeps {
@@ -236,6 +256,52 @@ describe("answerHook", () => {
     expect(answerHook(read(`${repo}/../../a.go`), deps())).toBe("");
   });
 
+  it("SessionStart in a scope folder outside every repo gives the scope's lessons", () => {
+    seed(statePath, scope);
+    mkdirSync(join(scope, "notes"), { recursive: true });
+    for (const cwd of [scope, join(scope, "notes"), `${scope}/`]) {
+      const answer = answerHook(start(cwd), deps());
+      expectOnlyContext(answer, "SessionStart");
+      expect(context(answer).split("\n")[0]).toBe(INTRO);
+      expect(context(answer)).toContain("Close rows");
+    }
+    expect(answerHook(start(`${scope}-other`), deps())).toBe("");
+    expect(answerHook(start(dir), deps())).toBe("");
+    // File events still need a repo.
+    expect(answerHook(read(join(scope, "notes", "a.go")), deps())).toBe("");
+  });
+
+  it("SessionStart picks the deepest scope, and a repo's own scope wins", () => {
+    const inner = join(scope, "team");
+    addLesson(scope, "Outer");
+    addLesson(inner, "Inner");
+    const config = { enabled: true, scopes: [scope, inner], perFile: 5, perSession: 5 };
+    const inTeam = context(answerHook(start(join(inner, "docs")), deps({ config })));
+    expect(inTeam).toContain("Inner");
+    expect(inTeam).not.toContain("Outer");
+    const atTop = context(answerHook(start(scope), deps({ config })));
+    expect(atTop).toContain("Outer");
+    expect(atTop).not.toContain("Inner");
+    // A repo of the inner scope, inside the outer folder: its scope is the inner one.
+    const svc = { repos: [{ scope: inner, dir: join(inner, "svc"), project: "g/svc" }] };
+    const inRepo = context(
+      answerHook(start(join(inner, "svc", "src")), deps({ config, scan: () => svc })),
+    );
+    expect(inRepo).toContain("Inner");
+    expect(inRepo).not.toContain("Outer");
+  });
+
+  it("SessionStart after compaction or clear shows lessons again; resume does not", () => {
+    seed(statePath, scope);
+    const shared = deps();
+    expect(answerHook(start(repo), shared)).not.toBe("");
+    expect(answerHook(start(repo, { source: "resume" }), shared)).toBe("");
+    expect(answerHook(start(repo, { source: "startup" }), shared)).toBe("");
+    expect(context(answerHook(start(repo, { source: "compact" }), shared))).toContain("Close rows");
+    expect(answerHook(read(join(repo, "a.go")), shared)).toBe("");
+    expect(context(answerHook(start(repo, { source: "clear" }), shared))).toContain("Close rows");
+  });
+
   it("a file outside every scope gives nothing", () => {
     seed(statePath, scope);
     expect(answerHook(read(join(dir, "other", "a.go")), deps())).toBe("");
@@ -243,7 +309,7 @@ describe("answerHook", () => {
     expect(answerHook(start, deps())).toBe("");
   });
 
-  it("a repo without a GitLab origin gives nothing", () => {
+  it("a repo without a GitLab origin gives no file lessons", () => {
     seed(statePath, scope);
     const other = join(scope, "mirror");
     mkdirSync(join(other, ".git"), { recursive: true });
@@ -253,8 +319,12 @@ describe("answerHook", () => {
     );
     const scan = (): ScopeMap => scanScopes([scope], "gitlab.example.com");
     expect(answerHook(read(join(other, "a.go")), deps({ scan }))).toBe("");
-    const start = { hook_event_name: "SessionStart", session_id: "s1", cwd: other };
-    expect(answerHook(start, deps({ scan }))).toBe("");
+    // Outside the scope folder it gets nothing at all; inside it, a session start is served as a
+    // folder of the scope.
+    const outside = join(dir, "mirror");
+    mkdirSync(join(outside, ".git"), { recursive: true });
+    expect(answerHook(start(outside), deps({ scan }))).toBe("");
+    expect(context(answerHook(start(other), deps({ scan })))).toContain("Close rows");
   });
 
   it("no database gives nothing", () => {
@@ -289,7 +359,7 @@ describe("answerHook", () => {
       config: { enabled: false, scopes: [scope], perFile: 5, perSession: 5 },
       hostname: "gitlab.example.com",
       reader: undefined,
-      seen: { get: untouched, add: untouched },
+      seen: { get: untouched, add: untouched, reset: untouched },
       now: NOW,
       scan: untouched,
     });
@@ -358,6 +428,19 @@ describe("fileSeenStore", () => {
     expect(existsSync(join(dir, "state", "escape.json"))).toBe(false);
   });
 
+  it("reset forgets a session", () => {
+    const seenDir = join(dir, "lessons-seen");
+    fileSeenStore(seenDir, NOW).add("s1", [1]);
+    fileSeenStore(seenDir, NOW).add("s2", [2]);
+    fileSeenStore(seenDir, NOW).reset("s1");
+    expect(fileSeenStore(seenDir, NOW).get("s1").size).toBe(0);
+    expect([...fileSeenStore(seenDir, NOW).get("s2")]).toEqual([2]);
+    expect(() => {
+      fileSeenStore(seenDir, NOW).reset("../s2");
+    }).not.toThrow();
+    expect([...fileSeenStore(seenDir, NOW).get("s2")]).toEqual([2]);
+  });
+
   it("removes session files older than a day when opened", () => {
     const seenDir = join(dir, "lessons-seen");
     mkdirSync(seenDir);
@@ -380,6 +463,14 @@ describe("fileSeenStore", () => {
     expect(() => {
       fileSeenStore(blocked, NOW).add("s1", [1]);
     }).not.toThrow();
+  });
+});
+
+describe("shouldReadStdin", () => {
+  it("does not wait on a terminal", () => {
+    expect(shouldReadStdin({ isTTY: true })).toBe(false);
+    expect(shouldReadStdin({ isTTY: false })).toBe(true);
+    expect(shouldReadStdin({})).toBe(true);
   });
 });
 

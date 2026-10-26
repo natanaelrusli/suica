@@ -9,7 +9,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { Config } from "../config.ts";
 import type { LessonReader } from "../lesson-store.ts";
 import { lessonsForFile, rankLessons, renderLessons } from "./match.ts";
@@ -32,11 +32,15 @@ export interface HookInput {
   readonly cwd: string;
   readonly tool_name?: string;
   readonly tool_input?: { readonly file_path?: string };
+  /** SessionStart only: "startup", "resume", "clear" or "compact". */
+  readonly source?: string;
 }
 
 export interface SeenStore {
   get(sessionId: string): ReadonlySet<number>;
   add(sessionId: string, ids: readonly number[]): void;
+  /** Forgets the session's lessons, for a new context window. */
+  reset(sessionId: string): void;
 }
 
 export interface HookDeps {
@@ -64,6 +68,7 @@ function parseInput(input: unknown): HookInput | undefined {
   if (typeof sessionId !== "string" || typeof cwd !== "string") return undefined;
   const toolName = input["tool_name"];
   const toolInput = input["tool_input"];
+  const source = input["source"];
   const filePath = isRecord(toolInput) ? toolInput["file_path"] : undefined;
   return {
     hook_event_name: event,
@@ -71,6 +76,7 @@ function parseInput(input: unknown): HookInput | undefined {
     cwd,
     ...(typeof toolName === "string" ? { tool_name: toolName } : {}),
     ...(typeof filePath === "string" ? { tool_input: { file_path: filePath } } : {}),
+    ...(typeof source === "string" ? { source } : {}),
   };
 }
 
@@ -83,7 +89,8 @@ function absolutePath(path: string, cwd: string): string | undefined {
 }
 
 interface Target {
-  readonly repo: ScopedRepo;
+  /** The lesson scope: the configured folder, resolved, as `scanScopes` stores it. */
+  readonly scope: string;
   /** Path relative to the repo for a file event; undefined for a session start. */
   readonly file?: string;
 }
@@ -91,8 +98,17 @@ interface Target {
 function target(input: HookInput, deps: HookDeps): Target | undefined {
   if (input.hook_event_name === "SessionStart") {
     const cwd = absolutePath(input.cwd, "");
-    const repo = cwd === undefined ? undefined : repoForPath(deps.scan(), cwd);
-    return repo === undefined ? undefined : { repo };
+    if (cwd === undefined) return undefined;
+    const repo = repoForPath(deps.scan(), cwd);
+    if (repo !== undefined) return { scope: repo.scope };
+    // A session in a scope folder but outside its repos: the deepest configured scope holding it.
+    let best: string | undefined;
+    for (const raw of deps.config.scopes) {
+      const scope = resolve(raw);
+      const inside = cwd === scope || cwd.startsWith(scope + sep);
+      if (inside && (best === undefined || scope.length > best.length)) best = scope;
+    }
+    return best === undefined ? undefined : { scope: best };
   }
   const tools = FILE_TOOLS[input.hook_event_name] ?? [];
   if (input.tool_name === undefined || !tools.includes(input.tool_name)) return undefined;
@@ -104,7 +120,7 @@ function target(input: HookInput, deps: HookDeps): Target | undefined {
   const file = relative(repo.dir, path);
   // repoForPath already keeps the path inside the repo; this guards the relative form too.
   if (file === "" || file === ".." || file.startsWith("../") || isAbsolute(file)) return undefined;
-  return { repo, file };
+  return { scope: repo.scope, file };
 }
 
 function answer(input: unknown, deps: HookDeps): string {
@@ -113,8 +129,12 @@ function answer(input: unknown, deps: HookDeps): string {
   if (parsed === undefined) return "";
   const where = target(parsed, deps);
   if (where === undefined) return "";
+  if (parsed.source === "compact" || parsed.source === "clear") {
+    // A new context window: what the session was shown before is gone from it.
+    deps.seen.reset(parsed.session_id);
+  }
   const seen = deps.seen.get(parsed.session_id);
-  const fresh = rankLessons(deps.reader, where.repo.scope, deps.now).filter(
+  const fresh = rankLessons(deps.reader, where.scope, deps.now).filter(
     (r) => !seen.has(r.lesson.id),
   );
   const shown: RankedLesson[] =
@@ -199,7 +219,21 @@ export function fileSeenStore(dir: string, now: number): SeenStore {
         // See above.
       }
     },
+    reset(sessionId) {
+      const path = file(sessionId);
+      if (path === undefined) return;
+      try {
+        rmSync(path, { force: true });
+      } catch {
+        // See above.
+      }
+    },
   };
+}
+
+/** Claude Code pipes the hook's input; a terminal (someone running it by hand) is not waited on. */
+export function shouldReadStdin(stdin: { readonly isTTY?: boolean }): boolean {
+  return stdin.isTTY !== true;
 }
 
 /**

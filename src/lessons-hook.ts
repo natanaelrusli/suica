@@ -6,13 +6,14 @@
 import { dirname, join } from "node:path";
 import { defaultConfigPath, defaultStatePath, loadConfig } from "./config.ts";
 import { openLessonsReadOnly } from "./lesson-store.ts";
-import { answerHook, fileSeenStore, readScopeCache } from "./lessons/hook.ts";
+import { answerHook, fileSeenStore, readScopeCache, shouldReadStdin } from "./lessons/hook.ts";
 import { scanScopes } from "./lessons/scopes.ts";
 
 /** Hook input is a small JSON object; anything bigger is not one we answer. */
 const STDIN_MAX_BYTES = 1_048_576;
 
 async function readStdin(): Promise<string | undefined> {
+  if (!shouldReadStdin(process.stdin)) return undefined;
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of process.stdin) {
@@ -49,7 +50,7 @@ async function main(): Promise<string> {
       reader,
       seen: fileSeenStore(join(stateDir, "lessons-seen"), now),
       now,
-      // The daemon caches its scan; walking the folders is only the fallback.
+      // The daemon normally provides the cache after each scan; without it every call walks the folders.
       scan: () =>
         readScopeCache(join(stateDir, "lesson-scopes.json"), scopes) ??
         scanScopes(scopes, hostname),
