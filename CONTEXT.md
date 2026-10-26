@@ -68,6 +68,22 @@ _Avoid_: auto fix, bot commit
 An Agent Fix whose input is the failed head pipeline of the Owner's own MR: the agent reads the failed jobs' logs, the model changes the code, and it waits for the Owner like any Agent Fix. Queued by hand, or automatically when the pipeline watch sees the pipeline fail.
 _Avoid_: CI fix, auto fix
 
+**Lesson**:
+A general rule learned from one or more review findings, with every occurrence.
+_Avoid_: rule, knowledge, memory
+
+**Occurrence**:
+One finding a Lesson was learned from or matched: its MR, repo, file and line, severity, text, source (Agent Review or Finding Thread) and outcome.
+_Avoid_: instance, hit
+
+**Lesson Scope**:
+A folder on the Owner's Mac whose repos share Lessons: one repo, or a parent folder of many (searched for repos below it).
+_Avoid_: root, workspace
+
+**Topic**:
+A kind of code or concern a Lesson is about (`http-client`, `db-pool`, `auth`, `sql`, `logging`, a language). The graph's link between Lessons.
+_Avoid_: tag, category
+
 **Pending Message**:
 A Reviewer Nudge, Re-review Nudge or Review Notice written by the agent but held until the Owner sends or skips it, when that flow is set to require approval.
 _Avoid_: Draft, queued message
