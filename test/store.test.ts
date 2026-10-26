@@ -183,7 +183,7 @@ describe("schema 10", () => {
     expect(store.getAgentReview(next)?.previousSha).toBe("aaa1111");
     store.close();
     const check = new DatabaseSync(path);
-    expect(check.prepare("PRAGMA user_version").get()?.["user_version"]).toBe(19);
+    expect(check.prepare("PRAGMA user_version").get()?.["user_version"]).toBe(20);
     check.close();
   });
 
@@ -211,7 +211,7 @@ describe("schema 10", () => {
     expect(store.getAgentReview(next)).toMatchObject({ descriptionSha: "d1", approved: true });
     store.close();
     const check = new DatabaseSync(path);
-    expect(check.prepare("PRAGMA user_version").get()?.["user_version"]).toBe(19);
+    expect(check.prepare("PRAGMA user_version").get()?.["user_version"]).toBe(20);
     check.close();
   });
 
@@ -321,6 +321,27 @@ describe("schema 10", () => {
       modelChoice: null,
     });
     upgraded.close();
+  });
+
+  it("a schema 19 database upgrades to 20 with the lesson tables", () => {
+    const path = tempDb();
+    openStore(path).close();
+    const raw = new DatabaseSync(path);
+    raw.exec(
+      "DROP TABLE lesson_link; DROP TABLE lesson_occurrence; DROP TABLE lesson; PRAGMA user_version = 19;",
+    );
+    raw.close();
+    const upgraded = openStore(path);
+    expect(upgraded.lessons.countPending()).toBe(0);
+    const id = upgraded.lessons.createLesson(
+      { scope: "g/p", title: "t", rule: "r", topics: ["a"], globs: [] },
+      1,
+    );
+    expect(upgraded.lessons.lesson(id)).toMatchObject({ scope: "g/p", topics: ["a"] });
+    upgraded.close();
+    const check = new DatabaseSync(path);
+    expect(check.prepare("PRAGMA user_version").get()?.["user_version"]).toBe(20);
+    check.close();
   });
 
   it("rereviewBases returns the newest posted or discarded review per MR and ignores later failed and skipped rows", () => {

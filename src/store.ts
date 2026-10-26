@@ -5,6 +5,8 @@ import { approvalVerdictSchema } from "./approval-judge.ts";
 import type { ApprovalVerdict } from "./approval-judge.ts";
 import type { Person, Snapshot } from "./domain.ts";
 import { createFixStore } from "./fix-store.ts";
+import { createLessonStore } from "./lesson-store.ts";
+import type { LessonStore } from "./lesson-store.ts";
 import type { FixStore } from "./fix-store.ts";
 import { integer, nullableText, parseActivity, text } from "./sql-row.ts";
 import type { ActivityLine, Row } from "./sql-row.ts";
@@ -71,7 +73,7 @@ const HISTORY_KINDS: readonly string[] = [
 ];
 
 /** What a language model run was for. Stored as text, so a later purpose needs no migration. */
-export type TokenPurpose = "review" | "approve" | "fix" | "reply" | "other";
+export type TokenPurpose = "review" | "approve" | "fix" | "reply" | "lessons" | "other";
 
 /** One language model run, as the model reported it. */
 export interface TokenUsageEntry {
@@ -185,6 +187,8 @@ export type { ActivityLine } from "./sql-row.ts";
 export interface Store {
   /** Agent Fix runs and the threads they handled. */
   readonly fixes: FixStore;
+  /** Review lessons and the occurrences they were distilled from. */
+  readonly lessons: LessonStore;
   load(): PreviousState;
   /**
    * Replaces the stored state with `snapshot` in one transaction and marks the baseline as done.
@@ -304,7 +308,49 @@ export interface Store {
   close(): void;
 }
 
-const SCHEMA_VERSION = 19;
+const SCHEMA_VERSION = 20;
+/** Lessons distilled from review findings and threads, the occurrences behind them, and links. */
+const SCHEMA_V20 = `
+CREATE TABLE IF NOT EXISTS lesson (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  scope TEXT NOT NULL,
+  title TEXT NOT NULL,
+  rule TEXT NOT NULL,
+  topics TEXT NOT NULL DEFAULT '[]',
+  globs TEXT NOT NULL DEFAULT '[]',
+  archived INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS lesson_occurrence (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  source_key TEXT NOT NULL UNIQUE,
+  source TEXT NOT NULL,
+  mr_key TEXT NOT NULL,
+  mr_title TEXT NOT NULL,
+  mr_url TEXT NOT NULL,
+  repo_path TEXT,
+  path TEXT,
+  line INTEGER,
+  severity TEXT NOT NULL,
+  title TEXT NOT NULL,
+  text TEXT NOT NULL,
+  outcome TEXT NOT NULL,
+  lesson_id INTEGER,
+  failures INTEGER NOT NULL DEFAULT 0,
+  retry_at INTEGER,
+  at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS lesson_occurrence_lesson ON lesson_occurrence (lesson_id);
+CREATE INDEX IF NOT EXISTS lesson_occurrence_pending ON lesson_occurrence ((lesson_id IS NULL), retry_at);
+CREATE TABLE IF NOT EXISTS lesson_link (
+  a INTEGER NOT NULL,
+  b INTEGER NOT NULL,
+  PRIMARY KEY (a, b),
+  CHECK (a < b)
+);
+`;
 /** When the Owner cleared a finished message from the lists; the row stays for stats and dedupe. */
 const SCHEMA_V19 = `ALTER TABLE outbox ADD COLUMN cleared_at INTEGER;`;
 /** The skill and model the Owner picked for one review. */
@@ -692,6 +738,7 @@ function initSchema(db: DatabaseSync): void {
     }
   }
   if (version < 19 && !hasColumn(db, "outbox", "cleared_at")) db.exec(SCHEMA_V19);
+  if (version < 20) db.exec(SCHEMA_V20);
   if (version !== SCHEMA_VERSION) db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 }
 
@@ -731,6 +778,7 @@ export function openStore(path: string): Store {
 
   return {
     fixes: createFixStore(db),
+    lessons: createLessonStore(db),
     load() {
       return {
         baselineDone: metaValue(META_BASELINE) === "1",
