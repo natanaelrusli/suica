@@ -1535,3 +1535,160 @@ extension Copy {
     public static let setupAgentNotStarted =
         "The config is saved, but the agent did not start. Try again, or run suica agent install in Terminal."
 }
+
+// MARK: - Lessons
+
+extension Copy {
+    public static let lessons = "Lessons"
+    public static let searchLessons = "Search lessons"
+    /// Under a finding that repeats a Lesson, in MR detail and on a Finding Thread.
+    public static func lessonRepeat(before: Int, repos: [String]) -> String {
+        let times = before == 1 ? "1 time" : "\(before) times"
+        let names = repos.map { "`\(DisplayText.clean($0, max: 120))`" }
+        return names.isEmpty ? "Flagged \(times) before" : "Flagged \(times) before, in \(names.joined(separator: ", "))"
+    }
+    public static let repeatedFindings = "Repeated findings"
+    public static let repeatedFindingsHint = "Findings of this review that earlier reviews flagged too. Only you see this."
+    public static func findingLabel(_ number: String) -> String { "Finding \(number)" }
+    public static let openLesson = "Open lesson"
+    public static let allScopes = "All scopes"
+    public static let anyTopic = "Any topic"
+    public static let anyRepo = "Any repo"
+    public static let topicFilter = "Topic"
+    public static let repoFilter = "Repo"
+    public static let scopeFilter = "Scope"
+    public static func lessonsPending(_ count: Int) -> String {
+        count == 1 ? "1 finding waiting to be learned" : "\(count) findings waiting to be learned"
+    }
+    public static func lessonCount(_ count: Int) -> String { count == 1 ? "1 lesson" : "\(count) lessons" }
+    public static func lessonFlagged(_ count: Int) -> String { count == 1 ? "Flagged once" : "Flagged \(count) times" }
+    public static func lessonWeight(_ weight: Double) -> String { "Weight \(weight.formatted(.number.precision(.fractionLength(0...2))))" }
+    public static func lessonScopeRepos(_ count: Int) -> String { count == 1 ? "1 repo" : "\(count) repos" }
+    public static let lessonsOffTitle = "Lessons are off"
+    public static let lessonsOffHint =
+        "Suica can learn a lesson from every review finding and hand the heaviest ones to your coding agent."
+    public static let turnOnLessons = "Turn on lessons in Configuration"
+    public static let noScopesTitle = "No lesson scopes"
+    public static let noScopesHint = "Add a folder of repos to Lesson scopes, so findings can be learned for them."
+    public static let openLessonsSettings = "Open Lessons settings"
+    public static let nothingLearnedTitle = "Nothing learned yet"
+    public static let nothingLearnedHint = "Lessons appear here once reviews of MRs in your lesson scopes have findings."
+    public static let noLessonsMatch = "No lessons match."
+    public static let noLessonsInScope = "No lessons in this scope yet."
+    public static let selectLesson = "Select a lesson"
+    public static let selectLessonHint = "Its rule, related lessons and every place it was flagged show here."
+    public static let lessonGone = "This lesson is not there any more. It may have been merged."
+    public static let lessonRule = "Rule"
+    public static let lessonTopics = "Topics"
+    public static let lessonFiles = "Files"
+    public static let lessonRelated = "Related lessons"
+    public static func lessonOccurrences(_ count: Int) -> String { "Flagged in (\(count))" }
+    public static let lessonArchived = "Archived"
+    public static func lessonScopeLabel(_ path: String) -> String { path.isEmpty ? "In no lesson scope" : path }
+    public static let archiveLesson = "Archive"
+    public static let archiveLessonTitle = "Archive this lesson?"
+    public static let archiveLessonMessage =
+        "Agents no longer get it and the vault leaves it out. Its findings stay with it."
+    public static let mergeLessonInto = "Merge into…"
+    public static let mergeLessonHelp = "Merge this lesson into another lesson of the same scope that says the same thing."
+    public static let noMergeCandidates = "No other lesson in this scope"
+    public static func mergeLessonTitle(_ gone: String, into keep: String) -> String {
+        "Merge “\(DisplayText.clean(gone, max: 80))” into “\(DisplayText.clean(keep, max: 80))”?"
+    }
+    public static let mergeLessonMessage =
+        "Its findings move to the other lesson, and this one goes away. This cannot be undone from the app."
+    public static let mergeLessonAction = "Merge"
+    public static func lessonChangeOutcome(_ outcome: LessonChangeOutcome) -> String {
+        switch outcome {
+        case .archived: "Lesson archived. Agents no longer get it."
+        case .merged: "Lessons merged."
+        case .notFound: "That lesson is not there any more."
+        case .refused(let message): "Not changed: \(DisplayText.clean(message, max: 200))"
+        case .unknown: "Nothing changed."
+        }
+    }
+    public static func lessonOutcome(_ outcome: String) -> String {
+        switch outcome {
+        case "open": "Open"
+        case "changed": "Changed"
+        case "replied": "Replied"
+        case "fixed": "Fixed"
+        case "not-fixed": "Not fixed"
+        case "partly-fixed": "Partly fixed"
+        default: DisplayText.clean(outcome.replacingOccurrences(of: "-", with: " ").capitalized, max: 30)
+        }
+    }
+    // Configuration → Lessons: the Claude Code hook and the MCP server
+    public static let lessonsAgentSetup = "Agent hook and MCP server"
+    public static let lessonsAgentSetupHint =
+        "Hands matching lessons to Claude Code as it reads and edits files, and lets Claude Code and Codex ask for them."
+    public static let lessonsHook = "Claude Code hook"
+    public static let lessonsClaudeMCP = "Claude Code MCP server"
+    public static let lessonsCodexMCP = "Codex MCP server"
+    public static let lessonsInstalledMark = "Installed"
+    public static let lessonsNotInstalledMark = "Not installed"
+    public static let lessonsInstall = "Install…"
+    public static let lessonsRemove = "Remove"
+    public static let lessonsInstallTitle = "Install the lessons hook and MCP server?"
+    public static func lessonsInstallPlan(_ plan: LessonsInstallPlan) -> String {
+        var lines = ["Edits \(plan.settingsPath), adding these hooks:"]
+        lines += plan.hooks.map { "• \($0.label)" }
+        lines.append("Hook command: \(plan.command)")
+        if plan.commands.isEmpty {
+            lines.append("No MCP server is registered: neither claude nor codex was found.")
+        } else {
+            lines.append("Then runs:")
+            lines += plan.commands.map { "• \($0)" }
+        }
+        if !plan.note.isEmpty { lines.append(plan.note) }
+        return lines.joined(separator: "\n")
+    }
+    public static let lessonsInstallAction = "Install"
+    public static func lessonsInstalled(registered: [String]) -> String {
+        registered.isEmpty
+            ? "The hook is installed. No MCP server was registered."
+            : "The hook is installed and the MCP server registered with \(registered.joined(separator: ", "))."
+    }
+    public static func lessonsInstallPartial(failed: [String]) -> String {
+        "The hook is installed, but registering the MCP server failed for \(failed.joined(separator: ", "))."
+    }
+    public static func lessonsSettingsUnusable(_ status: String, path: String) -> String {
+        let why = status == "invalid-settings" ? "is not valid JSON" : "cannot be read"
+        return "Nothing changed: \(DisplayText.clean(path, max: 200)) \(why). Fix it and try again."
+    }
+    public static func lessonsInstallOutcome(_ reply: LessonsInstallReply) -> String {
+        switch reply.status {
+        case "installed": lessonsInstalled(registered: reply.registered)
+        case "partial": lessonsInstallPartial(failed: reply.failed)
+        case "invalid-settings", "unreadable-settings":
+            lessonsSettingsUnusable(reply.status, path: reply.settingsPath ?? "~/.claude/settings.json")
+        default: "Nothing changed."
+        }
+    }
+    public static let lessonsUninstalled = "The hook and the MCP server are removed."
+    public static func lessonsUninstallOutcome(_ reply: LessonsUninstallReply) -> String {
+        switch reply.status {
+        case "uninstalled": lessonsUninstalled
+        case "partial": "The hook is removed, but unregistering failed for \(reply.failed.joined(separator: ", "))."
+        case "invalid-settings", "unreadable-settings":
+            lessonsSettingsUnusable(reply.status, path: "~/.claude/settings.json")
+        default: "Nothing changed."
+        }
+    }
+    public static let lessonsExportNow = "Export vault now"
+    public static let lessonsExportHint = "Writes the lessons to the vault folder as Markdown notes."
+    public static let lessonsExportNeedsVault = "Set Vault folder first."
+    public static func lessonsExported(written: Int, removed: Int, conflicts: Int) -> String {
+        let base = "Exported: \(written) written, \(removed) removed"
+        return conflicts > 0 ? "\(base), \(conflicts) left alone (not written by Suica)." : "\(base)."
+    }
+    public static func lessonsExportOutcome(_ reply: LessonsExportReply) -> String {
+        switch reply.status {
+        case "exported": lessonsExported(written: reply.written, removed: reply.removed, conflicts: reply.conflicts)
+        case "disabled": "Lessons are off, so nothing was exported."
+        case "no-vault-path": "Set the vault folder and save before exporting."
+        case "no-lessons": "No lessons are stored yet."
+        default: "Export failed: \(DisplayText.clean(reply.message ?? "unknown error", max: 200))"
+        }
+    }
+}

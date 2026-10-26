@@ -602,3 +602,79 @@ extension CLIAgentClient: FixesClient {
         try await action(["mr", "close", key, "--json"], timeout: Self.gitlabTimeout)
     }
 }
+
+// MARK: - Lessons client
+
+/// `{"status": …, "message": …}`, as `suica lessons archive|merge|show` answer a refusal.
+private struct LessonStatusLine: Decodable {
+    let status: String
+    let message: String?
+}
+
+extension CLIAgentClient: LessonsClient {
+    // `status` asks `claude mcp list` and `codex mcp list`, which check every server they know.
+    private static let lessonsStatusTimeout: TimeInterval = 60
+    // Install and uninstall run up to four claude/codex mcp calls of up to 30 s each.
+    private static let lessonsInstallTimeout: TimeInterval = 150
+
+    /// A command that answers with JSON even when it exits 1 (a refusal, a plan): the last line.
+    private func lessonsReply<T: Decodable>(_ type: T.Type, _ arguments: [String], timeout: TimeInterval)
+        async throws(AgentError) -> T
+    {
+        let result = try await runner.run(invocation(arguments, timeout: timeout))
+        if let line = lastLine(of: result.stdout), let parsed = try? JSONDecoder().decode(T.self, from: line) {
+            return parsed
+        }
+        guard result.exitCode == 0 else { throw AgentError.failed(exitCode: result.exitCode) }
+        throw AgentError.badOutput
+    }
+
+    public func lessons() async throws(AgentError) -> LessonListDocument {
+        try await document(LessonListDocument.self, ["lessons", "list", "--json"])
+    }
+
+    public func lesson(id: Int) async throws(AgentError) -> LessonDetailDocument? {
+        let result = try await runner.run(
+            invocation(["lessons", "show", String(id), "--json"], timeout: Self.shortTimeout))
+        guard let line = lastLine(of: result.stdout) else {
+            throw result.exitCode == 0 ? AgentError.badOutput : AgentError.failed(exitCode: result.exitCode)
+        }
+        if let status = try? JSONDecoder().decode(LessonStatusLine.self, from: line), status.status == "not-found" {
+            return nil
+        }
+        guard result.exitCode == 0 else { throw AgentError.failed(exitCode: result.exitCode) }
+        return try decodeDocument(LessonDetailDocument.self, from: line)
+    }
+
+    public func archiveLesson(id: Int) async throws(AgentError) -> LessonChangeOutcome {
+        let line = try await lessonsReply(
+            LessonStatusLine.self, ["lessons", "archive", String(id), "--json"], timeout: Self.shortTimeout)
+        return LessonChangeOutcome(status: line.status, message: line.message)
+    }
+
+    public func mergeLessons(keep: Int, gone: Int) async throws(AgentError) -> LessonChangeOutcome {
+        let line = try await lessonsReply(
+            LessonStatusLine.self, ["lessons", "merge", String(keep), String(gone), "--json"],
+            timeout: Self.shortTimeout)
+        return LessonChangeOutcome(status: line.status, message: line.message)
+    }
+
+    public func lessonsStatus() async throws(AgentError) -> LessonsSetupStatus {
+        try await document(LessonsSetupStatus.self, ["lessons", "status", "--json"], timeout: Self.lessonsStatusTimeout)
+    }
+
+    public func installLessons(confirm: Bool) async throws(AgentError) -> LessonsInstallReply {
+        try await lessonsReply(
+            LessonsInstallReply.self, ["lessons", "install"] + (confirm ? ["--yes"] : []) + ["--json"],
+            timeout: Self.lessonsInstallTimeout)
+    }
+
+    public func uninstallLessons() async throws(AgentError) -> LessonsUninstallReply {
+        try await lessonsReply(
+            LessonsUninstallReply.self, ["lessons", "uninstall", "--json"], timeout: Self.lessonsInstallTimeout)
+    }
+
+    public func exportLessons() async throws(AgentError) -> LessonsExportReply {
+        try await lessonsReply(LessonsExportReply.self, ["lessons", "export", "--json"], timeout: Self.gitlabTimeout)
+    }
+}

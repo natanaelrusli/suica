@@ -94,6 +94,7 @@ actor FakeFixesClient: FixesClient {
     #expect(ready.threads.map(\.action) == ["changed", "reply", "reply"])
     #expect(ready.threads.first?.notes.first?.body == "Rename this")
     #expect(ready.changedCount == 1)
+    #expect(ready.threads.map { $0.lessonRepeat?.before } == [1, nil, nil])
 
     let reviews = try decodeDocument(ReviewListDocument.self, from: contract("reviews.v1.json"))
     let mine = try #require(reviews.yourMergeRequests.first)
