@@ -39,6 +39,7 @@ describe("alert templates", () => {
     expect(renderAlert(alerts, "alert.review-ready", { "mr.title": "Add thing" })).toEqual({
       title: "🎉 Review siap",
       body: "Add thing 👀",
+      sound: "Glass",
     });
     expect(alerts["alert.baseline"]).toBe(DEFAULT_ALERTS["alert.baseline"]);
   });

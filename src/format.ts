@@ -1,14 +1,26 @@
-import { DEFAULT_ALERTS, splitAlert } from "./alerts.ts";
+import { ALERT_SOUNDS, DEFAULT_ALERTS, splitAlert } from "./alerts.ts";
 import type { AlertName, AlertTemplates } from "./alerts.ts";
 import type { ActivityEvent } from "./events.ts";
 import type { MergeRequest, ReviewState } from "./domain.ts";
 import { fillText } from "./teams/templates.ts";
 import type { HeldMessage } from "./teams/types.ts";
 
+/**
+ * A button on a notification. `open` shows a link; `suica` runs the suica CLI with these
+ * arguments. Only the agent builds them, from values it validated, never from message text.
+ */
+export type NotificationAction =
+  | { readonly title: string; readonly open: string }
+  | { readonly title: string; readonly suica: readonly string[] };
+
 export interface Notification {
   readonly title: string;
   readonly body: string;
   readonly url?: string;
+  /** Buttons, shown when the Owner hovers or expands the notification. Needs the Suica notifier. */
+  readonly actions?: readonly NotificationAction[];
+  /** A name from /System/Library/Sounds. */
+  readonly sound?: string;
 }
 
 const TITLE_MAX = 80;
@@ -66,9 +78,11 @@ export function renderAlert(
   bodyMax = ALERT_BODY_MAX,
 ): Notification {
   const { title, body } = splitAlert(alerts[name]);
+  const sound = ALERT_SOUNDS[name];
   return {
     title: clean(fillText(title, values), ALERT_TITLE_MAX),
     body: clean(fillText(body, values), bodyMax),
+    ...(sound === undefined ? {} : { sound }),
   };
 }
 
@@ -92,6 +106,9 @@ function reviewRequestNotifications(
     result.push({
       ...renderAlert(alerts, "alert.review-requested", values, BODY_MAX),
       url: event.mr.url,
+      actions: [
+        { title: "Review dengan agen", suica: ["review", "queue", event.mr.key, "--json"] },
+      ],
     });
   }
   return result;

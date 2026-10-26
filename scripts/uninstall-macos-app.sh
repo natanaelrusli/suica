@@ -1,5 +1,5 @@
 #!/bin/sh
-# Quits the menu bar app and removes its bundle.
+# Quits the menu bar app and removes its bundle and its notifier.
 set -eu
 
 BUNDLE_ID=com.madhani.suica
@@ -12,3 +12,4 @@ if [ -d "$APP" ]; then
 else
   echo "not installed: $APP"
 fi
+rm -rf -- "$HOME/Applications/Suica Notifier.app"

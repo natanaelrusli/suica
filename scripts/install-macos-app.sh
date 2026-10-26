@@ -49,5 +49,27 @@ iconutil -c icns "$ICONS/AppIcon.iconset" -o "$APP/Contents/Resources/AppIcon.ic
 cp "$REPO/macos/Info.plist.template" "$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :SuicaCLIPath $CLI" "$APP/Contents/Info.plist"
 codesign --force --sign - "$APP"
+
+# macOS shows a notification with the icon of the app that sent it, so the agent sends its
+# notifications through a copy of terminal-notifier that carries the Suica icon. It is a separate
+# app: the first notification asks for permission once, under the name Suica.
+NOTIFIER="$HOME/Applications/Suica Notifier.app"
+SOURCE=$(brew --prefix terminal-notifier 2>/dev/null || true)/terminal-notifier.app
+if [ -d "$SOURCE" ]; then
+  rm -rf "$NOTIFIER"
+  cp -R "$SOURCE" "$NOTIFIER"
+  rm -f "$NOTIFIER"/Contents/Resources/*.icns
+  cp "$APP/Contents/Resources/AppIcon.icns" "$NOTIFIER/Contents/Resources/AppIcon.icns"
+  PLIST="$NOTIFIER/Contents/Info.plist"
+  /usr/libexec/PlistBuddy -c "Set :CFBundleIconFile AppIcon" "$PLIST"
+  /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier com.madhani.suica.notifier" "$PLIST"
+  /usr/libexec/PlistBuddy -c "Set :CFBundleName Suica" "$PLIST"
+  /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string Suica" "$PLIST" 2>/dev/null ||
+    /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName Suica" "$PLIST"
+  codesign --force --deep --sign - "$NOTIFIER"
+  echo "installed $NOTIFIER"
+else
+  echo "terminal-notifier not installed (brew install terminal-notifier): notifications keep its icon and have no buttons"
+fi
 open "$APP"
 echo "installed $APP (cli: $CLI)"

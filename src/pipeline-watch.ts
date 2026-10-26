@@ -65,14 +65,18 @@ function currentMarks(
 
 async function notifyFailed(deps: PipelineWatchDeps, mr: MergeRequest): Promise<void> {
   try {
-    await deps.notifier.notify(
-      renderAlert(deps.alerts ?? DEFAULT_ALERTS, "alert.pipeline-failed", {
+    await deps.notifier.notify({
+      ...renderAlert(deps.alerts ?? DEFAULT_ALERTS, "alert.pipeline-failed", {
         "mr.title": clean(mr.title, ALERT_MR_TITLE_MAX),
         "mr.iid": String(mr.iid),
         "mr.project": mr.projectPath,
         "mr.url": mr.url,
       }),
-    );
+      url: mr.url,
+      actions: [
+        { title: "Perbaiki pipeline", suica: ["fix", "queue", mr.key, "--pipeline", "--json"] },
+      ],
+    });
   } catch (error) {
     // Never log the error message: process errors embed the notification text.
     deps.log.warn("pipeline notification failed", {

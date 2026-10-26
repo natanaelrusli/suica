@@ -199,129 +199,129 @@
       "name": "alert.review-requested",
       "group": "alert",
       "placeholders": ["mr.title", "mr.iid", "mr.project", "mr.url", "author.name"],
-      "text": "Diminta review: {{mr.title}}\n{{author.name}} · {{mr.project}}",
+      "text": "👀 Diminta review: {{mr.title}}\n{{author.name}} · {{mr.project}} !{{mr.iid}}",
       "custom": false,
-      "defaultText": "Diminta review: {{mr.title}}\n{{author.name}} · {{mr.project}}"
+      "defaultText": "👀 Diminta review: {{mr.title}}\n{{author.name}} · {{mr.project}} !{{mr.iid}}"
     },
     {
       "name": "alert.activity",
       "group": "alert",
       "placeholders": ["mr.title", "mr.iid", "mr.project", "mr.url", "activity.summary"],
-      "text": "!{{mr.iid}}: {{mr.title}}\n{{activity.summary}}",
+      "text": "💬 !{{mr.iid}} {{mr.title}}\n{{activity.summary}}",
       "custom": false,
-      "defaultText": "!{{mr.iid}}: {{mr.title}}\n{{activity.summary}}"
+      "defaultText": "💬 !{{mr.iid}} {{mr.title}}\n{{activity.summary}}"
     },
     {
       "name": "alert.summary",
       "group": "alert",
       "placeholders": ["alert.count", "alert.titles"],
-      "text": "{{alert.count}} aktivitas MR baru\n{{alert.titles}}",
+      "text": "📬 {{alert.count}} aktivitas MR baru\n{{alert.titles}}",
       "custom": false,
-      "defaultText": "{{alert.count}} aktivitas MR baru\n{{alert.titles}}"
+      "defaultText": "📬 {{alert.count}} aktivitas MR baru\n{{alert.titles}}"
     },
     {
       "name": "alert.baseline",
       "group": "alert",
       "placeholders": ["alert.count"],
-      "text": "Suica aktif\n{{alert.count}} MR menunggu review-mu",
+      "text": "🚃 Suica aktif\n{{alert.count}} MR menunggu review-mu",
       "custom": false,
-      "defaultText": "Suica aktif\n{{alert.count}} MR menunggu review-mu"
+      "defaultText": "🚃 Suica aktif\n{{alert.count}} MR menunggu review-mu"
     },
     {
       "name": "alert.rereview",
       "group": "alert",
       "placeholders": ["mr.title", "reviewers.names"],
-      "text": "Minta review ulang?\nKamu push ke {{mr.title}} setelah {{reviewers.names}} review. Kirim pesan Teams?",
+      "text": "🔁 Minta review ulang?\nKamu push ke {{mr.title}} setelah {{reviewers.names}} review. Kirim pesan Teams?",
       "custom": false,
-      "defaultText": "Minta review ulang?\nKamu push ke {{mr.title}} setelah {{reviewers.names}} review. Kirim pesan Teams?"
+      "defaultText": "🔁 Minta review ulang?\nKamu push ke {{mr.title}} setelah {{reviewers.names}} review. Kirim pesan Teams?"
     },
     {
       "name": "alert.review-ready",
       "group": "alert",
       "placeholders": ["mr.title"],
-      "text": "Review agen siap\n{{mr.title}}: periksa di Suica, lalu posting ke GitLab.",
+      "text": "🤖 Review agen siap\n{{mr.title}}: periksa di Suica, lalu posting ke GitLab.",
       "custom": false,
-      "defaultText": "Review agen siap\n{{mr.title}}: periksa di Suica, lalu posting ke GitLab."
+      "defaultText": "🤖 Review agen siap\n{{mr.title}}: periksa di Suica, lalu posting ke GitLab."
     },
     {
       "name": "alert.review-posted",
       "group": "alert",
       "placeholders": ["mr.title"],
-      "text": "Review agen diposting\n{{mr.title}}: sudah diposting ke GitLab.",
+      "text": "✅ Review agen diposting\n{{mr.title}}: sudah diposting ke GitLab.",
       "custom": false,
-      "defaultText": "Review agen diposting\n{{mr.title}}: sudah diposting ke GitLab."
+      "defaultText": "✅ Review agen diposting\n{{mr.title}}: sudah diposting ke GitLab."
     },
     {
       "name": "alert.review-approved",
       "group": "alert",
       "placeholders": ["mr.title"],
-      "text": "Review agen diposting\n{{mr.title}}: sudah diposting ke GitLab dan MR di-approve.",
+      "text": "✅ Review diposting, MR di-approve\n{{mr.title}}: sudah diposting ke GitLab dan MR di-approve.",
       "custom": false,
-      "defaultText": "Review agen diposting\n{{mr.title}}: sudah diposting ke GitLab dan MR di-approve."
+      "defaultText": "✅ Review diposting, MR di-approve\n{{mr.title}}: sudah diposting ke GitLab dan MR di-approve."
     },
     {
       "name": "alert.review-post-failed",
       "group": "alert",
       "placeholders": ["mr.title"],
-      "text": "Review agen gagal diposting\n{{mr.title}}: periksa GitLab, lalu posting dari Suica.",
+      "text": "⚠️ Review agen gagal diposting\n{{mr.title}}: periksa GitLab, lalu posting dari Suica.",
       "custom": false,
-      "defaultText": "Review agen gagal diposting\n{{mr.title}}: periksa GitLab, lalu posting dari Suica."
+      "defaultText": "⚠️ Review agen gagal diposting\n{{mr.title}}: periksa GitLab, lalu posting dari Suica."
     },
     {
       "name": "alert.review-failed",
       "group": "alert",
       "placeholders": ["mr.title", "review.reason"],
-      "text": "Review agen gagal\n{{mr.title}}: {{review.reason}}",
+      "text": "❌ Review agen gagal\n{{mr.title}}: {{review.reason}}",
       "custom": false,
-      "defaultText": "Review agen gagal\n{{mr.title}}: {{review.reason}}"
+      "defaultText": "❌ Review agen gagal\n{{mr.title}}: {{review.reason}}"
     },
     {
       "name": "alert.review-skipped",
       "group": "alert",
       "placeholders": ["mr.title", "review.reason"],
-      "text": "Review agen dilewati\n{{mr.title}}: {{review.reason}}",
+      "text": "⏭️ Review agen dilewati\n{{mr.title}}: {{review.reason}}",
       "custom": false,
-      "defaultText": "Review agen dilewati\n{{mr.title}}: {{review.reason}}"
+      "defaultText": "⏭️ Review agen dilewati\n{{mr.title}}: {{review.reason}}"
     },
     {
       "name": "alert.fix-ready",
       "group": "alert",
       "placeholders": ["mr.title", "fix.threads"],
-      "text": "Perbaikan agen siap\n{{mr.title}}: {{fix.threads}} thread dijawab. Periksa di Suica, lalu push.",
+      "text": "🛠️ Perbaikan agen siap\n{{mr.title}}: {{fix.threads}} thread dijawab. Periksa di Suica, lalu push.",
       "custom": false,
-      "defaultText": "Perbaikan agen siap\n{{mr.title}}: {{fix.threads}} thread dijawab. Periksa di Suica, lalu push."
+      "defaultText": "🛠️ Perbaikan agen siap\n{{mr.title}}: {{fix.threads}} thread dijawab. Periksa di Suica, lalu push."
     },
     {
       "name": "alert.fix-failed",
       "group": "alert",
       "placeholders": ["mr.title", "fix.reason"],
-      "text": "Perbaikan agen gagal\n{{mr.title}}: {{fix.reason}}",
+      "text": "❌ Perbaikan agen gagal\n{{mr.title}}: {{fix.reason}}",
       "custom": false,
-      "defaultText": "Perbaikan agen gagal\n{{mr.title}}: {{fix.reason}}"
+      "defaultText": "❌ Perbaikan agen gagal\n{{mr.title}}: {{fix.reason}}"
     },
     {
       "name": "alert.fix-pushed",
       "group": "alert",
       "placeholders": ["mr.title"],
-      "text": "Perbaikan agen di-push\n{{mr.title}}: sebagian balasan gagal diposting. Kirim ulang dari Suica.",
+      "text": "⚠️ Perbaikan di-push, balasan belum lengkap\n{{mr.title}}: sebagian balasan gagal diposting. Kirim ulang dari Suica.",
       "custom": false,
-      "defaultText": "Perbaikan agen di-push\n{{mr.title}}: sebagian balasan gagal diposting. Kirim ulang dari Suica."
+      "defaultText": "⚠️ Perbaikan di-push, balasan belum lengkap\n{{mr.title}}: sebagian balasan gagal diposting. Kirim ulang dari Suica."
     },
     {
       "name": "alert.pipeline-failed",
       "group": "alert",
       "placeholders": ["mr.title", "mr.iid", "mr.project", "mr.url"],
-      "text": "Pipeline gagal: {{mr.title}}\n!{{mr.iid}} · {{mr.project}}",
+      "text": "🔴 Pipeline gagal: {{mr.title}}\n!{{mr.iid}} · {{mr.project}}",
       "custom": false,
-      "defaultText": "Pipeline gagal: {{mr.title}}\n!{{mr.iid}} · {{mr.project}}"
+      "defaultText": "🔴 Pipeline gagal: {{mr.title}}\n!{{mr.iid}} · {{mr.project}}"
     },
     {
       "name": "alert.pipeline-fix-ready",
       "group": "alert",
       "placeholders": ["mr.title"],
-      "text": "Perbaikan pipeline siap\n{{mr.title}}: periksa perubahannya di Suica, lalu push.",
+      "text": "🛠️ Perbaikan pipeline siap\n{{mr.title}}: periksa perubahannya di Suica, lalu push.",
       "custom": false,
-      "defaultText": "Perbaikan pipeline siap\n{{mr.title}}: periksa perubahannya di Suica, lalu push."
+      "defaultText": "🛠️ Perbaikan pipeline siap\n{{mr.title}}: periksa perubahannya di Suica, lalu push."
     }
   ],
   "emoji": {

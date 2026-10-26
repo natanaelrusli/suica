@@ -42,19 +42,24 @@ export const NOTIFY_AFTER: Readonly<Record<FailureKind, number>> = {
   "teams-error": 1,
 };
 
+const FAILURE_SOUND = "Basso";
+
 export const STATE_FAILURE_NOTIFICATION: Notification = {
-  title: "Penyimpanan state bermasalah",
+  sound: FAILURE_SOUND,
+  title: "⚠️ Penyimpanan state bermasalah",
   body: "Suica tidak bisa menyimpan state. Alert bisa terulang; lihat log untuk detailnya.",
 };
 
 export function teamsFailureNotification(kind: TeamsFailureReportKind): Notification {
   return kind === "teams-unavailable"
     ? {
-        title: "Teams tidak terhubung",
+        sound: FAILURE_SOUND,
+        title: "🔌 Teams tidak terhubung",
         body: "Pesan Teams menunggu dan akan dicoba lagi; pesan yang sudah gagal terkirim tidak diulang.",
       }
     : {
-        title: "Teams mengembalikan error",
+        sound: FAILURE_SOUND,
+        title: "⚠️ Teams mengembalikan error",
         body: "Jika login kedaluwarsa, jalankan ulang sh scripts/login.sh di repo teams-mcp-login.",
       };
 }
@@ -63,22 +68,26 @@ export function failureNotification(kind: GitlabFailureKind, hostname: string): 
   switch (kind) {
     case "glab-missing":
       return {
-        title: "glab tidak ditemukan",
+        sound: FAILURE_SOUND,
+        title: "🔌 glab tidak ditemukan",
         body: "Pasang glab atau perbaiki PATH-nya supaya polling GitLab jalan lagi.",
       };
     case "gitlab-auth":
       return {
-        title: "Login GitLab gagal",
+        sound: FAILURE_SOUND,
+        title: "🔑 Login GitLab gagal",
         body: `Jalankan: glab auth login --hostname ${hostname}`,
       };
     case "gitlab-unreachable":
       return {
-        title: "GitLab tidak terjangkau",
+        sound: FAILURE_SOUND,
+        title: "🔌 GitLab tidak terjangkau",
         body: "Akan dicoba lagi otomatis dengan jeda yang makin panjang.",
       };
     case "gitlab-error":
       return {
-        title: "GitLab mengembalikan error",
+        sound: FAILURE_SOUND,
+        title: "⚠️ GitLab mengembalikan error",
         body: "Lihat log Suica untuk detailnya.",
       };
   }

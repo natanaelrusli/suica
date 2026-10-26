@@ -130,7 +130,7 @@ describe("pollOnce with Teams", () => {
     expect(await h.poll()).toBe("ok");
     expect(h.sent.map((n) => n.title)).toEqual([]);
     expect(await h.poll()).toBe("ok");
-    expect(h.sent.map((n) => n.title)).toEqual(["Teams tidak terhubung"]);
+    expect(h.sent.map((n) => n.title)).toEqual(["🔌 Teams tidak terhubung"]);
     expect(await h.poll()).toBe("ok");
     expect(h.sent).toHaveLength(1);
   });
@@ -140,7 +140,7 @@ describe("pollOnce with Teams", () => {
     h.setDispatchFailure("error");
     await h.poll();
     await h.poll();
-    expect(h.sent.map((n) => n.title)).toEqual(["Teams mengembalikan error"]);
+    expect(h.sent.map((n) => n.title)).toEqual(["⚠️ Teams mengembalikan error"]);
     h.setDispatchFailure(undefined);
     await h.poll();
     h.setDispatchFailure("error");
@@ -154,8 +154,8 @@ describe("pollOnce with Teams", () => {
       snapshot({ reviewRequested: [mr(1, { reviewers: [reviewer("me", "UNREVIEWED")] })] }),
     );
     expect(await h.poll()).toBe("ok");
-    expect(h.sent.map((n) => n.title)).toContain("Suica aktif");
-    expect(h.sent.map((n) => n.title)).toContain("Penyimpanan state bermasalah");
+    expect(h.sent.map((n) => n.title)).toContain("🚃 Suica aktif");
+    expect(h.sent.map((n) => n.title)).toContain("⚠️ Penyimpanan state bermasalah");
     expect(h.events).toEqual(["commit", "plan"]);
   });
 
@@ -167,14 +167,16 @@ describe("pollOnce with Teams", () => {
     expect(await h.poll()).toBe("ok");
     expect(h.sent).toEqual([
       {
-        title: "Minta review ulang?",
+        title: "🔁 Minta review ulang?",
         body: "Kamu push ke Title of g/p!5 setelah Bob dan Carol review. Kirim pesan Teams?",
         url: "suica://messages",
+        sound: "Glass",
       },
       {
-        title: "Minta review ulang?",
+        title: "🔁 Minta review ulang?",
         body: "Kamu push ke Title of g/p!8 setelah Erin review. Kirim pesan Teams?",
         url: "suica://message/9",
+        sound: "Glass",
       },
     ]);
   });
@@ -214,8 +216,8 @@ describe("pollOnce with Teams", () => {
     h.setDispatchFailure("error");
     await h.poll();
     expect(h.sent.map((n) => n.title)).toEqual([
-      "Minta review ulang?",
-      "Teams mengembalikan error",
+      "🔁 Minta review ulang?",
+      "⚠️ Teams mengembalikan error",
     ]);
   });
 });

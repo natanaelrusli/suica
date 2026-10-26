@@ -248,7 +248,9 @@ describe("confirmFix", () => {
       status: "pushed",
       detail: "1 of 2 replies posted.",
     });
-    expect(h.notifications.map((n) => n.title)).toEqual(["Perbaikan agen di-push"]);
+    expect(h.notifications.map((n) => n.title)).toEqual([
+      "⚠️ Perbaikan di-push, balasan belum lengkap",
+    ]);
     refuse = false;
     h.posts.length = 0;
     expect(await postMissingReplies(h.deps, row.id)).toBe("pushed");

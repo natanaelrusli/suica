@@ -380,7 +380,7 @@ describe("runAgentFix", () => {
     expect(h.seenFiles.get("notes.md")).toBe("keep it small");
     expect(existsSync(join(fixDir(h.statePath, row.id), "work", "repo"))).toBe(true);
     expect(h.db.loadTokenUsage(0)[0]?.purpose).toBe("fix");
-    expect(h.notifications.map((n) => n.title)).toEqual(["Perbaikan agen siap"]);
+    expect(h.notifications.map((n) => n.title)).toEqual(["🛠️ Perbaikan agen siap"]);
   });
 
   it("fixes a failed pipeline: reads its failed jobs' logs, keeps no log and says the pipeline fix is ready", async () => {
@@ -407,7 +407,7 @@ describe("runAgentFix", () => {
     expect(h.seenFiles.get("pipeline.md")).not.toContain("\u001b");
     expect(h.seenFiles.has("threads.md")).toBe(false);
     expect(JSON.stringify(stored)).not.toContain("exit code 1");
-    expect(h.notifications.map((n) => n.title)).toEqual(["Perbaikan pipeline siap"]);
+    expect(h.notifications.map((n) => n.title)).toEqual(["🛠️ Perbaikan pipeline siap"]);
   });
 
   it("skips a pipeline fix that changes nothing, with the model's reason", async () => {
@@ -420,7 +420,7 @@ describe("runAgentFix", () => {
       pipeline: { summary: "The runner lost its network." },
     });
     expect(existsSync(fixDir(h.statePath, row.id))).toBe(false);
-    expect(h.notifications.map((n) => n.title)).toEqual(["Perbaikan agen gagal"]);
+    expect(h.notifications.map((n) => n.title)).toEqual(["❌ Perbaikan agen gagal"]);
   });
 
   it("fails without running git when the git settings changed during the run", async () => {
@@ -479,7 +479,7 @@ describe("runAgentFix", () => {
       ]),
     );
     expect(existsSync(fixDir(h.statePath, row.id))).toBe(false);
-    expect(h.notifications.map((n) => n.title)).toEqual(["Perbaikan agen gagal"]);
+    expect(h.notifications.map((n) => n.title)).toEqual(["❌ Perbaikan agen gagal"]);
   });
 
   it("fails when the model gives no answer block", async () => {
