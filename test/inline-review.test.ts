@@ -59,6 +59,20 @@ const TOP_LEVEL_PREVIOUS = [
 ].join("\n");
 
 describe("extractFindings", () => {
+  it("extractFindings gives each finding its severity subheading", () => {
+    const body = [
+      "## Findings",
+      "1. `z.ts:1` — before any subheading",
+      "### Blocker",
+      "1. `a.ts:4` — a",
+      "",
+      "**Minor**",
+      "",
+      "- `b.ts:9` — b",
+    ].join("\n");
+    expect(extractFindings(body).map((f) => f.severity)).toEqual(["", "Blocker", "Minor"]);
+  });
+
   it("takes the located items under Findings and its subheadings, with their continuation", () => {
     const findings = extractFindings(REVIEW);
     expect(findings.map(({ number, path, line }) => ({ number, path, line }))).toEqual([

@@ -1677,7 +1677,7 @@ describe("postAgentReview and discardAgentReview", () => {
     expect(note.split("\n")[0]).toBe(
       "> **Agent re-review**: written by a language model (Claude Code, following `madhani:madhani-code-review`) on commit `01234567`, since the review of `fedcba98`, and posted by the reviewer after reading it. Code reading only; nothing was executed.",
     );
-    const finding = { number: "2", path: "a.ts", line: 1, text: "x", start: 0, end: 1 };
+    const finding = { number: "2", path: "a.ts", line: 1, text: "x", severity: "", start: 0, end: 1 };
     expect(renderThread(finding, true).split("\n")[0]).toBe(
       "> **Agent re-review**, finding 2: written by a language model and posted by the reviewer after reading it. The rest of the review is in its summary comment.",
     );
