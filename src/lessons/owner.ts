@@ -193,9 +193,13 @@ export function archiveLesson(
   return { status: "archived" };
 }
 
-/** Merges `goneId` into `keepId`; refuses Lessons of two scopes, so no Lesson crosses a scope. */
+/**
+ * Merges `goneId` into `keepId`. Refuses Lessons of two scopes (no Lesson crosses a scope) and an
+ * archived Lesson on either side. The checks run in the transaction that writes, so a scope remap
+ * by the daemon cannot slip in between.
+ */
 export function mergeLessons(
-  store: Pick<LessonStore, "lesson" | "merge">,
+  store: Pick<LessonStore, "lesson" | "merge" | "transaction">,
   keepId: number,
   goneId: number,
   now: number,
@@ -203,12 +207,22 @@ export function mergeLessons(
   if (keepId === goneId) {
     return { status: "bad-request", message: "a lesson cannot be merged into itself" };
   }
-  const keep = store.lesson(keepId);
-  const gone = store.lesson(goneId);
-  if (keep === undefined || gone === undefined) return { status: "not-found" };
-  if (keep.scope !== gone.scope) {
-    return { status: "bad-request", message: "lessons of two scopes cannot be merged" };
-  }
-  store.merge(keepId, goneId, now);
-  return { status: "merged" };
+  let result: ChangeResult = { status: "not-found" };
+  store.transaction(() => {
+    const keep = store.lesson(keepId);
+    const gone = store.lesson(goneId);
+    if (keep === undefined || gone === undefined) return;
+    const archived = [keep, gone].find((each) => each.archived);
+    if (archived !== undefined) {
+      result = { status: "bad-request", message: `lesson ${String(archived.id)} is archived` };
+      return;
+    }
+    if (keep.scope !== gone.scope) {
+      result = { status: "bad-request", message: "lessons of two scopes cannot be merged" };
+      return;
+    }
+    store.merge(keepId, goneId, now);
+    result = { status: "merged" };
+  });
+  return result;
 }

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { LessonStore, NewOccurrence } from "../src/lesson-store.ts";
 import { openLessonsReadOnly } from "../src/lesson-store.ts";
-import { buildLessonList, buildLessonShow } from "../src/lessons/owner.ts";
+import { buildLessonList, buildLessonShow, mergeLessons } from "../src/lessons/owner.ts";
 import { openStore } from "../src/store.ts";
 
 const NOW = Date.UTC(2026, 9, 26, 12);
@@ -172,6 +172,52 @@ describe("the Lessons view documents", () => {
     expect(text.endsWith("…")).toBe(true);
   });
 
+  it("checks a merge inside the transaction that writes it", () => {
+    const store = openStore(":memory:");
+    const { timeout, errors } = seed(store.lessons);
+    const events: string[] = [];
+    let open = false;
+    const wrapped = {
+      transaction: (work: () => void) => {
+        events.push("begin");
+        open = true;
+        try {
+          store.lessons.transaction(work);
+        } finally {
+          open = false;
+          events.push("end");
+        }
+      },
+      lesson: (id: number) => {
+        events.push(open ? "read-inside" : "read-outside");
+        return store.lessons.lesson(id);
+      },
+      merge: (keep: number, gone: number, at: number) => {
+        events.push(open ? "merge-inside" : "merge-outside");
+        store.lessons.merge(keep, gone, at);
+      },
+    };
+    expect(mergeLessons(wrapped, timeout, errors, NOW)).toEqual({ status: "merged" });
+    expect(events).toEqual(["begin", "read-inside", "read-inside", "merge-inside", "end"]);
+  });
+
+  it("refuses a merge when either lesson is archived, and changes nothing", () => {
+    const store = openStore(":memory:");
+    const { timeout, archived } = seed(store.lessons);
+    const before = () => [store.lessons.occurrences(timeout), store.lessons.occurrences(archived)];
+    const was = before();
+    expect(mergeLessons(store.lessons, timeout, archived, NOW)).toEqual({
+      status: "bad-request",
+      message: `lesson ${String(archived)} is archived`,
+    });
+    expect(mergeLessons(store.lessons, archived, timeout, NOW)).toEqual({
+      status: "bad-request",
+      message: `lesson ${String(archived)} is archived`,
+    });
+    expect(before()).toEqual(was);
+    expect(store.lessons.lesson(archived)).toBeDefined();
+  });
+
   it("shows nothing for an unknown id", () => {
     const store = openStore(":memory:");
     expect(buildLessonShow(store.lessons, 42, NOW)).toBeUndefined();
@@ -305,6 +351,15 @@ describe("suica lessons list|show|archive|merge", () => {
       status: 1,
       json: { version: 1, status: "bad-request" },
     });
+    expect(run("merge", String(ids.archived), String(ids.timeout), "--json")).toMatchObject({
+      status: 1,
+      json: {
+        version: 1,
+        status: "bad-request",
+        message: `lesson ${String(ids.archived)} is archived`,
+      },
+    });
+    expect(snapshot()).toEqual(before);
     expect(run("merge", String(ids.timeout), "999", "--json")).toMatchObject({
       status: 1,
       json: { version: 1, status: "not-found" },
