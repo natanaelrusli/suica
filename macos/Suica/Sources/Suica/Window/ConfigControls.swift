@@ -63,6 +63,9 @@ struct PathInput: View {
 
     private var expanded: String { (path as NSString).expandingTildeInPath }
 
+    /// The paths that are folders, not files: the picker lists folders only and can make a new one.
+    private static let folderKeys: Set<String> = ["lessons.vaultPath", "teams.templatesPath"]
+
     var body: some View {
         HStack(spacing: 6) {
             TextField(
@@ -72,7 +75,7 @@ struct PathInput: View {
                 .textFieldStyle(.roundedBorder)
                 .multilineTextAlignment(.leading)
                 .font(.body.monospaced())
-            Button(Copy.chooseFile, action: choose)
+            Button(Self.folderKeys.contains(field.path.joined(separator: ".")) ? Copy.chooseFolder : Copy.chooseFile, action: choose)
             Button {
                 NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: expanded)])
             } label: {
@@ -88,16 +91,22 @@ struct PathInput: View {
 
     private func choose() {
         let panel = NSOpenPanel()
-        panel.canChooseFiles = true
+        let foldersOnly = Self.folderKeys.contains(field.path.joined(separator: "."))
+        panel.canChooseFiles = !foldersOnly
         panel.canChooseDirectories = true
+        // The panel's own New Folder button: a vault or a templates folder can be made on the spot.
+        panel.canCreateDirectories = true
         panel.allowsMultipleSelection = false
         panel.showsHiddenFiles = true
+        panel.prompt = foldersOnly ? Copy.chooseFolderPrompt : Copy.chooseFile
         let start = path.isEmpty ? (field.placeholder ?? "") : path
         if !start.isEmpty {
-            panel.directoryURL = URL(fileURLWithPath: (start as NSString).expandingTildeInPath).deletingLastPathComponent()
+            let startURL = URL(fileURLWithPath: Folders.expand(start))
+            // A folder opens inside itself; a file's folder is where it sits.
+            panel.directoryURL = foldersOnly && Folders.isFolder(start) ? startURL : startURL.deletingLastPathComponent()
         }
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        editor.setText(field, (url.path as NSString).abbreviatingWithTildeInPath)
+        editor.setText(field, Folders.tidy(url.path))
     }
 }
 

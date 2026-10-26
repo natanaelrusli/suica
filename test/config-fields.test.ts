@@ -50,6 +50,7 @@ describe("CONFIG_FIELDS", () => {
       ["lessons.perSession", "int"],
     ]);
     expect(lessons.find((field) => field.path[1] === "vaultPath")?.format).toBe("path");
+    expect(lessons.find((field) => field.path[1] === "scopes")?.format).toBe("path");
     expect(lessons.find((field) => field.path[1] === "perFile")?.max).toBe(20);
     expect(lessons.find((field) => field.path[1] === "perSession")?.max).toBe(20);
   });
@@ -66,7 +67,9 @@ describe("CONFIG_FIELDS", () => {
       const named = /(Seconds|Minutes|Hours)$/.exec(key)?.[1]?.toLowerCase();
       if (named !== undefined) expect(field.unit, key).toBe(named);
       if (field.unit !== undefined || field.max !== undefined) expect(field.type, key).toBe("int");
-      if (field.format !== undefined) expect(field.type, key).toBe("string");
+      if (field.format === "hostname") expect(field.type, key).toBe("string");
+      // A path is one string, or a list of them (the lesson folders).
+      if (field.format === "path") expect(["string", "stringList"], key).toContain(field.type);
     }
     const concurrency = CONFIG_FIELDS.find(
       (field) => field.path.join(".") === "review.concurrency",

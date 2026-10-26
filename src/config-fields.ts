@@ -386,6 +386,7 @@ export const CONFIG_FIELDS: readonly ConfigField[] = [
     type: "stringList",
     label: "Lesson folders",
     help: "One folder per line, for example ~/work: only repositories under these folders feed and use lessons; empty means none, so nothing is learned or served",
+    format: "path",
   },
   {
     path: ["lessons", "vaultPath"],

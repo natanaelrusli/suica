@@ -893,6 +893,13 @@ public enum Copy {
 
     public static let durationUnitPicker = "Unit"
     public static let chooseFile = "Choose…"
+    public static let chooseFolder = "Choose folder…"
+    public static let chooseFolderPrompt = "Choose"
+    public static let addFolders = "Add folders…"
+    public static let addFoldersPrompt = "Add"
+    public static let folderNotFound = "Folder not found"
+    public static let noFoldersYet = "No folders yet. Add one, or drop a folder from Finder here."
+    public static let dropFoldersHint = "Drop folders here"
     public static let showInFinder = "Show in Finder"
     public static let openInBrowser = "Open in browser"
     public static let installed = "Installed"
