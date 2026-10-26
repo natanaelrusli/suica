@@ -84,7 +84,7 @@ The Lessons must reach the agent before it writes the change: a hook on the edit
 ### Asking (any Coding Agent)
 
 - `suica lessons mcp` is a local MCP server over stdio, which Claude Code, Codex and Gemini CLI launch themselves. No network port.
-- Tools: `lessons_for_path` (a file or folder path; the matching Lessons, as the hook gives them), `search_lessons` (words and an optional Topic, within the scope of a given path), `get_lesson` (one Lesson with its occurrences). All are read-only and scoped: a path outside every Lesson Scope gets nothing.
+- Tools: `lessons_for_path` (a file or folder path; the matching Lessons, as the hook gives them), `search_lessons` (words and an optional Topic, within the scope of a given path), `get_lesson` (one Lesson with where it was flagged: repo, MR and link, file and line, severity, outcome; never the finding's text, which anyone with comment access writes). All are read-only and scoped: a path outside every Lesson Scope gets nothing.
 - `suica lessons install` also registers the server for Claude Code (user scope) and, when installed, Codex; the README shows the line for others.
 
 ## The Owner

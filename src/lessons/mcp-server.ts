@@ -29,7 +29,6 @@ const NONE = "No lessons apply here.";
 const FAILED = "Lessons could not be read right now.";
 const SEARCH_LIMIT = 10;
 const OCCURRENCE_LIMIT = 20;
-const OCCURRENCE_TEXT_MAX = 500;
 
 const PATH_PROPERTY = {
   type: "string",
@@ -65,7 +64,8 @@ const TOOLS = [
   },
   {
     name: "get_lesson",
-    description: "One lesson with the review comments behind it, if it is in the scope of `path`.",
+    description:
+      "One lesson with where it was flagged (repo, MR, file and line, severity, outcome), if it is in the scope of `path`.",
     inputSchema: {
       type: "object",
       properties: {
@@ -132,11 +132,15 @@ function withIds(ranked: readonly RankedLesson[]): string {
     .join("\n");
 }
 
+/**
+ * Where and how a Lesson was flagged. Never the finding text: a Finding Thread's text is written
+ * by anyone with comment access, and this goes straight to the Coding Agent.
+ */
 function renderOccurrence(o: OccurrenceRow): string {
   const bang = o.mrKey.lastIndexOf("!");
   const mr = `${projectOfMrKey(o.mrKey)} !${bang < 0 ? "" : o.mrKey.slice(bang + 1)}`;
   const where = o.path === null ? "" : ` ${o.path}${o.line === null ? "" : `:${String(o.line)}`}`;
-  return `- ${flat(mr, 200)} ${flat(o.mrUrl, 300)}${flat(where, 300) === "" ? "" : ` ${flat(where, 300)}`} [${flat(o.severity, 30)}, ${o.outcome}]: ${flat(o.text, OCCURRENCE_TEXT_MAX)}`;
+  return `- ${flat(mr, 200)} ${flat(o.mrUrl, 300)}${flat(where, 300) === "" ? "" : ` ${flat(where, 300)}`} [${flat(o.severity, 30)}, ${o.outcome}]`;
 }
 
 function text(body: string): Record<string, unknown> {
