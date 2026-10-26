@@ -61,9 +61,31 @@ export function rankLessons(
   return out.sort((a, b) => b.weight - a.weight || a.lesson.id - b.lesson.id);
 }
 
+/**
+ * `matchesGlob` never lets `*` or `**` match a segment starting with a dot. Lessons' globs are
+ * about file types and folders, so a `*.yml` glob under `**` should cover `.gitlab-ci.yml` and
+ * `.github/workflows/ci.yml`. The leading dot of every segment, in path and glob alike, becomes
+ * this character, which no wildcard rule singles out; a glob segment naming `.github` still only
+ * matches `.github`. The plain match is tried as well, for globs such as `{.a,.b}`.
+ */
+const DOT = "\u0001";
+
+function undotted(text: string): string {
+  return text
+    .split("/")
+    .map((segment) => (segment.startsWith(".") ? DOT + segment.slice(1) : segment))
+    .join("/");
+}
+
 function globMatches(path: string, glob: string): boolean {
   try {
-    return matchesGlob(path, glob);
+    if (matchesGlob(path, glob) || matchesGlob(undotted(path), undotted(glob))) return true;
+    // A glob without a slash, such as `*.ts` or `Dockerfile`, names a file anywhere in the repo.
+    if (glob.includes("/")) return false;
+    const name = path.slice(path.lastIndexOf("/") + 1);
+    return (
+      name !== path && (matchesGlob(name, glob) || matchesGlob(undotted(name), undotted(glob)))
+    );
   } catch {
     return false;
   }

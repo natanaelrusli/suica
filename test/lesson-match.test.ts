@@ -156,6 +156,33 @@ describe("lessonsForFile", () => {
     expect(lessonsForFile(both, "./cmd/main.go", 5)).toEqual([go]);
     expect(lessonsForFile(both, "/cmd/main.go", 5)).toEqual([go]);
   });
+  it("matches dotfiles and files in dot-folders", () => {
+    const yml = ranked(lesson(5, { globs: ["**/*.yml"] }));
+    expect(lessonsForFile([yml], ".gitlab-ci.yml", 5)).toEqual([yml]);
+    expect(lessonsForFile([yml], ".github/workflows/ci.yml", 5)).toEqual([yml]);
+    expect(lessonsForFile([yml], "deploy/.hidden/x.yml", 5)).toEqual([yml]);
+    const github = ranked(lesson(6, { globs: [".github/**/*.yml"] }));
+    expect(lessonsForFile([github], ".github/workflows/.x/ci.yml", 5)).toEqual([github]);
+    expect(lessonsForFile([github], "github/workflows/ci.yml", 5)).toEqual([]);
+    const env = ranked(lesson(7, { globs: ["*.env", ".env"] }));
+    expect(lessonsForFile([env], "config/.env", 5)).toEqual([env]);
+    expect(lessonsForFile([env], "config/env", 5)).toEqual([]);
+  });
+  it("matches a glob without a slash against the file name anywhere", () => {
+    const ts = ranked(lesson(8, { globs: ["*.ts"] }));
+    expect(lessonsForFile([ts], "src/a.ts", 5)).toEqual([ts]);
+    expect(lessonsForFile([ts], "a.ts", 5)).toEqual([ts]);
+    expect(lessonsForFile([ts], "src/a.tsx", 5)).toEqual([]);
+    const docker = ranked(lesson(9, { globs: ["Dockerfile"] }));
+    expect(lessonsForFile([docker], "build/api/Dockerfile", 5)).toEqual([docker]);
+    const rooted = ranked(lesson(10, { globs: ["src/*.ts"] }));
+    expect(lessonsForFile([rooted], "lib/src/a.ts", 5)).toEqual([]);
+  });
+  it("still does not match a file of another type", () => {
+    expect(lessonsForFile([go], "a.txt", 5)).toEqual([]);
+    expect(lessonsForFile([go], ".a.txt", 5)).toEqual([]);
+    expect(lessonsForFile([go], ".config/a.txt", 5)).toEqual([]);
+  });
   it("treats an invalid glob as no match", () => {
     const bad = ranked(lesson(3, { globs: ["\0bad", "**/*.go"] }));
     expect(() => lessonsForFile([bad], "a.go", 5)).not.toThrow();
