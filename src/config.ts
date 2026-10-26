@@ -152,11 +152,11 @@ export const configSchema = z
       })
       .strict()
       .default({}),
-    // Review lessons: what reviews keep teaching, shown to the Owner as a Lesson Book.
+    // Review lessons: what reviews keep teaching, as Lessons for the Owner and coding agents.
     lessons: z
       .object({
         enabled: z.boolean().default(false),
-        // Folders whose repositories' MRs count for lessons; empty means every repository.
+        // Folders whose repositories' MRs count for lessons; empty means none: nothing is learned or served.
         scopes: z.array(z.string().min(1)).max(LESSON_SCOPES_MAX).default([]),
         // A folder (an Obsidian vault, say) the lessons are also written to as Markdown.
         vaultPath: z.string().min(1).optional(),
