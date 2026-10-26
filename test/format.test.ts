@@ -38,9 +38,16 @@ describe("buildNotifications", () => {
     ];
     expect(buildNotifications(events, 4)).toEqual([
       {
-        title: "Diminta review: Add thing",
-        body: "Alice · g/p",
+        title: "👀 Diminta review: Add thing",
+        body: "Alice · g/p !7",
         url: "https://gitlab.example/g/p/-/merge_requests/7",
+        sound: "Glass",
+        actions: [
+          {
+            title: "Review dengan agen",
+            suica: ["review", "queue", "g/p!7", "--json"],
+          },
+        ],
       },
     ]);
   });
@@ -54,7 +61,7 @@ describe("buildNotifications", () => {
     ];
     expect(buildNotifications(events, 4)).toEqual([
       {
-        title: "!7: Add thing",
+        title: "💬 !7 Add thing",
         body: "Bob menyetujui; 2 komentar baru dari Carol, Dave",
         url: target.url,
       },
@@ -80,8 +87,8 @@ describe("buildNotifications", () => {
     const summary = buildNotifications(requests(5), 4);
     expect(summary).toEqual([
       {
-        title: "5 aktivitas MR baru",
-        body: "Diminta review: MR 1 | Diminta review: MR 2 | Diminta review: MR 3 +2 lainnya",
+        title: "📬 5 aktivitas MR baru",
+        body: "👀 Diminta review: MR 1 | 👀 Diminta review: MR 2 | 👀 Diminta review: MR 3 +2 lainnya",
       },
     ]);
     expect(summary[0]).not.toHaveProperty("url");
@@ -95,8 +102,8 @@ describe("buildNotifications", () => {
       },
     ];
     const [only] = buildNotifications(events, 4);
-    expect(only?.title).toBe("Diminta review: evil second line");
-    expect(only?.body).toBe("n Mallory · g/p");
+    expect(only?.title).toBe("👀 Diminta review: evil second line");
+    expect(only?.body).toBe("n Mallory · g/p !1");
     expect(only?.title).not.toContain("\n");
   });
 });
@@ -105,7 +112,7 @@ describe("baselineNotifications", () => {
   it("is silent when nothing is waiting and summarises otherwise", () => {
     expect(baselineNotifications(0)).toEqual([]);
     expect(baselineNotifications(3)).toEqual([
-      { title: "Suica aktif", body: "3 MR menunggu review-mu" },
+      { title: "🚃 Suica aktif", body: "3 MR menunggu review-mu" },
     ]);
   });
 });
@@ -123,9 +130,10 @@ describe("rereviewNotifications", () => {
   it("asks about one Reviewer and opens that message when clicked", () => {
     expect(rereviewNotifications([held(12, "Bob")])).toEqual([
       {
-        title: "Minta review ulang?",
+        title: "🔁 Minta review ulang?",
         body: "Kamu push ke Add thing setelah Bob review. Kirim pesan Teams?",
         url: "suica://message/12",
+        sound: "Glass",
       },
     ]);
   });
@@ -139,14 +147,16 @@ describe("rereviewNotifications", () => {
     ]);
     expect(notifications).toEqual([
       {
-        title: "Minta review ulang?",
+        title: "🔁 Minta review ulang?",
         body: "Kamu push ke Add thing setelah Bob, Carol dan Dave review. Kirim pesan Teams?",
         url: "suica://messages",
+        sound: "Glass",
       },
       {
-        title: "Minta review ulang?",
+        title: "🔁 Minta review ulang?",
         body: "Kamu push ke Other setelah Erin review. Kirim pesan Teams?",
         url: "suica://message/4",
+        sound: "Glass",
       },
     ]);
   });

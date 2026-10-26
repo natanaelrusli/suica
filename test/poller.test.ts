@@ -83,7 +83,7 @@ describe("pollOnce", () => {
     const h = harness();
     h.setSnapshot(snapshot({ reviewRequested: [waiting(1), waiting(2)] }));
     expect(await h.poll()).toBe("ok");
-    expect(h.sent).toEqual([{ title: "Suica aktif", body: "2 MR menunggu review-mu" }]);
+    expect(h.sent).toEqual([{ title: "🚃 Suica aktif", body: "2 MR menunggu review-mu" }]);
     expect(await h.poll()).toBe("ok");
     expect(h.sent).toHaveLength(1);
   });
@@ -95,9 +95,11 @@ describe("pollOnce", () => {
     await h.poll();
     expect(h.sent).toEqual([
       {
-        title: "Diminta review: MR 3",
-        body: "Author · g/p",
+        title: "👀 Diminta review: MR 3",
+        body: "Author · g/p !3",
         url: "https://gitlab.example/g/p/-/merge_requests/3",
+        sound: "Glass",
+        actions: [{ title: "Review dengan agen", suica: ["review", "queue", "g/p!3", "--json"] }],
       },
     ]);
   });
@@ -129,7 +131,7 @@ describe("pollOnce", () => {
     h.setSnapshot(snapshot({ reviewRequested: [1, 2, 3, 4, 5, 6].map(waiting) }));
     await h.poll();
     expect(h.sent).toHaveLength(1);
-    expect(h.sent[0]?.title).toBe("6 aktivitas MR baru");
+    expect(h.sent[0]?.title).toBe("📬 6 aktivitas MR baru");
   });
 
   it("notifier failure keeps state uncommitted so the events are retried, and never logs the text", async () => {
@@ -169,7 +171,7 @@ describe("pollOnce", () => {
     h.setCommitError(new Error("database is locked"));
     expect(await h.poll()).toBe("failed");
     expect(await h.poll()).toBe("failed");
-    const stateAlerts = h.sent.filter((n) => n.title === "Penyimpanan state bermasalah");
+    const stateAlerts = h.sent.filter((n) => n.title === "⚠️ Penyimpanan state bermasalah");
     expect(stateAlerts).toHaveLength(1);
     expect(h.logs.join("\n")).not.toContain("database is locked");
   });
@@ -180,7 +182,7 @@ describe("pollOnce", () => {
     expect(await h.poll()).toBe("failed");
     expect(await h.poll()).toBe("failed");
     expect(h.sent).toHaveLength(1);
-    expect(h.sent[0]?.title).toBe("Login GitLab gagal");
+    expect(h.sent[0]?.title).toBe("🔑 Login GitLab gagal");
     h.setFetchError(undefined);
     expect(await h.poll()).toBe("ok");
     h.setFetchError(new FetchFailure("gitlab-auth", "no current user"));
@@ -195,7 +197,7 @@ describe("pollOnce", () => {
     expect(h.sent).toHaveLength(0);
     await h.poll();
     expect(h.sent).toHaveLength(1);
-    expect(h.sent[0]?.title).toBe("GitLab tidak terjangkau");
+    expect(h.sent[0]?.title).toBe("🔌 GitLab tidak terjangkau");
     await h.poll();
     expect(h.sent).toHaveLength(1);
   });

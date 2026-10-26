@@ -1,6 +1,7 @@
 import { renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { defaultStatePath, loadConfig } from "./config.ts";
 import type { Config } from "./config.ts";
 import { queueAutomaticFixes } from "./agent-fix.ts";
@@ -100,7 +101,9 @@ export function createRuntime(configPath: string, signal?: AbortSignal): Runtime
 
   // A bad notification template stops startup too, whether Teams is on or not.
   const alerts = loadAlerts(config.teams.templatesPath ?? defaultTemplatesPath());
-  const notifier = createNotifier();
+  const notifier = createNotifier(defaultExec, {
+    cli: [process.execPath, fileURLToPath(new URL("./cli.ts", import.meta.url))],
+  });
   const reviews = createReviewWorker({
     store,
     config,

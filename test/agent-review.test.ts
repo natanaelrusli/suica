@@ -602,7 +602,7 @@ describe("runAgentReview", () => {
         cacheCreationTokens: 1,
       },
     ]);
-    expect(h.notifications.map((n) => n.title)).toEqual(["Review agen siap"]);
+    expect(h.notifications.map((n) => n.title)).toEqual(["🤖 Review agen siap"]);
   });
 
   it("logs the code of a failed notification, never its text", async () => {
@@ -659,7 +659,7 @@ describe("runAgentReview", () => {
     expect(big.db.getAgentReview(b.id)?.detail).toMatch(
       /changes 501 lines, more than review.maxChangedLines \(100\)/,
     );
-    expect(big.notifications.map((n) => n.title)).toEqual(["Review agen dilewati"]);
+    expect(big.notifications.map((n) => n.title)).toEqual(["⏭️ Review agen dilewati"]);
 
     const twice = harness();
     const first = twice.queue();
@@ -694,7 +694,7 @@ describe("runAgentReview", () => {
     });
     const cwd = broken.calls.find((call) => call.file === "/bin/claude")?.options.cwd ?? "";
     expect(existsSync(cwd)).toBe(false);
-    expect(broken.notifications.map((n) => n.title)).toEqual(["Review agen gagal"]);
+    expect(broken.notifications.map((n) => n.title)).toEqual(["❌ Review agen gagal"]);
 
     const errored = harness({
       cliStdout: JSON.stringify({ is_error: true, subtype: "error_max_turns" }),
@@ -738,14 +738,14 @@ describe("runAgentReview", () => {
     await runAgentReview(auto.deps, a);
     expect(auto.db.getAgentReview(a.id)?.status).toBe("posted");
     expect(auto.posts).toEqual(["projects/g%2Fp/merge_requests/7/notes"]);
-    expect(auto.notifications.map((n) => n.title)).toEqual(["Review agen diposting"]);
+    expect(auto.notifications.map((n) => n.title)).toEqual(["✅ Review agen diposting"]);
 
     const approval = harness();
     const b = approval.queue();
     await runAgentReview(approval.deps, b);
     expect(approval.db.getAgentReview(b.id)?.status).toBe("ready");
     expect(approval.posts).toEqual([]);
-    expect(approval.notifications.map((n) => n.title)).toEqual(["Review agen siap"]);
+    expect(approval.notifications.map((n) => n.title)).toEqual(["🤖 Review agen siap"]);
   });
 
   it("approves after an automatic post of a clean re-review with review.approve, and says so", async () => {
@@ -777,7 +777,7 @@ describe("runAgentReview", () => {
       "projects/g%2Fp/merge_requests/7/approve",
     ]);
     expect(h.db.getAgentReview(queued.id)).toMatchObject({ status: "posted", approved: true });
-    expect(h.notifications.map((n) => n.title)).toEqual(["Review agen diposting"]);
+    expect(h.notifications.map((n) => n.title)).toEqual(["✅ Review diposting, MR di-approve"]);
 
     const major = harness({
       approve: true,
@@ -896,7 +896,7 @@ describe("runAgentReview", () => {
     await runAgentReview(h.deps, queued);
     expect(h.db.getAgentReview(queued.id)).toMatchObject({ status: "ready" });
     expect(h.db.getAgentReview(queued.id)?.detail).toMatch(/Check the MR in GitLab/);
-    expect(h.notifications.map((n) => n.title)).toEqual(["Review agen gagal diposting"]);
+    expect(h.notifications.map((n) => n.title)).toEqual(["⚠️ Review agen gagal diposting"]);
   });
 
   it("re-reviews against the previous posted review: writes previous-review.md and since-last-review.diff, tells the model, and stores previousSha", async () => {
