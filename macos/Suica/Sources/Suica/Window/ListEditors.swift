@@ -190,7 +190,7 @@ struct FolderListEditor: View {
                 if isTargeted { Text(Copy.dropFoldersHint).font(.caption).foregroundStyle(.secondary) }
             }
         }
-        .frame(maxWidth: 460, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(isTargeted ? 4 : 0)
         .overlay {
             if isTargeted { RoundedRectangle(cornerRadius: 10).stroke(Color.accentColor, lineWidth: 2) }
@@ -247,11 +247,11 @@ private struct FolderRow: View {
                 .foregroundStyle(exists ? Color.accentColor : Color.orange)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 1) {
-                Text(folder).font(.body.monospaced()).lineLimit(1).truncationMode(.head)
+                Text(folder).font(.body.monospaced()).lineLimit(1).truncationMode(.middle)
                 if !exists { Text(Copy.folderNotFound).font(.caption).foregroundStyle(.orange) }
             }
             Spacer(minLength: 4)
-            Button(Copy.chooseFile, action: change).buttonStyle(.borderless)
+            Button(Copy.chooseFile, action: change).buttonStyle(.bordered).controlSize(.small)
                 .accessibilityLabel("\(Copy.chooseFile): \(folder)")
             Button {
                 NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: Folders.expand(folder))])

@@ -385,7 +385,7 @@ export const CONFIG_FIELDS: readonly ConfigField[] = [
     path: ["lessons", "scopes"],
     type: "stringList",
     label: "Lesson folders",
-    help: "One folder per line, for example ~/work: only repositories under these folders feed and use lessons; empty means none, so nothing is learned or served",
+    help: "Folders whose git repositories feed and use lessons, for example ~/work; empty means none, so nothing is learned or served",
     format: "path",
   },
   {
