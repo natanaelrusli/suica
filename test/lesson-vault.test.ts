@@ -382,6 +382,30 @@ describe("exportVault", () => {
     );
   });
 
+  it("a failure midway keeps the files written so far, and the earlier ones, in the manifest", () => {
+    exportVault(data(), [SCOPE], dir, NOW);
+    // A directory where index.md was: writing it fails after the Lessons notes are written.
+    rmSync(join(dir, "index.md"));
+    mkdirSync(join(dir, "index.md"));
+    const renamed = reader(
+      [lesson(1, { title: "Uno" }), lesson(2, { title: "Two" })],
+      [occ(1, 1), occ(2, 2)],
+    );
+    expect(() => exportVault(renamed, [SCOPE], dir, NOW)).toThrow();
+    const manifest = JSON.parse(readFileSync(join(dir, ".suica-vault.json"), "utf8")) as {
+      files: string[];
+    };
+    expect(existsSync(join(dir, "Lessons/uno-1.md"))).toBe(true);
+    expect(manifest.files).toContain("Lessons/uno-1.md");
+    expect(manifest.files).toContain("Lessons/one-1.md");
+    expect(manifest.files).toContain("index.md");
+    // Once the obstacle is gone, the next export removes the stale note as its own.
+    rmSync(join(dir, "index.md"), { recursive: true });
+    const after = exportVault(renamed, [SCOPE], dir, NOW);
+    expect(after.conflicts).toBe(0);
+    expect(existsSync(join(dir, "Lessons/one-1.md"))).toBe(false);
+  });
+
   it("creates the vault dir when missing", () => {
     const target = join(dir, "new", "vault");
     exportVault(data(), [SCOPE], target, NOW);

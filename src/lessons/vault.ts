@@ -348,36 +348,44 @@ export function exportVault(
   const owned: string[] = [];
   let written = 0;
   let conflicts = 0;
-  for (const [relative, target] of targets) {
-    const content = files.get(relative) ?? "";
-    if (sameContent(target, content)) {
-      owned.push(relative);
-      continue;
-    }
-    // A file Suica did not write and the user may have: left alone, never adopted.
-    if (!ours.has(relative) && lstatSync(target, { throwIfNoEntry: false }) !== undefined) {
-      conflicts += 1;
-      continue;
-    }
-    writeAtomic(target, content);
-    owned.push(relative);
-    written += 1;
-  }
   let removed = 0;
-  for (const relative of previous) {
-    if (files.has(relative)) continue;
-    try {
-      const target = join(root, ...relative.split("/"));
-      if (lstatSync(target, { throwIfNoEntry: false }) === undefined) continue;
-      if (!insideVault(root, realpathSync(dirname(target)))) continue;
-      rmSync(target, { force: true });
-      removed += 1;
-    } catch {
-      // Already gone or unreadable: nothing of ours to remove.
+  let complete = false;
+  try {
+    for (const [relative, target] of targets) {
+      const content = files.get(relative) ?? "";
+      if (sameContent(target, content)) {
+        owned.push(relative);
+        continue;
+      }
+      // A file Suica did not write and the user may have: left alone, never adopted.
+      if (!ours.has(relative) && lstatSync(target, { throwIfNoEntry: false }) !== undefined) {
+        conflicts += 1;
+        continue;
+      }
+      writeAtomic(target, content);
+      owned.push(relative);
+      written += 1;
     }
+    for (const relative of previous) {
+      if (files.has(relative)) continue;
+      try {
+        const target = join(root, ...relative.split("/"));
+        if (lstatSync(target, { throwIfNoEntry: false }) === undefined) continue;
+        if (!insideVault(root, realpathSync(dirname(target)))) continue;
+        rmSync(target, { force: true });
+        removed += 1;
+      } catch {
+        // Already gone or unreadable: nothing of ours to remove.
+      }
+    }
+    complete = true;
+  } finally {
+    // A run cut off midway still owns what it wrote and what earlier runs wrote, so no note it
+    // wrote ever looks like the user's and goes stale for good.
+    const listed = complete ? owned : [...new Set([...previous, ...owned])];
+    const manifest = `${JSON.stringify({ version: 1, files: listed.filter((f) => OWNED.test(f)).sort() }, null, 2)}\n`;
+    const manifestPath = join(root, MANIFEST);
+    if (!sameContent(manifestPath, manifest)) writeAtomic(manifestPath, manifest);
   }
-  const manifest = `${JSON.stringify({ version: 1, files: owned.sort() }, null, 2)}\n`;
-  const manifestPath = join(root, MANIFEST);
-  if (!sameContent(manifestPath, manifest)) writeAtomic(manifestPath, manifest);
   return { written, removed, conflicts };
 }
