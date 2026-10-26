@@ -587,11 +587,25 @@ public protocol LessonsClient: Sendable {
 
 // MARK: - Model
 
-/// Where Install… is: asking the agent for its plan, waiting for you to confirm it, or installing.
+/// Where Install… is: asking the agent for its plan, showing it, waiting for your answer after the
+/// dialog closed, or installing.
 public enum LessonsInstallStep: Equatable, Sendable {
     case idle, planning
+    /// The plan is on screen.
     case confirming(LessonsInstallPlan)
+    /// The dialog closed and its button has not answered yet. SwiftUI closes a dialog (writes
+    /// false to its binding) and runs the pressed button in either order, so closing alone never
+    /// cancels: Install or Cancel decides.
+    case dismissed(LessonsInstallPlan)
     case installing
+
+    /// The plan waiting for Install or Cancel.
+    public var plan: LessonsInstallPlan? {
+        switch self {
+        case .confirming(let plan), .dismissed(let plan): plan
+        default: nil
+        }
+    }
 }
 
 /// The Lessons page and the Lessons configuration's hook row. Nothing polls: the page reads the
@@ -614,6 +628,10 @@ public final class LessonsModel {
     /// The hook and MCP servers; nil until read.
     public private(set) var setup: LessonsSetupStatus?
     public private(set) var install: LessonsInstallStep = .idle
+    /// The status is being read.
+    public private(set) var setupLoading = false
+    /// Why the last status read failed; nil once one succeeds.
+    public private(set) var setupError: String?
     /// An uninstall or export is in flight.
     public private(set) var setupBusy = false
     /// The outcome of the last install, uninstall or export.
@@ -684,7 +702,7 @@ public final class LessonsModel {
                 detailError = Copy.lessonGone
             }
         } catch {
-            guard mine == latestDetail else { return }
+            guard mine == latestDetail, selectedId == id else { return }
             detailError = MenuModel.message(for: error)
         }
     }
@@ -727,11 +745,20 @@ public final class LessonsModel {
     // MARK: Hook and MCP server
 
     public func refreshSetup() async {
-        if let fresh = try? await client.lessonsStatus() { setup = fresh }
+        guard !setupLoading else { return }
+        setupLoading = true
+        do {
+            setup = try await client.lessonsStatus()
+            setupError = nil
+        } catch {
+            setupError = Copy.lessonsStatusFailed(MenuModel.message(for: error))
+        }
+        setupLoading = false
     }
 
     /// Asks the agent what installing would change; nothing changes until `confirmInstall`.
     public func beginInstall() async {
+        if case .dismissed = install { install = .idle }
         guard install == .idle else { return }
         install = .planning
         do {
@@ -747,14 +774,26 @@ public final class LessonsModel {
         install = .idle
     }
 
-    public func cancelInstall() {
-        if case .confirming = install { install = .idle }
+    /// The dialog's binding was set to false: keeps the plan for the button that closed it.
+    public func installDialogClosed() {
+        if case .confirming(let plan) = install { install = .dismissed(plan) }
     }
 
-    /// Installs as the plan on screen said, then reads the status again.
-    public func confirmInstall() async {
-        guard case .confirming = install else { return }
+    /// Cancel: nothing is installed.
+    public func cancelInstall() {
+        if install.plan != nil { install = .idle }
+    }
+
+    /// Install: moves to `.installing` at once, before anything can cancel, then installs as the
+    /// plan said and reads the status again. Nil when no plan waits.
+    @discardableResult
+    public func confirmInstall() -> Task<Void, Never>? {
+        guard install.plan != nil else { return nil }
         install = .installing
+        return Task { await self.runInstall() }
+    }
+
+    private func runInstall() async {
         do {
             setupNotice = Copy.lessonsInstallOutcome(try await client.installLessons(confirm: true))
         } catch {
@@ -765,6 +804,7 @@ public final class LessonsModel {
     }
 
     public func uninstall() async {
+        if case .dismissed = install { install = .idle }
         guard !setupBusy, install == .idle else { return }
         setupBusy = true
         do {

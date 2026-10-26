@@ -353,7 +353,7 @@ private func reply(_ json: String) throws -> LessonsInstallReply {
         return
     }
     #expect(plan.mcp == ["claude"])
-    await model.confirmInstall()
+    await model.confirmInstall()?.value
     #expect(model.install == .idle)
     #expect(model.setupNotice == Copy.lessonsInstalled(registered: ["claude"]))
     #expect(model.setup == LessonsSetupStatus(hook: true, claude: true, codex: false))
@@ -365,9 +365,10 @@ private func reply(_ json: String) throws -> LessonsInstallReply {
     await client.setInstalls([try reply(planJSON)])
     let model = LessonsModel(client: client)
     await model.beginInstall()
+    model.installDialogClosed()
     model.cancelInstall()
     #expect(model.install == .idle)
-    await model.confirmInstall()
+    #expect(model.confirmInstall() == nil)
     #expect(await client.calls == ["install"])
 }
 
@@ -385,10 +386,10 @@ private func reply(_ json: String) throws -> LessonsInstallReply {
     ])
     let model = LessonsModel(client: client)
     await model.beginInstall()
-    await model.confirmInstall()
+    await model.confirmInstall()?.value
     #expect(model.setupNotice == Copy.lessonsInstallPartial(failed: ["claude", "codex"]))
     await model.beginInstall()
-    await model.confirmInstall()
+    await model.confirmInstall()?.value
     #expect(model.setupNotice == Copy.lessonsSettingsUnusable("invalid-settings", path: "/h/.claude/settings.json"))
     #expect(Copy.lessonsSettingsUnusable("invalid-settings", path: "/p").contains("not valid JSON"))
 }
@@ -449,4 +450,91 @@ private func reply(_ json: String) throws -> LessonsInstallReply {
     #expect(model.setupNotice == Copy.lessonsExported(written: 3, removed: 0, conflicts: 1))
     await model.uninstall()
     #expect(model.setupNotice == Copy.lessonsUninstalled)
+}
+
+private let installedJSON =
+    #"{"version":1,"status":"installed","settingsPath":"/s","changed":true,"registered":["claude"],"skipped":[],"failed":[]}"#
+
+/// SwiftUI may write false to the dialog's binding before or after it runs the Install button.
+@MainActor @Test(arguments: [true, false])
+func installRunsOnceWhicheverWayTheDialogCloses(bindingFirst: Bool) async throws {
+    let client = FakeLessonsClient(list: listDocument([acme]))
+    await client.setInstalls([try reply(planJSON), try reply(installedJSON)])
+    let model = LessonsModel(client: client)
+    await model.beginInstall()
+    if bindingFirst { model.installDialogClosed() }
+    let task = model.confirmInstall()
+    #expect(model.install == .installing)
+    if !bindingFirst { model.installDialogClosed() }
+    #expect(model.confirmInstall() == nil)
+    await task?.value
+    #expect(model.install == .idle)
+    #expect(model.setupNotice == Copy.lessonsInstalled(registered: ["claude"]))
+    #expect(await client.calls.filter { $0 == "install --yes" }.count == 1)
+}
+
+@MainActor @Test func cancelAfterTheDialogClosedInstallsNothing() async throws {
+    let client = FakeLessonsClient(list: listDocument([acme]))
+    await client.setInstalls([try reply(planJSON), try reply(planJSON)])
+    let model = LessonsModel(client: client)
+    await model.beginInstall()
+    model.installDialogClosed()
+    #expect(model.install.plan != nil)
+    model.cancelInstall()
+    #expect(model.install == .idle)
+    // A dialog closed without either button does not block the next Install….
+    await model.beginInstall()
+    model.installDialogClosed()
+    await model.beginInstall()
+    #expect(await client.calls == ["install", "install", "install"])
+}
+
+actor FailingStatusClient: LessonsClient {
+    var fail = true
+    let detailGate = Gate()
+    private(set) var detailCalls = 0
+    func setFail(_ next: Bool) { fail = next }
+    func lessons() async throws(AgentError) -> LessonListDocument { throw AgentError.launchFailed }
+    func lesson(id: Int) async throws(AgentError) -> LessonDetailDocument? {
+        detailCalls += 1
+        await detailGate.wait()
+        throw AgentError.launchFailed
+    }
+    func archiveLesson(id: Int) async throws(AgentError) -> LessonChangeOutcome { throw AgentError.launchFailed }
+    func mergeLessons(keep: Int, gone: Int) async throws(AgentError) -> LessonChangeOutcome { throw AgentError.launchFailed }
+    func lessonsStatus() async throws(AgentError) -> LessonsSetupStatus {
+        if fail { throw AgentError.timedOut }
+        return LessonsSetupStatus(hook: true, claude: false, codex: false)
+    }
+    func installLessons(confirm: Bool) async throws(AgentError) -> LessonsInstallReply { throw AgentError.launchFailed }
+    func uninstallLessons() async throws(AgentError) -> LessonsUninstallReply { throw AgentError.launchFailed }
+    func exportLessons() async throws(AgentError) -> LessonsExportReply { throw AgentError.launchFailed }
+}
+
+@MainActor @Test func aFailedStatusReadSaysSoAndARetryClearsIt() async {
+    let client = FailingStatusClient()
+    let model = LessonsModel(client: client)
+    await model.refreshSetup()
+    #expect(model.setup == nil && !model.setupLoading)
+    #expect(model.setupError == Copy.lessonsStatusFailed(Copy.agentTimedOut))
+    await client.setFail(false)
+    await model.refreshSetup()
+    #expect(model.setupError == nil)
+    #expect(model.setup == LessonsSetupStatus(hook: true, claude: false, codex: false))
+}
+
+@MainActor @Test func aDetailErrorForAnotherSelectionIsDropped() async throws {
+    let client = FailingStatusClient()
+    let model = LessonsModel(client: client)
+    let first = Task { await model.select(1) }
+    while await client.detailCalls == 0 { await Task.yield() }
+    await model.select(nil)
+    await client.detailGate.open()
+    await first.value
+    #expect(model.detailError == nil)
+}
+
+@Test func theCountBadgeHasASpokenLabel() {
+    #expect(Copy.lessonFlaggedCount(1) == "flagged once")
+    #expect(Copy.lessonFlaggedCount(3) == "flagged 3 times")
 }

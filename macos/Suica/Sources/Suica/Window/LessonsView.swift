@@ -248,6 +248,7 @@ private struct LessonRow: View {
                 .lineLimit(2)
             HStack(spacing: 4) {
                 Badge(text: "\(lesson.count)×", tint: .brown)
+                    .accessibilityLabel(Copy.lessonFlaggedCount(lesson.count))
                 Text(lesson.repos.map(DisplayText.shortKey).joined(separator: ", "))
                     .lineLimit(1)
                     .truncationMode(.tail)
@@ -309,7 +310,7 @@ private struct LessonDetailView: View {
             isPresented: Binding(get: { mergeTarget != nil }, set: { if !$0 { mergeTarget = nil } }),
             presenting: mergeTarget
         ) { target in
-            Button(Copy.mergeLessonAction) { Task { await model.merge(lesson.id, into: target.id) } }
+            Button(Copy.mergeLessonAction, role: .destructive) { Task { await model.merge(lesson.id, into: target.id) } }
             Button(Copy.cancel, role: .cancel) {}
         } message: { _ in
             Text(Copy.mergeLessonMessage)
@@ -511,13 +512,25 @@ struct LessonsAgentSetupSection: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+            if let error = model.setupError {
+                HStack(spacing: 8) {
+                    Label(error, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer()
+                    Button(Copy.lessonsStatusRetry) { Task { await model.refreshSetup() } }
+                        .disabled(model.setupLoading)
+                }
+            }
             statusRow(Copy.lessonsHook, model.setup?.hook)
             statusRow(Copy.lessonsClaudeMCP, model.setup?.claude)
             statusRow(Copy.lessonsCodexMCP, model.setup?.codex)
             HStack(spacing: 8) {
-                if model.install != .idle || model.setupBusy { ProgressView().controlSize(.small) }
+                if model.install != .idle || model.setupBusy {
+                    ProgressView().controlSize(.small).accessibilityLabel(Copy.lessonsWorking)
+                }
                 Spacer()
-                Button(Copy.lessonsRemove, role: .destructive) { Task { await model.uninstall() } }
+                Button(Copy.lessonsRemove, role: .destructive) { confirmingRemove = true }
                     .disabled(!installedAny || model.install != .idle || model.setupBusy)
                 Button(Copy.lessonsInstall) { Task { await model.beginInstall() } }
                     .disabled(model.install != .idle || model.setupBusy)
@@ -537,20 +550,31 @@ struct LessonsAgentSetupSection: View {
         }
         .motion(value: model.setupNotice)
         .task { await model.refreshSetup() }
+        // Install moves the model to installing before its task starts, and closing the dialog
+        // only parks the plan: SwiftUI may close it before or after running the button.
         .confirmationDialog(Copy.lessonsInstallTitle, isPresented: confirming, presenting: plan) { _ in
-            Button(Copy.lessonsInstallAction) { Task { await model.confirmInstall() } }
+            Button(Copy.lessonsInstallAction) { model.confirmInstall() }
             Button(Copy.cancel, role: .cancel) { model.cancelInstall() }
         } message: { plan in
             Text(Copy.lessonsInstallPlan(plan))
         }
+        .confirmationDialog(Copy.lessonsRemoveTitle, isPresented: $confirmingRemove) {
+            Button(Copy.lessonsRemoveAction, role: .destructive) { Task { await model.uninstall() } }
+            Button(Copy.cancel, role: .cancel) {}
+        } message: {
+            Text(Copy.lessonsRemoveMessage)
+        }
     }
 
+    @State private var confirmingRemove = false
+
+    /// The plan while the dialog shows it.
     private var plan: LessonsInstallPlan? {
         if case .confirming(let plan) = model.install { plan } else { nil }
     }
 
     private var confirming: Binding<Bool> {
-        Binding(get: { plan != nil }, set: { if !$0 { model.cancelInstall() } })
+        Binding(get: { plan != nil }, set: { if !$0 { model.installDialogClosed() } })
     }
 
     private var installedAny: Bool {
@@ -566,8 +590,10 @@ struct LessonsAgentSetupSection: View {
                     systemImage: installed ? "checkmark.circle.fill" : "circle.dashed"
                 )
                 .foregroundStyle(installed ? AnyShapeStyle(.green) : AnyShapeStyle(.secondary))
+            } else if model.setupLoading {
+                ProgressView().controlSize(.small).accessibilityLabel(Copy.loading)
             } else {
-                ProgressView().controlSize(.small)
+                Text(Copy.lessonsStatusUnknown).foregroundStyle(.secondary)
             }
         }
     }

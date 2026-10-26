@@ -1644,6 +1644,15 @@ extension Copy {
         return lines.joined(separator: "\n")
     }
     public static let lessonsInstallAction = "Install"
+    public static func lessonsStatusFailed(_ message: String) -> String { "Could not read the status: \(message)" }
+    public static let lessonsStatusRetry = "Retry"
+    public static let lessonsStatusUnknown = "Unknown"
+    public static let lessonsWorking = "Working on the hook and MCP server"
+    public static let lessonsRemoveTitle = "Remove the lessons hook and MCP server?"
+    public static let lessonsRemoveMessage =
+        "Removes Suica's hook entries from ~/.claude/settings.json and unregisters the lessons MCP server from Claude Code and Codex. settings.json is rewritten as formatted JSON: its other keys and hooks are kept, but comments and unusual spacing are not."
+    public static let lessonsRemoveAction = "Remove"
+    public static func lessonFlaggedCount(_ count: Int) -> String { count == 1 ? "flagged once" : "flagged \(count) times" }
     public static func lessonsInstalled(registered: [String]) -> String {
         registered.isEmpty
             ? "The hook is installed. No MCP server was registered."
