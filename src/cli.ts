@@ -813,10 +813,11 @@ function exportLessonsCommand(json: boolean): number {
   const reader = openLessonsReadOnly(config.statePath ?? defaultStatePath());
   if (reader === undefined) return say({ status: "no-lessons" }, "no lessons stored yet", 1);
   try {
-    const { written, removed } = exportVault(reader, scopes, vaultPath, Date.now());
+    const { written, removed, conflicts } = exportVault(reader, scopes, vaultPath, Date.now());
     return say(
-      { status: "exported", written, removed, path: vaultPath },
-      `exported to ${vaultPath}: ${String(written)} written, ${String(removed)} removed`,
+      { status: "exported", written, removed, conflicts, path: vaultPath },
+      `exported to ${vaultPath}: ${String(written)} written, ${String(removed)} removed` +
+        (conflicts > 0 ? `, ${String(conflicts)} left alone (not written by Suica)` : ""),
       0,
     );
   } catch (error) {

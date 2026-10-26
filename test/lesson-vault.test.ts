@@ -14,6 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { LessonRow, OccurrenceRow } from "../src/lesson-store.ts";
+import { createHash } from "node:crypto";
 import { exportVault, renderVault, slug } from "../src/lessons/vault.ts";
 import { openStore } from "../src/store.ts";
 
@@ -120,7 +121,7 @@ describe("renderVault", () => {
     );
     const note = noteOf(files, 1);
     expect(note).toMatch(
-      /^---\nid: 1\nscope: "\/work\/acme"\ntopics: \["errors", "go-style"\]\nweight: \d+\.\d{2}\n/,
+      /^---\nid: 1\nscope: "acme"\ntopics: \["errors", "go-style"\]\nweight: \d+\.\d{2}\n/,
     );
     expect(note).toContain("first_seen: 2026-10-25\nlast_seen: 2026-10-25\n---");
     expect(note).toContain("# Wrap errors\n\nWrap with %w.");
@@ -186,7 +187,7 @@ describe("renderVault", () => {
     );
     const note = noteOf(files, 1);
     const front = note.split("\n---\n")[0] ?? "";
-    expect(front).toContain('scope: "/work/my projects"');
+    expect(front).toContain('scope: "my projects"');
     expect(front.split("\n").length).toBe(7);
     const heading = note.split("\n").find((l) => l.startsWith("# "));
     expect(heading).toBeDefined();
@@ -269,6 +270,90 @@ describe("renderVault", () => {
   });
 });
 
+describe("renderVault labels, repos and untrusted text", () => {
+  it("labels a scope under the home folder with ~ and others by basename", () => {
+    const home = "/Users/me";
+    const lessons = [
+      lesson(1, { scope: "/Users/me/repo.madhani.one" }),
+      lesson(2, { scope: "/elsewhere/other" }),
+    ];
+    const files = renderVault(
+      reader(lessons, [occ(1, 1), occ(2, 2)]),
+      ["/Users/me/repo.madhani.one", "/elsewhere/other"],
+      NOW,
+      home,
+    );
+    expect(noteOf(files, 1)).toContain('scope: "~/repo.madhani.one"');
+    expect(noteOf(files, 2)).toContain('scope: "other"');
+    for (const content of files.values()) expect(content).not.toContain("/Users/me");
+  });
+
+  it("renders an absolute occurrence path as its basename", () => {
+    const files = render([lesson(1)], [occ(1, 1, { path: "/Users/me/secret/dir/a.go", line: 3 })]);
+    const note = noteOf(files, 1);
+    expect(note).toContain("`a.go:3`");
+    expect(note).not.toContain("/Users/me");
+  });
+
+  it("neutralises images and html in untrusted text", () => {
+    const files = render(
+      [lesson(1, { title: "T <b>x</b>", rule: "![r](https://evil/r.png) <script>" })],
+      [occ(1, 1, { text: "![x](https://evil/x.png) <img src=x onerror=1>" })],
+    );
+    for (const content of files.values()) {
+      expect(content).not.toContain("<img");
+      expect(content).not.toContain("<script");
+      expect(content).not.toContain("<b>");
+      expect(content).not.toMatch(/(^|[^\\])!\[/m);
+    }
+    expect(noteOf(files, 1)).toContain("&lt;img");
+    expect(noteOf(files, 1)).toContain("\\![x]");
+  });
+
+  const sha6 = (project: string) => createHash("sha1").update(project).digest("hex").slice(0, 6);
+  const repoFiles = (files: Map<string, string>) =>
+    [...files.keys()].filter((k) => k.startsWith("Repos/")).sort();
+
+  it("keeps the plain name for a plain project", () => {
+    const files = render([lesson(1)], [occ(1, 1, { mrKey: "group/project!1" })]);
+    expect(repoFiles(files)).toEqual(["Repos/group-project.md"]);
+  });
+
+  it("disambiguates names that collide after the / mapping", () => {
+    const files = render(
+      [lesson(1), lesson(2)],
+      [occ(1, 1, { mrKey: "a/b-c!1" }), occ(2, 2, { mrKey: "a-b/c!1" })],
+    );
+    expect(repoFiles(files)).toEqual(
+      [`Repos/a-b-c-${sha6("a/b-c")}.md`, `Repos/a-b-c-${sha6("a-b/c")}.md`].sort(),
+    );
+    expect(noteOf(files, 1)).toContain(`[[Repos/a-b-c-${sha6("a/b-c")}]]`);
+  });
+
+  it("disambiguates names that collide ignoring case", () => {
+    const files = render(
+      [lesson(1), lesson(2)],
+      [occ(1, 1, { mrKey: "Foo/Bar!1" }), occ(2, 2, { mrKey: "foo/bar!1" })],
+    );
+    expect(repoFiles(files)).toEqual(
+      [`Repos/Foo-Bar-${sha6("Foo/Bar")}.md`, `Repos/foo-bar-${sha6("foo/bar")}.md`].sort(),
+    );
+  });
+
+  it("adds the hash when sanitising changed more than the slash", () => {
+    const files = render([lesson(1)], [occ(1, 1, { mrKey: "g/p q!1" })]);
+    expect(repoFiles(files)).toEqual([`Repos/g-p_q-${sha6("g/p q")}.md`]);
+  });
+
+  it("floors now to the UTC day so weights do not churn within a day", () => {
+    const data = [lesson(1)];
+    const os = [occ(1, 1)];
+    const morning = renderVault(reader(data, os), [SCOPE], Date.UTC(2026, 9, 26, 1));
+    const evening = renderVault(reader(data, os), [SCOPE], Date.UTC(2026, 9, 26, 23));
+    expect([...evening]).toEqual([...morning]);
+  });
+});
+
 describe("exportVault", () => {
   const data = () =>
     reader([lesson(1, { title: "One" }), lesson(2, { title: "Two" })], [occ(1, 1), occ(2, 2)]);
@@ -298,7 +383,7 @@ describe("exportVault", () => {
     const text = readFileSync(file, "utf8");
     const again = exportVault(data(), [SCOPE], dir, NOW);
     const after = lstatSync(file);
-    expect(again).toEqual({ written: 0, removed: 0 });
+    expect(again).toEqual({ written: 0, removed: 0, conflicts: 0 });
     expect(after.ino).toBe(before.ino);
     expect(after.mtimeMs).toBe(before.mtimeMs);
     expect(readFileSync(file, "utf8")).toBe(text);
@@ -346,6 +431,80 @@ describe("exportVault", () => {
     } finally {
       rmSync(outside, { recursive: true, force: true });
     }
+  });
+
+  it("keeps a user's own files it did not write and counts them as conflicts", () => {
+    mkdirSync(join(dir, "Topics"));
+    writeFileSync(join(dir, "index.md"), "my index\n");
+    writeFileSync(join(dir, "Topics", "errors.md"), "my topic\n");
+    const first = exportVault(data(), [SCOPE], dir, NOW);
+    expect(first.conflicts).toBe(2);
+    expect(readFileSync(join(dir, "index.md"), "utf8")).toBe("my index\n");
+    expect(readFileSync(join(dir, "Topics", "errors.md"), "utf8")).toBe("my topic\n");
+    const manifest = JSON.parse(readFileSync(join(dir, ".suica-vault.json"), "utf8")) as {
+      files: string[];
+    };
+    expect(manifest.files).not.toContain("index.md");
+    expect(manifest.files).not.toContain("Topics/errors.md");
+    // Later, with no lessons at all, nothing of the user's is deleted.
+    const later = exportVault(reader([], []), [SCOPE], dir, NOW);
+    expect(later.conflicts).toBe(1);
+    expect(readFileSync(join(dir, "index.md"), "utf8")).toBe("my index\n");
+    expect(readFileSync(join(dir, "Topics", "errors.md"), "utf8")).toBe("my topic\n");
+  });
+
+  it("adopts an identical file at a path outside the manifest", () => {
+    exportVault(data(), [SCOPE], dir, NOW);
+    rmSync(join(dir, ".suica-vault.json"));
+    const again = exportVault(data(), [SCOPE], dir, NOW);
+    expect(again.conflicts).toBe(0);
+    expect(again.written).toBe(0);
+    const manifest = JSON.parse(readFileSync(join(dir, ".suica-vault.json"), "utf8")) as {
+      files: string[];
+    };
+    expect(manifest.files).toContain("index.md");
+  });
+
+  it("overwrites a manifest-listed file the user edited", () => {
+    exportVault(data(), [SCOPE], dir, NOW);
+    writeFileSync(join(dir, "index.md"), "edited");
+    const again = exportVault(data(), [SCOPE], dir, NOW);
+    expect(again.conflicts).toBe(0);
+    expect(readFileSync(join(dir, "index.md"), "utf8")).toContain("# Lessons");
+  });
+
+  it("removes only files of the owned layout listed in the manifest", () => {
+    mkdirSync(join(dir, "notes"));
+    mkdirSync(join(dir, "Lessons", "deep"), { recursive: true });
+    writeFileSync(join(dir, "notes", "private.md"), "private");
+    writeFileSync(join(dir, "Lessons", "deep", "x.md"), "deep");
+    writeFileSync(join(dir, "Lessons", "x.txt"), "txt");
+    writeFileSync(
+      join(dir, ".suica-vault.json"),
+      JSON.stringify({
+        version: 1,
+        files: ["notes/private.md", "Lessons/deep/x.md", "Lessons/x.txt", "Lessons/gone-9.md"],
+      }),
+    );
+    writeFileSync(join(dir, "Lessons", "gone-9.md"), "ours");
+    const result = exportVault(data(), [SCOPE], dir, NOW);
+    expect(result.removed).toBe(1);
+    expect(existsSync(join(dir, "Lessons", "gone-9.md"))).toBe(false);
+    expect(readFileSync(join(dir, "notes", "private.md"), "utf8")).toBe("private");
+    expect(readFileSync(join(dir, "Lessons", "deep", "x.md"), "utf8")).toBe("deep");
+    expect(readFileSync(join(dir, "Lessons", "x.txt"), "utf8")).toBe("txt");
+  });
+
+  it("writes nothing the second time within a UTC day", () => {
+    exportVault(data(), [SCOPE], dir, Date.UTC(2026, 9, 26, 1));
+    const again = exportVault(data(), [SCOPE], dir, Date.UTC(2026, 9, 26, 4));
+    expect(again).toEqual({ written: 0, removed: 0, conflicts: 0 });
+  });
+
+  it("leaves no temp file behind", () => {
+    exportVault(data(), [SCOPE], dir, NOW);
+    expect(readdirSync(dir).filter((f) => f.includes("tmp"))).toEqual([]);
+    expect(readdirSync(join(dir, "Lessons")).filter((f) => f.includes("tmp"))).toEqual([]);
   });
 
   it("refuses an empty, relative or root directory", () => {
