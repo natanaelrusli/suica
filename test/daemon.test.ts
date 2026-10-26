@@ -84,4 +84,29 @@ describe("runDaemon", () => {
     });
     expect(order).toEqual(["poll", "after", "poll", "after"]);
   });
+
+  it("keeps polling when the work after a poll throws", async () => {
+    const controller = new AbortController();
+    const logs: string[] = [];
+    let polls = 0;
+    await runDaemon({
+      poll: () => {
+        polls += 1;
+        return Promise.resolve("ok");
+      },
+      afterPoll: () => {
+        throw new Error("learner");
+      },
+      readIdleSeconds: () => Promise.resolve(0),
+      polling,
+      sleep: () => {
+        if (polls >= 2) controller.abort();
+        return Promise.resolve();
+      },
+      log: createLogger({ write: (line) => logs.push(line), minLevel: "info" }),
+      signal: controller.signal,
+    });
+    expect(polls).toBe(2);
+    expect(logs.some((line) => line.includes("after-poll work crashed"))).toBe(true);
+  });
 });

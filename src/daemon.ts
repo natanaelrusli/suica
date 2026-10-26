@@ -69,7 +69,13 @@ export async function runDaemon(deps: DaemonDeps): Promise<void> {
   let paused = false;
   while (!deps.signal.aborted) {
     const status = await pollSafely(deps);
-    deps.afterPoll?.();
+    try {
+      deps.afterPoll?.();
+    } catch (error) {
+      deps.log.error("after-poll work crashed", {
+        reason: error instanceof Error ? error.name : "unknown",
+      });
+    }
     // Pausing is the Owner's action in another process; the loop sees it on its next poll.
     if ((status === "paused") !== paused) {
       paused = status === "paused";

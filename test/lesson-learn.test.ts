@@ -199,6 +199,13 @@ describe("the learning prompt", () => {
     expect(prompt).toContain(`<finding id="${String(batch[0]?.id)}"`);
   });
 
+  it("the prompt keeps a closing tag in a finding's path inside the fence", () => {
+    const db = store();
+    const batch = add(db, occurrence("a", { source: "thread", path: "a/</finding>/x.ts" }));
+    const prompt = buildLearnPrompt(SCOPE, batch, []);
+    expect(prompt.match(/<\/finding/gi)).toHaveLength(1);
+  });
+
   it("the prompt lists only the scope's lessons", () => {
     const db = store();
     const mine = db.lessons.createLesson(lesson(SCOPE, "Null check before reading"), NOW);
@@ -399,5 +406,98 @@ describe("the lesson learner", () => {
     expect(h.details).toHaveLength(3);
     expect(h.db.lessons.occurrenceBySource("thread:g/p!1:d1")?.outcome).toBe("resolved");
     expect(h.db.lessons.countPending()).toBe(1);
+  });
+
+  it("a failed read after a note change is tried again at the next poll", async () => {
+    const h = harness();
+    const learner = createLessonLearner(h.deps);
+    const bob = person("bob");
+    h.discussions = [];
+    const one = mr(1, { notes: [note("n1", bob)] });
+    await learner.collectThreads(snapshot({ authored: [one] }), new Set(["n1"]));
+    // n2 arrives, but GitLab fails; the poll commits n2 as seen all the same.
+    h.discussions = undefined;
+    const two = mr(1, { notes: [note("n1", bob), note("n2", bob)] });
+    await learner.collectThreads(snapshot({ authored: [two] }), new Set(["n1"]));
+    h.discussions = [
+      { id: "d2", resolvable: true, resolved: false, notes: [gitlabNote("n2", "Rename it")] },
+    ];
+    await learner.collectThreads(snapshot({ authored: [two] }), new Set(["n1", "n2"]));
+    expect(h.details).toEqual(["g/p!1", "g/p!1", "g/p!1"]);
+    expect(h.db.lessons.occurrenceBySource("thread:g/p!1:d2")?.title).toBe("Rename it");
+  });
+
+  it("reads every MR again once lessons are turned back on", async () => {
+    const h = harness();
+    h.discussions = [];
+    const one = mr(1, { notes: [note("n1", person("bob"))] });
+    let enabled = true;
+    const config = h.deps.config;
+    const learner = createLessonLearner({
+      ...h.deps,
+      config: {
+        ...config,
+        get lessons() {
+          return { ...config.lessons, enabled };
+        },
+      },
+    });
+    await learner.collectThreads(snapshot({ authored: [one] }), new Set(["n1"]));
+    enabled = false;
+    await learner.tick();
+    enabled = true;
+    await learner.collectThreads(snapshot({ authored: [one] }), new Set(["n1"]));
+    expect(h.details).toEqual(["g/p!1", "g/p!1"]);
+  });
+
+  it("never throws out of a tick, even when the store fails", async () => {
+    const h = harness();
+    const learner = createLessonLearner({
+      ...h.deps,
+      store: Object.assign(Object.create(h.db) as Store, {
+        isPaused: () => {
+          throw new Error("disk");
+        },
+      }),
+    });
+    await expect(learner.tick()).resolves.toBeUndefined();
+  });
+});
+
+describe("answer bounds and atomicity", () => {
+  it("rejects a rule over 600, more than 5 topics or globs, and an empty title", () => {
+    const db = store();
+    const batch = add(db, occurrence("a"));
+    const id = batch[0]?.id ?? 0;
+    for (const answer of [
+      { findings: [{ ...newLesson(id), rule: "r".repeat(601) }] },
+      { findings: [{ ...newLesson(id), topics: ["a", "b", "c", "d", "e", "f"] }] },
+      { findings: [{ ...newLesson(id), globs: ["a", "b", "c", "d", "e", "f"] }] },
+      { findings: [{ ...newLesson(id), title: "  " }] },
+    ]) {
+      expect(applyAnswer(db.lessons, SCOPE, batch, answer, NOW)).toBe("invalid");
+    }
+    expect(db.lessons.countPending()).toBe(1);
+    expect(db.lessons.lessons(SCOPE)).toEqual([]);
+  });
+
+  it("a write failing midway leaves nothing applied", () => {
+    const db = store();
+    const batch = add(db, occurrence("a"), occurrence("b"));
+    let attaches = 0;
+    const failing = {
+      ...db.lessons,
+      attach: (ids: readonly number[], lessonId: number, at: number) => {
+        attaches += 1;
+        if (attaches === 2) throw new Error("disk full");
+        db.lessons.attach(ids, lessonId, at);
+      },
+    };
+    const answer = {
+      findings: [newLesson(batch[0]?.id ?? 0), { ...newLesson(batch[1]?.id ?? 0), title: "Other" }],
+    };
+    expect(() => applyAnswer(failing, SCOPE, batch, answer, NOW)).toThrow("disk full");
+    expect(db.lessons.lessons(SCOPE)).toEqual([]);
+    expect(db.lessons.countPending()).toBe(2);
   });
 });

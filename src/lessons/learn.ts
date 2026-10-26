@@ -121,7 +121,9 @@ export function buildLearnPrompt(
     ...batch.map((each) =>
       [
         `<finding id="${String(each.id)}">`,
-        `${each.path ?? "(no file)"}${each.line === null ? "" : `:${String(each.line)}`} ${each.severity}`.trim(),
+        defuse(
+          `${each.path ?? "(no file)"}${each.line === null ? "" : `:${String(each.line)}`} ${each.severity}`,
+        ).trim(),
         defuse(cut(each.text, TEXT_MAX)),
         "</finding>",
       ].join("\n"),
@@ -177,28 +179,30 @@ export function applyAnswer(
   }
   if (answered.size !== inBatch.size) return "invalid";
   const created = new Map<string, number>();
-  for (const each of findings) {
-    let id = each.lesson;
-    if (id === null) {
-      const title = each.title?.trim() ?? "";
-      id = created.get(title.toLowerCase()) ?? null;
+  store.transaction(() => {
+    for (const each of findings) {
+      let id = each.lesson;
       if (id === null) {
-        id = store.createLesson(
-          {
-            scope,
-            title,
-            rule: each.rule?.trim() ?? "",
-            topics: each.topics ?? [],
-            globs: (each.globs ?? []).map((glob) => glob.trim()),
-          },
-          at,
-        );
-        created.set(title.toLowerCase(), id);
+        const title = each.title?.trim() ?? "";
+        id = created.get(title.toLowerCase()) ?? null;
+        if (id === null) {
+          id = store.createLesson(
+            {
+              scope,
+              title,
+              rule: each.rule?.trim() ?? "",
+              topics: each.topics ?? [],
+              globs: (each.globs ?? []).map((glob) => glob.trim()),
+            },
+            at,
+          );
+          created.set(title.toLowerCase(), id);
+        }
       }
+      store.attach([each.occurrence], id, at);
+      for (const other of each.related ?? []) store.link(id, other);
     }
-    store.attach([each.occurrence], id, at);
-    for (const other of each.related ?? []) store.link(id, other);
-  }
+  });
   return "applied";
 }
 
@@ -309,7 +313,19 @@ export function createLessonLearner(deps: LearnerDeps): LessonLearner {
 
   return {
     tick: () => {
-      if (running !== undefined || !enabled()) return Promise.resolve();
+      if (running !== undefined) return Promise.resolve();
+      let on: boolean;
+      try {
+        on = enabled();
+      } catch (error) {
+        log.warn("lessons tick failed", { reason: reason(error) });
+        return Promise.resolve();
+      }
+      if (!on) {
+        // Read every MR again once lessons are back on: notes written meanwhile count as seen.
+        read.clear();
+        return Promise.resolve();
+      }
       const run: Promise<void> = learnOnce()
         .catch((error: unknown) => {
           log.warn("lessons tick failed", { reason: reason(error) });
@@ -321,8 +337,11 @@ export function createLessonLearner(deps: LearnerDeps): LessonLearner {
       return run;
     },
     collectThreads: async (snapshot, seenNotes) => {
-      if (!enabled()) return;
       try {
+        if (!enabled()) {
+          read.clear();
+          return;
+        }
         await collectOpenThreads(deps, options(), snapshot, seenNotes, read);
       } catch (error) {
         log.warn("lesson threads not collected", { reason: reason(error) });

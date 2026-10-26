@@ -17,8 +17,8 @@ import type { ScopeMap } from "./scopes.ts";
 const TITLE_MAX = 120;
 const REVIEW_CURSOR = "lessons.reviewCursor";
 const THREADS_BACKFILLED = "lessons.threadsBackfilled";
-/** Reviews whose findings are learned; a skipped review's findings still teach. */
-const COLLECTED: readonly AgentReviewStatus[] = ["ready", "posted"];
+/** Reviews whose findings are learned; a skipped or discarded review's findings still teach. */
+const COLLECTED: readonly AgentReviewStatus[] = ["ready", "posted", "discarded"];
 /** Reviews that may still become ready: the cursor waits for them. */
 const UNSETTLED: readonly AgentReviewStatus[] = ["queued", "running", "posting"];
 
@@ -289,6 +289,8 @@ export async function collectOpenThreads(
         mr_key: mr.key,
         reason: error instanceof Error ? error.name : "unknown",
       });
+      // The poll already counts its notes as seen: read it again at the next poll.
+      read.delete(mr.key);
       continue;
     }
     read.add(mr.key);

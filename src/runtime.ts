@@ -1,4 +1,4 @@
-import { writeFileSync } from "node:fs";
+import { renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { defaultStatePath, loadConfig } from "./config.ts";
@@ -175,9 +175,10 @@ export function createRuntime(configPath: string, signal?: AbortSignal): Runtime
     detail: (key) => fetchFixDetail(run, glabRest(config.gitlab), key),
     onScan: (map) => {
       try {
-        writeFileSync(join(dirname(statePath), "lesson-scopes.json"), JSON.stringify(map), {
-          mode: 0o600,
-        });
+        const target = join(dirname(statePath), "lesson-scopes.json");
+        const temporary = `${target}.${String(process.pid)}.tmp`;
+        writeFileSync(temporary, JSON.stringify(map), { mode: 0o600 });
+        renameSync(temporary, target);
       } catch (error) {
         log.warn("lesson scopes not written", {
           reason: error instanceof Error ? error.name : "unknown",

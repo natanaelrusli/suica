@@ -136,6 +136,18 @@ describe("collecting review findings", () => {
     ]);
   });
 
+  it("a discarded review with a body teaches, one without does not", () => {
+    const db = store();
+    const shown = review(db, REVIEW, "ready", "g/p!1");
+    db.transitionAgentReview(shown.id, ["ready"], "discarded", {}, NOW);
+    const never = db.queueAgentReview("g/p!2", "manual", NOW, "Other") ?? 0;
+    db.transitionAgentReview(never, ["queued"], "discarded", {}, NOW);
+    expect(collectReviews(db, NOW)).toBe(2);
+    expect(new Set(db.lessons.pendingOccurrences(NOW, 10).map((each) => each.mrKey))).toEqual(
+      new Set(["g/p!1"]),
+    );
+  });
+
   it("collectReviews skips queued, running and failed reviews", () => {
     const db = store();
     review(db, REVIEW, "failed", "g/p!1");

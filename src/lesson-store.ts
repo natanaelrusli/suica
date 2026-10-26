@@ -75,6 +75,8 @@ export interface LessonStore {
   archive(id: number, at: number): void;
   /** Moves the occurrences and links of `goneId` to `keepId` and deletes `goneId`. */
   merge(keepId: number, goneId: number, at: number): void;
+  /** Runs `work` in one transaction: a throw leaves none of its writes. */
+  transaction(work: () => void): void;
   /** Shares the store's meta table. */
   meta(key: string): string | undefined;
   setMeta(key: string, value: string): void;
@@ -196,19 +198,29 @@ export function createLessonStore(db: DatabaseSync): LessonStore {
       .get(...args);
     return row === undefined ? undefined : toOccurrence(row);
   };
+  let depth = 0;
+  /** One transaction; a call inside another joins it. */
   const inTransaction = (work: () => void): void => {
+    if (depth > 0) {
+      work();
+      return;
+    }
     db.exec("BEGIN IMMEDIATE");
+    depth += 1;
     try {
       work();
       db.exec("COMMIT");
     } catch (error) {
       db.exec("ROLLBACK");
       throw error;
+    } finally {
+      depth -= 1;
     }
   };
 
   return {
     ...createReads(db),
+    transaction: inTransaction,
     addOccurrences(rows) {
       const insert = db.prepare(
         `INSERT OR IGNORE INTO lesson_occurrence
