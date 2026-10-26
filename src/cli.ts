@@ -23,6 +23,7 @@ import { applyInstall, applyUninstall, lessonsStatus, planInstall } from "./less
 import type { LessonsPaths } from "./lessons/install.ts";
 import { serveLessons } from "./lessons/mcp-server.ts";
 import { scanScopes } from "./lessons/scopes.ts";
+import { exportVault } from "./lessons/vault.ts";
 import { MODEL_CLI_CHOICES, detectModelClis, resolveModelCli } from "./model-cli.ts";
 import { buildReviewOptions, listSkills } from "./review-options.ts";
 import { closeMergeRequest, commentOnMergeRequest, mergeMergeRequest } from "./mr-actions.ts";
@@ -76,7 +77,7 @@ import { realProbe } from "./office/probe.ts";
 import { buildUsage } from "./usage.ts";
 
 const USAGE =
-  "usage: suica <once|status|state|stats|usage|office --json|office chat <agent> <sessionId> --json|office send <agent> <sessionId> --json (message on stdin)|pause|resume|pending [--all]|send <id> [--json]|skip <id> [--json]|retry <id> [--json]|clear <id|yours|others|all> [--json]|selftest|message <key> --json (request on stdin)|reviews --json|mr <key> --json|mr approve <key> <sha> --json|mr comment <key> --json (body on stdin)|mr close <key> --json|mr merge <key> <sha> [--squash] [--remove-source-branch] [--when-pipeline-succeeds] --json (message on stdin)|review options [--cli <id>] --json|review queue <key> [--skill <name>] [--model <name>] [--auto] --json|review post <id> [--inline|--comment] --json|review discard <id> --json|review cancel <id> --json|fix list --json|fix queue <key> [--pipeline] --json|fix watch <key> --json|fix unwatch <key> --json|fix confirm <id> --json (edits on stdin)|fix retry <id> --json (note on stdin)|fix discard <id> --json|fix cancel <id> --json|fix replies <id> --json|config show --json|config set --json|templates show --json|templates set --json|gitlab check <host> --json|lessons mcp|lessons install [--yes] [--json]|lessons uninstall [--json]|lessons status --json|agent install [--json]|agent uninstall|agent restart --json>\n";
+  "usage: suica <once|status|state|stats|usage|office --json|office chat <agent> <sessionId> --json|office send <agent> <sessionId> --json (message on stdin)|pause|resume|pending [--all]|send <id> [--json]|skip <id> [--json]|retry <id> [--json]|clear <id|yours|others|all> [--json]|selftest|message <key> --json (request on stdin)|reviews --json|mr <key> --json|mr approve <key> <sha> --json|mr comment <key> --json (body on stdin)|mr close <key> --json|mr merge <key> <sha> [--squash] [--remove-source-branch] [--when-pipeline-succeeds] --json (message on stdin)|review options [--cli <id>] --json|review queue <key> [--skill <name>] [--model <name>] [--auto] --json|review post <id> [--inline|--comment] --json|review discard <id> --json|review cancel <id> --json|fix list --json|fix queue <key> [--pipeline] --json|fix watch <key> --json|fix unwatch <key> --json|fix confirm <id> --json (edits on stdin)|fix retry <id> --json (note on stdin)|fix discard <id> --json|fix cancel <id> --json|fix replies <id> --json|config show --json|config set --json|templates show --json|templates set --json|gitlab check <host> --json|lessons mcp|lessons install [--yes] [--json]|lessons uninstall [--json]|lessons status --json|lessons export [--json]|agent install [--json]|agent uninstall|agent restart --json>\n";
 const TEAMS_DISABLED = "teams is disabled: set teams.enabled to true in the config\n";
 const SHOWN_WITH_ALL = 50;
 
@@ -797,6 +798,35 @@ async function lessonsMcp(): Promise<number> {
   return 0;
 }
 
+/** `suica lessons export`: writes the vault now; exits 1 when there is nowhere or nothing to write from. */
+function exportLessonsCommand(json: boolean): number {
+  const config = loadConfig(defaultConfigPath());
+  const { enabled, scopes, vaultPath } = config.lessons;
+  const say = (result: Record<string, unknown>, line: string, code: number): number => {
+    process.stdout.write(json ? `${JSON.stringify({ version: 1, ...result })}\n` : `${line}\n`);
+    return code;
+  };
+  if (!enabled) return say({ status: "disabled" }, "lessons are off", 0);
+  if (vaultPath === undefined) {
+    return say({ status: "no-vault-path" }, "set lessons.vaultPath to export", 1);
+  }
+  const reader = openLessonsReadOnly(config.statePath ?? defaultStatePath());
+  if (reader === undefined) return say({ status: "no-lessons" }, "no lessons stored yet", 1);
+  try {
+    const { written, removed } = exportVault(reader, scopes, vaultPath, Date.now());
+    return say(
+      { status: "exported", written, removed, path: vaultPath },
+      `exported to ${vaultPath}: ${String(written)} written, ${String(removed)} removed`,
+      0,
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "export failed";
+    return say({ status: "failed", message }, `export failed: ${message}`, 1);
+  } finally {
+    reader.close();
+  }
+}
+
 function lessonsPaths(): LessonsPaths {
   return {
     node: process.execPath,
@@ -964,6 +994,7 @@ async function main(argv: readonly string[]): Promise<number> {
     if (argv[1] === "install" && known(["--yes", "--json"])) {
       return installLessonsCommand(flags.includes("--yes"), json);
     }
+    if (argv[1] === "export" && known(["--json"])) return exportLessonsCommand(json);
     if (argv[1] === "uninstall" && known(["--json"])) return uninstallLessonsCommand(json);
     if (argv[1] === "status" && json && flags.length === 1) {
       const status = await lessonsStatus(homedir(), defaultExec, lessonsClis(), lessonsPaths());

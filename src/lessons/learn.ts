@@ -10,6 +10,7 @@ import { backfillThreads, collectOpenThreads, collectReviews } from "./collect.t
 import type { CollectOptions } from "./collect.ts";
 import { remapScopes, sameScopeMap } from "./remap.ts";
 import { projectOfMrKey, scanScopes, scopeForProject } from "./scopes.ts";
+import { exportVault } from "./vault.ts";
 import type { ScopeMap } from "./scopes.ts";
 
 /**
@@ -308,6 +309,12 @@ export function createLessonLearner(deps: LearnerDeps): LessonLearner {
     const at = deps.now();
     if (applyAnswer(store.lessons, batch.scope, batch.rows, answer, at) === "applied") {
       log.info("lessons learned", { mr_key: mrKey, occurrences: batch.rows.length });
+      const { vaultPath, scopes } = config.lessons;
+      try {
+        if (vaultPath !== undefined) exportVault(store.lessons, scopes, vaultPath, at);
+      } catch (error) {
+        log.warn("lessons vault not exported", { reason: reason(error) });
+      }
       return;
     }
     const failures = Math.max(...batch.rows.map((each) => each.failures));

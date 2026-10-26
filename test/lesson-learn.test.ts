@@ -1,3 +1,6 @@
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { parseConfig } from "../src/config.ts";
 import type { Exec } from "../src/exec.ts";
@@ -292,6 +295,22 @@ describe("applying an answer", () => {
 });
 
 describe("the lesson learner", () => {
+  it("exports the vault after a batch is learned, when a vault path is set", async () => {
+    const vault = mkdtempSync(join(tmpdir(), "suica-learn-vault-"));
+    try {
+      const h = harness();
+      const rows = add(h.db, occurrence("a"));
+      h.answer = () => fenced({ findings: [newLesson(rows[0]?.id ?? 0)] });
+      const config = parseConfig(
+        `gitlab:\n  hostname: gitlab.example\nmodel:\n  cli: claude\nlessons:\n  enabled: true\n  scopes: ["${SCOPE}"]\n  vaultPath: ${vault}\n`,
+      );
+      await createLessonLearner({ ...h.deps, config }).tick();
+      expect(existsSync(join(vault, "index.md"))).toBe(true);
+    } finally {
+      rmSync(vault, { recursive: true, force: true });
+    }
+  });
+
   it("an invalid answer schedules a retry with backoff", async () => {
     const h = harness();
     const [row] = add(h.db, occurrence("a"));
