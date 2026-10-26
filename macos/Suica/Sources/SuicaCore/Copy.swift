@@ -1676,6 +1676,7 @@ extension Copy {
         }
     }
     public static let lessonsExportNow = "Export vault now"
+    public static let lessonsVault = "Markdown vault"
     public static let lessonsExportHint = "Writes the lessons to the vault folder as Markdown notes."
     public static let lessonsExportNeedsVault = "Set Vault folder first."
     public static func lessonsExported(written: Int, removed: Int, conflicts: Int) -> String {

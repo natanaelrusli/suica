@@ -271,6 +271,10 @@ struct FixTab: View {
                     MarkdownText(source: note.body)
                 }
             }
+            if let lesson = thread.lessonRepeat {
+                LessonRepeatMarker(
+                    lessonId: lesson.lessonId, title: lesson.title, before: lesson.before, repos: lesson.repos)
+            }
             Divider()
             if thread.reply.isEmpty && thread.action == "reply" {
                 Text(Copy.fixNoAnswer).font(.caption).foregroundStyle(.orange)

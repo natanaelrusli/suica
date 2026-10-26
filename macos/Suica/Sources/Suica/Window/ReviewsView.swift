@@ -186,7 +186,7 @@ struct ReviewsView: View {
 
 /// The tab switch over the top of the list, below the title bar. On macOS 26 the rows scroll under
 /// both, which blur them as they pass; before it, a strip with a line under it.
-private struct ListTopBar<Bar: View>: ViewModifier {
+struct ListTopBar<Bar: View>: ViewModifier {
     let titleBar: CGFloat
     @ViewBuilder let bar: Bar
 
@@ -890,7 +890,7 @@ enum ReviewTint {
 
 /// Lays children out left to right and wraps to a new line when the row is full; a child wider
 /// than the row is cut to the row's width.
-private struct FlowRow: Layout {
+struct FlowRow: Layout {
     var spacing: CGFloat = 6
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
@@ -1250,6 +1250,8 @@ private struct AgentReviewTab: View {
                             text: DisplayText.clean(review.detail, max: 400),
                             tint: review.status == "failed" ? .red : .orange)
                     }
+                    let repeated = review.repeatedFindings
+                    if !repeated.isEmpty { RepeatedFindingsCard(items: repeated) }
                     if let body = review.body, !body.isEmpty {
                         MarkdownText(source: body)
                             .padding(14)

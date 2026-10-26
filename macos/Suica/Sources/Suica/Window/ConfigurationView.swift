@@ -7,6 +7,8 @@ struct ConfigurationView: View {
     let editor: ConfigEditorModel
     /// For the installed skills and the models that Review skill and Review model are picked from.
     let reviews: ReviewsModel
+    /// For the lessons hook and MCP server row on the Lessons page.
+    let lessons: LessonsModel
     let navigator: Navigator
     /// One category from the sidebar, or nil for the overview of all of them. A search looks
     /// through every setting.
@@ -183,6 +185,9 @@ struct ConfigurationView: View {
                     Label(title, systemImage: group.category.symbol).font(.headline)
                 }
             }
+            if category?.key == "lessons" && !searching {
+                LessonsAgentSetupSection(model: lessons, vaultPath: savedVaultPath(document))
+            }
         }
         .formStyle(.grouped)
         .motion(value: query)
@@ -208,6 +213,14 @@ struct ConfigurationView: View {
                     reviewOptions: options?.options, choose: { picking = $0 })
             }
         }
+    }
+
+    /// `lessons.vaultPath` as saved, nil when unset.
+    private func savedVaultPath(_ document: ConfigDocument) -> String? {
+        guard let field = document.fields.first(where: { $0.path == ["lessons", "vaultPath"] }),
+            case .string(let path) = field.effective, !path.isEmpty
+        else { return nil }
+        return path
     }
 
     // MARK: Skill and model drawer

@@ -11,6 +11,8 @@ enum WindowSection: String, CaseIterable, Identifiable {
     /// Your own MRs. Added after every digit was taken, so it takes ⇧⌘2 beside Merge requests (⌘2);
     /// the sidebar and the Go menu list it right after Merge requests.
     case myMergeRequests
+    /// The Lessons learned from review findings; ⇧⌘L, listed under Insights after Statistics.
+    case lessons
 
     var id: String { rawValue }
 
@@ -27,6 +29,7 @@ enum WindowSection: String, CaseIterable, Identifiable {
         case .appearance: Copy.appearance
         case .office: Copy.office
         case .system: Copy.systemPage
+        case .lessons: Copy.lessons
         }
     }
 
@@ -43,6 +46,8 @@ enum WindowSection: String, CaseIterable, Identifiable {
         case .appearance: "paintpalette"
         case .office: "cube.transparent"
         case .system: "cpu"
+        // As Configuration's Lessons category.
+        case .lessons: "book"
         }
     }
 
@@ -60,12 +65,14 @@ enum WindowSection: String, CaseIterable, Identifiable {
         case .appearance: .indigo
         case .office: .cyan
         case .system: .mint
+        case .lessons: .brown
         }
     }
 
     /// ⌘1 to ⌘9 and ⌘0 in the order of the cases; My MRs takes ⇧⌘2.
     var shortcut: KeyboardShortcut {
         if self == .myMergeRequests { return KeyboardShortcut("2", modifiers: [.command, .shift]) }
+        if self == .lessons { return KeyboardShortcut("l", modifiers: [.command, .shift]) }
         let index = Self.allCases.firstIndex(of: self) ?? 0
         return KeyboardShortcut(KeyEquivalent(Character(String((index + 1) % 10))))
     }
@@ -234,7 +241,7 @@ struct SidebarNode: Identifiable {
                     children: StatisticsPage.allCases.map {
                         SidebarNode(item: .statistics($0), title: $0.title, symbol: $0.symbol, tint: $0.tint)
                     }),
-                SidebarNode(.usage), SidebarNode(.logs), SidebarNode(.system),
+                SidebarNode(.lessons), SidebarNode(.usage), SidebarNode(.logs), SidebarNode(.system),
             ]
         ),
         (
