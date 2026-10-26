@@ -971,6 +971,7 @@ public enum Copy {
         case "approve": "Approval checks"
         case "fix": "Agent fixes"
         case "reply": "Replies"
+        case "lessons": "Lessons"
         case "other": "Other"
         default: DisplayText.clean(raw, max: 40)
         }
