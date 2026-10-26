@@ -766,6 +766,7 @@ public enum Copy {
         case "model": "Language model"
         case "review": "Agent Review"
         case "fix": "Agent Fix"
+        case "lessons": "Lessons"
         case "office": "Office"
         default: key.prefix(1).uppercased() + key.dropFirst()
         }

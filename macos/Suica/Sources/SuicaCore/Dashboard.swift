@@ -309,7 +309,7 @@ public struct ConfigCategory: Hashable, Identifiable, Sendable {
 
     /// In the order the agent lists its fields, so the sidebar can show them before the config loads.
     public static let known = [
-        "gitlab", "polling", "notifications", "teams", "model", "review", "fix", "office", storageKey,
+        "gitlab", "polling", "notifications", "teams", "model", "review", "fix", "lessons", "office", storageKey,
     ]
         .map(ConfigCategory.init)
 
