@@ -129,11 +129,11 @@ Config file: `~/.config/suica/config.yaml` (override the path with `SUICA_CONFIG
 | `fix.effort`                       | `medium`                         | How hard the CLI thinks during a fix, as for `review.effort`    |
 | `fix.timeoutMinutes`               | `20`                             | A fix run is stopped after this long                            |
 | `fix.maxPerDay`                    | `10`                             | At most this many automatic fixes in 24 hours; fixes you start yourself do not count |
-| `lessons.enabled`                  | `false`                          | Learn Lessons from Agent Review findings and Finding Threads and hand them to your Coding Agents (see Lessons below); off, nothing is collected and no tokens are spent |
+| `lessons.enabled`                  | `false`                          | Learn Lessons from every Agent Review that gets ready (posted or discarded) and from Finding Threads, and hand them to your Coding Agents (see Lessons below); off, nothing is collected and no tokens are spent |
 | `lessons.scopes`                   | `[]`                             | Folders (`~` allowed, at most 20): only repositories under them feed and use lessons; empty means none, so nothing is learned or served |
 | `lessons.vaultPath`                | none                             | Folder, such as an Obsidian vault, the lessons are also written to as Markdown |
-| `lessons.perFile`                  | `5`                              | At most this many Lessons the Claude Code hook hands over for one file it reads or writes (1 to 20) |
-| `lessons.perSession`               | `5`                              | At most this many Lessons the Claude Code hook hands over when a session starts in a Lesson Scope (1 to 20) |
+| `lessons.perFile`                  | `5`                              | At most this many Lessons your Coding Agent gets for one file it reads or writes, from the Claude Code hook or `lessons_for_path` (1 to 20) |
+| `lessons.perSession`               | `5`                              | At most this many Lessons your Coding Agent gets when a session starts in a Lesson Scope, from the Claude Code hook or `lessons_for_path` on a folder (1 to 20) |
 | `office.agents`                    | `[claude, codex, gemini]`        | Which Coding Agents the Office looks for on this Mac |
 | `office.custom`                    | `[]`                             | More Coding Agents, one entry each: `name\|process\|log glob\|cwd key\|activity key` (the program's name, a JSONL log pattern such as `~/.aider/*.jsonl`, and the dotted keys of the working folder and the activity in a log line) |
 | `statePath`                        | `~/Library/Application Support/suica/state.db` | SQLite state file |
