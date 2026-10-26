@@ -78,6 +78,8 @@ export interface LessonStore {
   /** The MRs with due occurrences that have no lesson, the one with the oldest first. */
   pendingMrKeys(now: number): string[];
   countPending(): number;
+  /** Occurrences not learned yet, counted per project (`group/project`). */
+  countPendingByProject(): Map<string, number>;
   /**
    * For each key whose occurrence belongs to an unarchived Lesson of a scope that has an earlier
    * occurrence from another MR, that Lesson; keys without one are left out. Siblings of the same
@@ -117,7 +119,13 @@ export interface LessonStore {
 /** What a reader of the lessons file may do; `db` is its read-only handle. */
 export type LessonReader = Pick<
   LessonStore,
-  "lessons" | "lesson" | "occurrences" | "links" | "countPending" | "repeatsBySource"
+  | "lessons"
+  | "lesson"
+  | "occurrences"
+  | "links"
+  | "countPending"
+  | "countPendingByProject"
+  | "repeatsBySource"
 > & {
   readonly db: DatabaseSync;
   close(): void;
@@ -194,7 +202,13 @@ function placeholders(count: number): string {
 
 type Reads = Pick<
   LessonStore,
-  "lessons" | "lesson" | "occurrences" | "links" | "countPending" | "repeatsBySource"
+  | "lessons"
+  | "lesson"
+  | "occurrences"
+  | "links"
+  | "countPending"
+  | "countPendingByProject"
+  | "repeatsBySource"
 >;
 
 function createReads(db: DatabaseSync): Reads {
@@ -231,6 +245,19 @@ function createReads(db: DatabaseSync): Reads {
         .prepare("SELECT COUNT(*) AS n FROM lesson_occurrence WHERE lesson_id IS NULL")
         .get();
       return row === undefined ? 0 : integer(row, "n");
+    },
+    countPendingByProject() {
+      const out = new Map<string, number>();
+      const rows = db
+        .prepare(
+          "SELECT mr_key, COUNT(*) AS n FROM lesson_occurrence WHERE lesson_id IS NULL GROUP BY mr_key",
+        )
+        .all();
+      for (const row of rows) {
+        const project = projectOfMrKey(text(row, "mr_key"));
+        out.set(project, (out.get(project) ?? 0) + integer(row, "n"));
+      }
+      return out;
     },
     repeatsBySource(sourceKeys) {
       const out = new Map<string, LessonRepeat>();

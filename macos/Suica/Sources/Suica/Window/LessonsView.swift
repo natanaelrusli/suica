@@ -66,13 +66,13 @@ struct LessonsView: View {
             if let list = model.list {
                 if !list.enabled {
                     emptyPage(Copy.lessonsOffTitle, symbol: "book.closed", hint: Copy.lessonsOffHint,
-                              action: Copy.turnOnLessons, pending: 0)
+                              action: Copy.turnOnLessons, pending: 0, unscoped: 0)
                 } else if list.scopes.isEmpty {
                     emptyPage(Copy.noScopesTitle, symbol: "folder.badge.questionmark", hint: Copy.noScopesHint,
-                              action: Copy.openLessonsSettings, pending: list.pending)
+                              action: Copy.openLessonsSettings, pending: list.pending, unscoped: list.unscoped)
                 } else if list.isEmpty {
                     emptyPage(Copy.nothingLearnedTitle, symbol: "book", hint: Copy.nothingLearnedHint,
-                              action: nil, pending: list.pending)
+                              action: nil, pending: list.pending, unscoped: list.unscoped)
                 } else {
                     LessonsSplit(model: model)
                 }
@@ -102,13 +102,16 @@ struct LessonsView: View {
         }
     }
 
-    private func emptyPage(_ title: String, symbol: String, hint: String, action: String?, pending: Int) -> some View {
+    private func emptyPage(
+        _ title: String, symbol: String, hint: String, action: String?, pending: Int, unscoped: Int
+    ) -> some View {
         ContentUnavailableView {
             Label(title, systemImage: symbol)
         } description: {
             VStack(spacing: 6) {
                 Text(hint)
                 if pending > 0 { Text(Copy.lessonsPending(pending)).foregroundStyle(.secondary) }
+                if unscoped > 0 { Text(Copy.lessonsUnscoped(unscoped)).foregroundStyle(.secondary) }
             }
         } actions: {
             if let action {
@@ -163,6 +166,12 @@ private struct LessonsSplit: View {
             }
             if let pending = model.list?.pending, pending > 0 {
                 Label(Copy.lessonsPending(pending), systemImage: "hourglass")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .listRowSeparator(.hidden)
+            }
+            if let unscoped = model.list?.unscoped, unscoped > 0 {
+                Label(Copy.lessonsUnscoped(unscoped), systemImage: "folder.badge.minus")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .listRowSeparator(.hidden)

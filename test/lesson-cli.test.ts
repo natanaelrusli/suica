@@ -64,7 +64,10 @@ function lesson(
   return id;
 }
 
-/** The golden's data: two lessons of one scope, linked; one archived; one of another scope; one pending. */
+/**
+ * The golden's data: two lessons of one scope, linked; one archived; one of another scope; one
+ * pending; one pending from a repo under no scope, which can never be learned.
+ */
 function seed(lessons: LessonStore): {
   timeout: number;
   errors: number;
@@ -103,7 +106,10 @@ function seed(lessons: LessonStore): {
   lessons.link(timeout, errors);
   lessons.link(timeout, archived);
   lessons.link(timeout, beta);
-  lessons.addOccurrences([occurrence("review:5:1", "acme/api!9", NOW)]);
+  lessons.addOccurrences([
+    occurrence("review:5:1", "acme/api!9", NOW),
+    occurrence("review:6:1", "solo/elsewhere!2", NOW),
+  ]);
   return { timeout, errors, archived, beta };
 }
 
@@ -149,7 +155,7 @@ describe("the Lessons view documents", () => {
         },
         NOW,
       ),
-    ).toEqual({ version: 1, enabled: false, scopes: [], pending: 0 });
+    ).toEqual({ version: 1, enabled: false, scopes: [], pending: 0, unscoped: 0 });
     expect(scanned).toBe(false);
   });
 
@@ -159,6 +165,7 @@ describe("the Lessons view documents", () => {
       enabled: true,
       scopes: [{ path: SCOPE, repos: 2, lessons: [] }],
       pending: 0,
+      unscoped: 0,
     });
   });
 
@@ -266,7 +273,7 @@ describe("suica lessons list|show|archive|merge", () => {
   it("lessons list matches the golden's shape, heaviest first, with the pending count", () => {
     const result = run("list", "--json");
     expect(result.status).toBe(0);
-    expect(result.json).toMatchObject({ version: 1, enabled: true, pending: 1 });
+    expect(result.json).toMatchObject({ version: 1, enabled: true, pending: 1, unscoped: 1 });
     expect(titles(result.json)).toEqual([
       "HTTP clients need an explicit timeout",
       "Wrap errors with context",
@@ -283,7 +290,13 @@ describe("suica lessons list|show|archive|merge", () => {
     write(`  enabled: false\n  scopes: ["${SCOPE}"]\n`);
     const result = run("list", "--json");
     expect(result.status).toBe(0);
-    expect(result.json).toEqual({ version: 1, enabled: false, scopes: [], pending: 0 });
+    expect(result.json).toEqual({
+      version: 1,
+      enabled: false,
+      scopes: [],
+      pending: 0,
+      unscoped: 0,
+    });
   }, 20_000);
 
   it("lessons show lists occurrences newest first, and not-found for an unknown id", () => {

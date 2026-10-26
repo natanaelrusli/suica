@@ -1560,6 +1560,11 @@ extension Copy {
     public static func lessonsPending(_ count: Int) -> String {
         count == 1 ? "1 finding waiting to be learned" : "\(count) findings waiting to be learned"
     }
+    public static func lessonsUnscoped(_ count: Int) -> String {
+        count == 1
+            ? "1 finding is from a repository outside your lesson folders and is not learned"
+            : "\(count) findings are from repositories outside your lesson folders and are not learned"
+    }
     public static func lessonCount(_ count: Int) -> String { count == 1 ? "1 lesson" : "\(count) lessons" }
     public static func lessonFlagged(_ count: Int) -> String { count == 1 ? "Flagged once" : "Flagged \(count) times" }
     public static func lessonWeight(_ weight: Double) -> String { "Weight \(weight.formatted(.number.precision(.fractionLength(0...2))))" }

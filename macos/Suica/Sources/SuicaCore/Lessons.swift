@@ -65,14 +65,28 @@ public struct LessonListDocument: Codable, Equatable, Sendable {
     public let enabled: Bool
     /// Empty while lessons are off.
     public let scopes: [LessonScope]
-    /// Findings not learned into a Lesson yet.
+    /// Findings not learned into a Lesson yet whose repo is under a Lesson folder.
     public let pending: Int
+    /// Findings from repos under no Lesson folder: never learned. 0 when an older CLI leaves it out.
+    public let unscoped: Int
 
-    public init(version: Int, enabled: Bool, scopes: [LessonScope], pending: Int) {
+    public init(version: Int, enabled: Bool, scopes: [LessonScope], pending: Int, unscoped: Int = 0) {
         self.version = version
         self.enabled = enabled
         self.scopes = scopes
         self.pending = pending
+        self.unscoped = unscoped
+    }
+
+    private enum CodingKeys: String, CodingKey { case version, enabled, scopes, pending, unscoped }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        version = try container.decode(Int.self, forKey: .version)
+        enabled = try container.decode(Bool.self, forKey: .enabled)
+        scopes = try container.decode([LessonScope].self, forKey: .scopes)
+        pending = try container.decode(Int.self, forKey: .pending)
+        unscoped = try container.decodeIfPresent(Int.self, forKey: .unscoped) ?? 0
     }
 }
 

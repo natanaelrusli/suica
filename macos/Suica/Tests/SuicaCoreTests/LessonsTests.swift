@@ -48,7 +48,7 @@ private func detail(_ id: Int, scope: String, archived: Bool = false) throws -> 
 
 @Test func theLessonListDecodesFromTheContract() throws {
     let list = try decodeDocument(LessonListDocument.self, from: lessonsContract("list"))
-    #expect(list.enabled && list.pending == 1)
+    #expect(list.enabled && list.pending == 1 && list.unscoped == 1)
     let scope = try #require(list.scopes.first)
     #expect(scope.path == "/work/acme" && scope.repos == 2)
     #expect(scope.lessons.map(\.id) == [1, 2])
@@ -57,6 +57,19 @@ private func detail(_ id: Int, scope: String, archived: Bool = false) throws -> 
     #expect(first.topics == ["http-client", "go"] && first.repos == ["acme/api", "acme/web"])
     #expect(first.weight == 7.07 && first.count == 3)
     #expect(first.lastSeenDate != nil)
+}
+
+@Test func aLessonListWithoutUnscopedDecodesAsZero() throws {
+    let json = #"{"version":1,"enabled":true,"scopes":[],"pending":3}"#
+    let list = try decodeDocument(LessonListDocument.self, from: Data(json.utf8))
+    #expect(list.pending == 3 && list.unscoped == 0)
+}
+
+@Test func theUnscopedLineSaysTheFindingsAreNotLearned() {
+    #expect(Copy.lessonsUnscoped(1)
+        == "1 finding is from a repository outside your lesson folders and is not learned")
+    #expect(Copy.lessonsUnscoped(182)
+        == "182 findings are from repositories outside your lesson folders and are not learned")
 }
 
 @Test func theLessonDetailDecodesFromTheContract() throws {

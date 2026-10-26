@@ -30,7 +30,8 @@
         ]
       }
     ],
-    "pending": 1
+    "pending": 1,
+    "unscoped": 1
   },
   "show": {
     "version": 1,

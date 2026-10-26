@@ -1,7 +1,7 @@
 import { resolve } from "node:path";
 import type { LessonReader, LessonStore, OccurrenceRow, Outcome } from "../lesson-store.ts";
 import { rankLessons, weight } from "./match.ts";
-import { projectOfMrKey } from "./scopes.ts";
+import { projectOfMrKey, scopeForProject } from "./scopes.ts";
 import type { ScopeMap } from "./scopes.ts";
 
 /**
@@ -40,8 +40,10 @@ export interface LessonListJson {
   readonly enabled: boolean;
   /** Empty while lessons are off. */
   readonly scopes: readonly LessonScopeJson[];
-  /** Occurrences not learned into a Lesson yet. */
+  /** Occurrences not learned into a Lesson yet whose repo is under a scope. */
   readonly pending: number;
+  /** Occurrences not learned yet whose repo is under no scope: they are never learned. */
+  readonly unscoped: number;
 }
 
 export interface OccurrenceJson {
@@ -82,7 +84,7 @@ export interface LessonShowJson {
   };
 }
 
-type ListReader = Pick<LessonReader, "lessons" | "occurrences" | "countPending">;
+type ListReader = Pick<LessonReader, "lessons" | "occurrences" | "countPendingByProject">;
 type ShowReader = Pick<LessonReader, "lesson" | "occurrences" | "links">;
 
 function rounded(value: number): number {
@@ -93,6 +95,20 @@ function iso(at: number): string {
   return new Date(at).toISOString();
 }
 
+/** Pending occurrences split by whether their project maps to a scope, as the learner decides. */
+function pendingCounts(
+  reader: ListReader | undefined,
+  map: ScopeMap,
+): { pending: number; unscoped: number } {
+  let pending = 0;
+  let unscoped = 0;
+  for (const [project, count] of reader?.countPendingByProject() ?? []) {
+    if (scopeForProject(map, project) === undefined) unscoped += count;
+    else pending += count;
+  }
+  return { pending, unscoped };
+}
+
 /** Every configured scope with its Lessons; reads nothing at all while lessons are off. */
 export function buildLessonList(
   reader: ListReader | undefined,
@@ -100,7 +116,7 @@ export function buildLessonList(
   scan: () => ScopeMap,
   now: number,
 ): LessonListJson {
-  if (!config.enabled) return { version: 1, enabled: false, scopes: [], pending: 0 };
+  if (!config.enabled) return { version: 1, enabled: false, scopes: [], pending: 0, unscoped: 0 };
   const map = scan();
   const paths = [...new Set(config.scopes.filter((raw) => raw !== "").map((raw) => resolve(raw)))];
   return {
@@ -123,7 +139,7 @@ export function buildLessonList(
               lastSeen: iso(ranked.last.at),
             })),
     })),
-    pending: reader?.countPending() ?? 0,
+    ...pendingCounts(reader, map),
   };
 }
 
