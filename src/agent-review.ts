@@ -48,7 +48,7 @@ import {
 import type { InvocationMode, ReviewEffort, RunResult } from "./review-runner.ts";
 import { approveMergeRequest, fetchMrDetail, parseMrKey, resolveOwnThreads } from "./reviews.ts";
 import type { ApproveOutcome, DiffFileJson, MrDetailJson, ResolveOutcome } from "./reviews.ts";
-import type { AgentReviewRow, Store } from "./store.ts";
+import type { AgentReviewRow, Store, TokenPurpose } from "./store.ts";
 
 /** Agent Review: an MR reviewed by a coding agent CLI with a skill, posted only after approval. */
 
@@ -808,34 +808,49 @@ async function judgeApproval(
 }
 
 /**
- * The judge outside a review run, for the approval recheck: the configured model CLI at low
- * effort, without tools, in a scratch folder of its own. Throws when no CLI can run it or the run
- * fails, so the caller fails closed; an answer without a verdict is a verdict of not approving.
+ * One tool-less model run outside a review: the configured model CLI with `review.model` at low
+ * effort, without tools, in a scratch folder of its own; its token use is recorded as `purpose`.
+ * Returns the answer's text. Throws when no CLI can run it or the run fails.
+ */
+export async function runToolless(
+  deps: Pick<ReviewDeps, "store" | "config" | "exec" | "signal" | "now" | "detectClis">,
+  prompt: string,
+  purpose: TokenPurpose,
+  timeoutMinutes: number,
+): Promise<string> {
+  const clis = (deps.detectClis ?? detectModelClis)();
+  const cliId = resolveModelCli(deps.config.model.cli, clis);
+  if (cliId === null || cliId === "gemini") throw new RunFailure(`no model CLI can run ${purpose}`);
+  const path = clis.find((cli) => cli.id === cliId)?.path;
+  if (path === null || path === undefined) throw new RunFailure(`${cliId} is not installed`);
+  const workDir = mkdtempSync(join(tmpdir(), `suica-${purpose}-`));
+  try {
+    const result = await runCli(deps, cliId, path, prompt, workDir, () => undefined, {
+      model: deps.config.review.model,
+      effort: "low",
+      timeoutMinutes,
+      mode: "judge",
+    });
+    if (result.tokens !== null) {
+      deps.store.recordTokenUsage({ at: deps.now(), purpose, ...result.tokens });
+    }
+    return result.body;
+  } finally {
+    rmSync(workDir, { recursive: true, force: true });
+  }
+}
+
+/**
+ * The judge outside a review run, for the approval recheck: `runToolless`. Throws when no CLI can
+ * run it or the run fails, so the caller fails closed; an answer without a verdict is a verdict of
+ * not approving.
  */
 export async function runJudge(
   deps: Pick<ReviewDeps, "store" | "config" | "exec" | "signal" | "now" | "detectClis">,
   prompt: string,
 ): Promise<ApprovalVerdict> {
-  const clis = (deps.detectClis ?? detectModelClis)();
-  const cliId = resolveModelCli(deps.config.model.cli, clis);
-  if (cliId === null || cliId === "gemini") throw new RunFailure("no model CLI can judge");
-  const path = clis.find((cli) => cli.id === cliId)?.path;
-  if (path === null || path === undefined) throw new RunFailure(`${cliId} is not installed`);
-  const workDir = mkdtempSync(join(tmpdir(), "suica-judge-"));
-  try {
-    const result = await runCli(deps, cliId, path, prompt, workDir, () => undefined, {
-      model: deps.config.review.model,
-      effort: "low",
-      timeoutMinutes: JUDGE_TIMEOUT_MINUTES,
-      mode: "judge",
-    });
-    if (result.tokens !== null) {
-      deps.store.recordTokenUsage({ at: deps.now(), purpose: "approve", ...result.tokens });
-    }
-    return parseVerdict(result.body) ?? NO_VERDICT;
-  } finally {
-    rmSync(workDir, { recursive: true, force: true });
-  }
+  const body = await runToolless(deps, prompt, "approve", JUDGE_TIMEOUT_MINUTES);
+  return parseVerdict(body) ?? NO_VERDICT;
 }
 
 // MARK: - Queue, worker, post, discard
@@ -950,6 +965,8 @@ export interface ReviewWorker {
   tick(): void;
   /** Resolves once no review is running. */
   idle(): Promise<void>;
+  /** True while a run is in progress. */
+  busy(): boolean;
 }
 
 /**
@@ -981,6 +998,7 @@ export function createReviewWorker(deps: ReviewDeps): ReviewWorker {
     idle: async () => {
       while (running.size > 0) await Promise.all(running);
     },
+    busy: () => running.size > 0,
   };
 }
 

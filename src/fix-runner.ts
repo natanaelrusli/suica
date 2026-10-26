@@ -481,5 +481,6 @@ export function createFixWorker(deps: FixDeps): ReviewWorker {
     idle: async () => {
       while (running !== undefined) await running;
     },
+    busy: () => running !== undefined,
   };
 }

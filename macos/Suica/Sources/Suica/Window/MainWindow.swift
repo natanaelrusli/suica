@@ -194,6 +194,7 @@ struct MainWindow: View {
     let fixes: FixesModel
     let templates: TemplateEditorModel
     let office: OfficeModel
+    let lessons: LessonsModel
     @Bindable var onboarding: OnboardingModel
     let settings: AppearanceSettings
     @Bindable var navigator: Navigator
@@ -235,6 +236,11 @@ struct MainWindow: View {
             }
         }
         .frame(minWidth: 760, minHeight: 480)
+        // A repeat marker on an MR opens its Lesson here.
+        .environment(\.openLesson, OpenLessonAction { id in
+            navigator.selection = .section(.lessons)
+            Task { await lessons.open(id) }
+        })
         // The Dock icon exists only while the window does.
         .onAppear {
             // Opened from the Dock or Open Suica…: the start page. From the popover or Go menu: theirs.
@@ -422,11 +428,12 @@ struct MainWindow: View {
         case .usage: UsageView(window: window)
         case .logs: LogsView(window: window)
         case .configuration: ConfigurationView(
-                window: window, editor: editor, reviews: reviews, navigator: navigator,
+                window: window, editor: editor, reviews: reviews, lessons: lessons, navigator: navigator,
                 category: item.category)
         case .appearance: AppearanceView(settings: settings)
         case .office: OfficeView(model: office, settings: settings)
         case .system: SystemView()
+        case .lessons: LessonsView(model: lessons, navigator: navigator)
         }
     }
 }

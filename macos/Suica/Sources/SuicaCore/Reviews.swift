@@ -48,11 +48,13 @@ public struct AgentReviewInfo: Codable, Equatable, Sendable {
     public let activity: [ReviewActivityLine]?
     public let createdAt: Int
     public let updatedAt: Int
+    /// Its findings that repeat a Lesson; empty from an agent without lessons.
+    public let repeats: [ReviewRepeat]
 
     public init(
         id: Int, status: String, cli: String? = nil, model: String? = nil, skill: String? = nil, startedAt: Int? = nil,
         headSha: String? = nil, previousSha: String? = nil, body: String? = nil, detail: String = "",
-        activity: [ReviewActivityLine]? = nil, createdAt: Int = 0, updatedAt: Int = 0
+        activity: [ReviewActivityLine]? = nil, createdAt: Int = 0, updatedAt: Int = 0, repeats: [ReviewRepeat] = []
     ) {
         self.id = id
         self.status = status
@@ -67,6 +69,30 @@ public struct AgentReviewInfo: Codable, Equatable, Sendable {
         self.activity = activity
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+        self.repeats = repeats
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, status, cli, model, skill, startedAt, headSha, previousSha, body, detail, activity, createdAt,
+            updatedAt, repeats
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(Int.self, forKey: .id)
+        status = try container.decode(String.self, forKey: .status)
+        cli = try container.decodeIfPresent(String.self, forKey: .cli)
+        model = try container.decodeIfPresent(String.self, forKey: .model)
+        skill = try container.decodeIfPresent(String.self, forKey: .skill)
+        startedAt = try container.decodeIfPresent(Int.self, forKey: .startedAt)
+        headSha = try container.decodeIfPresent(String.self, forKey: .headSha)
+        previousSha = try container.decodeIfPresent(String.self, forKey: .previousSha)
+        body = try container.decodeIfPresent(String.self, forKey: .body)
+        detail = try container.decode(String.self, forKey: .detail)
+        activity = try container.decodeIfPresent([ReviewActivityLine].self, forKey: .activity)
+        createdAt = try container.decode(Int.self, forKey: .createdAt)
+        updatedAt = try container.decode(Int.self, forKey: .updatedAt)
+        repeats = try container.decodeIfPresent([ReviewRepeat].self, forKey: .repeats) ?? []
     }
 
     /// The agent is still on it: the page refreshes until it is done.

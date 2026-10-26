@@ -11,6 +11,8 @@ export interface Finding {
   readonly line: number;
   /** The item without its marker and location, continuation lines included. */
   readonly text: string;
+  /** The capitalised severity subheading the item sits under, as in `countFindings`; "" under none. */
+  readonly severity: string;
   /** Lines `[start, end)` of the review the item occupies. */
   readonly start: number;
   readonly end: number;
@@ -45,6 +47,8 @@ export function extractFindings(markdown: string): Finding[] {
   let sectionLevel: number | undefined;
   /** The level of the Previous heading the lines are under, if any. */
   let previousLevel: number | undefined;
+  /** Undefined under a subheading that is not a severity. */
+  let severity: string | undefined = "";
   let inFence = false;
   let index = 0;
   while (index < lines.length) {
@@ -59,10 +63,18 @@ export function extractFindings(markdown: string): Finding[] {
       } else if (isFindingsHeading(title)) {
         sectionLevel = level;
         previousLevel = undefined;
+        severity = "";
       } else {
         if (sectionLevel !== undefined && level <= sectionLevel) sectionLevel = undefined;
         previousLevel = isPreviousHeading(title) ? level : undefined;
+        severity = severityOf(title);
       }
+      index += 1;
+      continue;
+    }
+    const label = inFence ? null : BOLD_LABEL.exec(line);
+    if (label !== null && sectionLevel !== undefined && previousLevel === undefined) {
+      severity = severityOf(label[2] ?? "");
       index += 1;
       continue;
     }
@@ -84,12 +96,29 @@ export function extractFindings(markdown: string): Finding[] {
       path: match[3] ?? "",
       line: Number(match[4]),
       text: [match[5] ?? "", ...continuation].join("\n").trim(),
+      severity: severity ?? "",
       start: index,
       end,
     });
     index = end;
   }
   return findings;
+}
+
+/**
+ * Each finding's number, made unique within the review: numbered lists under each severity both
+ * start at 1, so a number already used becomes `<number>#<position>` (1-based among all findings).
+ * The Lesson occurrence keys of a review's findings are built from these.
+ */
+export function uniqueFindingNumbers(findings: readonly Pick<Finding, "number">[]): string[] {
+  const used = new Set<string>();
+  return findings.map((finding, index) => {
+    const number = used.has(finding.number)
+      ? `${finding.number}#${String(index + 1)}`
+      : finding.number;
+    used.add(number);
+    return number;
+  });
 }
 
 /** How many findings a review lists under one severity; "" for those under no severity subheading. */

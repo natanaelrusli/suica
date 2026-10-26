@@ -72,6 +72,19 @@ extension UnconfiguredClient: SetupClient {
     func installAgent() async throws(AgentError) -> ActionResult { throw AgentError.launchFailed }
 }
 
+extension UnconfiguredClient: LessonsClient {
+    func lessons() async throws(AgentError) -> LessonListDocument { throw AgentError.launchFailed }
+    func lesson(id: Int) async throws(AgentError) -> LessonDetailDocument? { throw AgentError.launchFailed }
+    func archiveLesson(id: Int) async throws(AgentError) -> LessonChangeOutcome { throw AgentError.launchFailed }
+    func mergeLessons(keep: Int, gone: Int) async throws(AgentError) -> LessonChangeOutcome {
+        throw AgentError.launchFailed
+    }
+    func lessonsStatus() async throws(AgentError) -> LessonsSetupStatus { throw AgentError.launchFailed }
+    func installLessons(confirm: Bool) async throws(AgentError) -> LessonsInstallReply { throw AgentError.launchFailed }
+    func uninstallLessons() async throws(AgentError) -> LessonsUninstallReply { throw AgentError.launchFailed }
+    func exportLessons() async throws(AgentError) -> LessonsExportReply { throw AgentError.launchFailed }
+}
+
 extension UnconfiguredClient: TemplatesClient {
     func templates() async throws(AgentError) -> TemplatesDocument { throw AgentError.launchFailed }
     func saveTemplate(name: String, text: String?) async throws(AgentError) -> TemplateSaveResult {
@@ -122,6 +135,7 @@ struct SuicaApp: App {
     @State private var templates: TemplateEditorModel
     @State private var office: OfficeModel
     @State private var onboarding: OnboardingModel
+    @State private var lessons: LessonsModel
     @State private var appearance = AppearanceSettings()
     @State private var navigator = Navigator()
     @State private var celebrations = CelebrationCounter()
@@ -134,6 +148,7 @@ struct SuicaApp: App {
         let templatesClient: any TemplatesClient
         let officeClient: any OfficeClient
         let setupClient: any SetupClient
+        let lessonsClient: any LessonsClient
         if let config = AgentConfig.fromBundle(.main) {
             let client = CLIAgentClient(config: config, runner: ProcessRunner())
             agent = client
@@ -143,6 +158,7 @@ struct SuicaApp: App {
             templatesClient = client
             officeClient = client
             setupClient = client
+            lessonsClient = client
         } else {
             agent = UnconfiguredClient()
             dashboard = UnconfiguredClient()
@@ -151,6 +167,7 @@ struct SuicaApp: App {
             templatesClient = UnconfiguredClient()
             officeClient = UnconfiguredClient()
             setupClient = UnconfiguredClient()
+            lessonsClient = UnconfiguredClient()
         }
         let model = MenuModel(client: agent)
         _model = State(initialValue: model)
@@ -162,6 +179,7 @@ struct SuicaApp: App {
         _fixes = State(initialValue: FixesModel(client: fixesClient))
         _templates = State(initialValue: TemplateEditorModel(client: templatesClient))
         _office = State(initialValue: OfficeModel(client: officeClient))
+        _lessons = State(initialValue: LessonsModel(client: lessonsClient))
         let onboardingModel = OnboardingModel(dashboard: dashboard, setup: setupClient)
         _onboarding = State(initialValue: onboardingModel)
         let reviewsModel = ReviewsModel(client: reviewsClient)
@@ -191,7 +209,7 @@ struct SuicaApp: App {
         Window(Copy.appName, id: "main") {
             MainWindow(
                 window: window, editor: editor, reviews: reviews, fixes: fixes, templates: templates,
-                office: office, onboarding: onboarding, settings: appearance, navigator: navigator
+                office: office, lessons: lessons, onboarding: onboarding, settings: appearance, navigator: navigator
             )
             .modifier(Celebrations(model: model, reviews: reviews, settings: appearance, counter: celebrations))
             .appearance(appearance)

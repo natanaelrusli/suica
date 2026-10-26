@@ -339,6 +339,7 @@ func makeBrokenConfigStatus() -> StatusDocument {
     #expect(Copy.purpose("review") == "Agent reviews")
     #expect(Copy.purpose("approve") == "Approval checks")
     #expect(Copy.purpose("reply") == "Replies")
+    #expect(Copy.purpose("lessons") == "Lessons")
     #expect(Copy.purpose("triage") == "triage")
 }
 

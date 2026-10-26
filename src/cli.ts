@@ -1,5 +1,6 @@
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { installAgent, plistPath, uninstallAgent } from "./agent-install.ts";
 import { buildStatus, loadStatusInput, readServiceStatus, restartService } from "./agent-status.ts";
 import { actionJson, buildAgentState } from "./agent-state.ts";
@@ -17,6 +18,15 @@ import {
   glabRunner,
 } from "./gitlab.ts";
 import { checkGitlab } from "./gitlab-check.ts";
+import { openLessonsReadOnly } from "./lesson-store.ts";
+import { readScopeCache } from "./lessons/hook.ts";
+import { applyInstall, applyUninstall, lessonsStatus, planInstall } from "./lessons/install.ts";
+import type { LessonsPaths } from "./lessons/install.ts";
+import { serveLessons } from "./lessons/mcp-server.ts";
+import { archiveLesson, buildLessonList, buildLessonShow, mergeLessons } from "./lessons/owner.ts";
+import type { ChangeResult } from "./lessons/owner.ts";
+import { scanScopes } from "./lessons/scopes.ts";
+import { exportVault } from "./lessons/vault.ts";
 import { MODEL_CLI_CHOICES, detectModelClis, resolveModelCli } from "./model-cli.ts";
 import { buildReviewOptions, listSkills } from "./review-options.ts";
 import { closeMergeRequest, commentOnMergeRequest, mergeMergeRequest } from "./mr-actions.ts";
@@ -27,6 +37,7 @@ import {
   fetchFixDetail,
   fetchMrDetail,
   parseMrKey,
+  repeatLookup,
   resolveOwnThreads,
 } from "./reviews.ts";
 import {
@@ -70,7 +81,7 @@ import { realProbe } from "./office/probe.ts";
 import { buildUsage } from "./usage.ts";
 
 const USAGE =
-  "usage: suica <once|status|state|stats|usage|office --json|office chat <agent> <sessionId> --json|office send <agent> <sessionId> --json (message on stdin)|pause|resume|pending [--all]|send <id> [--json]|skip <id> [--json]|retry <id> [--json]|clear <id|yours|others|all> [--json]|selftest|message <key> --json (request on stdin)|reviews --json|mr <key> --json|mr approve <key> <sha> --json|mr comment <key> --json (body on stdin)|mr close <key> --json|mr merge <key> <sha> [--squash] [--remove-source-branch] [--when-pipeline-succeeds] --json (message on stdin)|review options [--cli <id>] --json|review queue <key> [--skill <name>] [--model <name>] [--auto] --json|review post <id> [--inline|--comment] --json|review discard <id> --json|review cancel <id> --json|fix list --json|fix queue <key> [--pipeline] --json|fix watch <key> --json|fix unwatch <key> --json|fix confirm <id> --json (edits on stdin)|fix retry <id> --json (note on stdin)|fix discard <id> --json|fix cancel <id> --json|fix replies <id> --json|config show --json|config set --json|templates show --json|templates set --json|gitlab check <host> --json|agent install [--json]|agent uninstall|agent restart --json>\n";
+  "usage: suica <once|status|state|stats|usage|office --json|office chat <agent> <sessionId> --json|office send <agent> <sessionId> --json (message on stdin)|pause|resume|pending [--all]|send <id> [--json]|skip <id> [--json]|retry <id> [--json]|clear <id|yours|others|all> [--json]|selftest|message <key> --json (request on stdin)|reviews --json|mr <key> --json|mr approve <key> <sha> --json|mr comment <key> --json (body on stdin)|mr close <key> --json|mr merge <key> <sha> [--squash] [--remove-source-branch] [--when-pipeline-succeeds] --json (message on stdin)|review options [--cli <id>] --json|review queue <key> [--skill <name>] [--model <name>] [--auto] --json|review post <id> [--inline|--comment] --json|review discard <id> --json|review cancel <id> --json|fix list --json|fix queue <key> [--pipeline] --json|fix watch <key> --json|fix unwatch <key> --json|fix confirm <id> --json (edits on stdin)|fix retry <id> --json (note on stdin)|fix discard <id> --json|fix cancel <id> --json|fix replies <id> --json|config show --json|config set --json|templates show --json|templates set --json|gitlab check <host> --json|lessons mcp|lessons install [--yes] [--json]|lessons uninstall [--json]|lessons status --json|lessons export [--json]|lessons list --json|lessons show <id> --json|lessons archive <id> --json|lessons merge <keep> <gone> --json|agent install [--json]|agent uninstall|agent restart --json>\n";
 const TEAMS_DISABLED = "teams is disabled: set teams.enabled to true in the config\n";
 const SHOWN_WITH_ALL = 50;
 
@@ -328,6 +339,7 @@ async function reviewsJson(): Promise<number> {
       store.fixes.latestByMr(),
       config.review.approveWhen,
       (key) => isWatched(key, choices, config),
+      repeatLookup(config.lessons.enabled, store.lessons),
     );
     process.stdout.write(`${JSON.stringify(document)}\n`);
     return 0;
@@ -475,7 +487,12 @@ async function fixCommand(argv: readonly string[]): Promise<number> {
   try {
     if (action === "list") {
       process.stdout.write(
-        `${JSON.stringify(buildFixList(store.fixes.list(Date.now() - FIX_LIST_DAYS_MS)))}\n`,
+        `${JSON.stringify(
+          buildFixList(
+            store.fixes.list(Date.now() - FIX_LIST_DAYS_MS),
+            repeatLookup(config.lessons.enabled, store.lessons),
+          ),
+        )}\n`,
       );
       return 0;
     }
@@ -770,6 +787,189 @@ async function templatesCommand(action: string | undefined): Promise<number> {
   return reply(saveTemplate(directory, request));
 }
 
+/** The scope map the daemon caches after each scan; without it the folders are walked. */
+function lessonScopeMap(config: ReturnType<typeof loadConfig>) {
+  const statePath = config.statePath ?? defaultStatePath();
+  const { scopes } = config.lessons;
+  return (
+    readScopeCache(join(dirname(statePath), "lesson-scopes.json"), scopes) ??
+    scanScopes(scopes, config.gitlab.hostname)
+  );
+}
+
+/** `suica lessons list --json`: every scope's Lessons, read-only. */
+function listLessonsCommand(): number {
+  const config = loadConfig(defaultConfigPath());
+  const { enabled } = config.lessons;
+  const reader = enabled ? openLessonsReadOnly(config.statePath ?? defaultStatePath()) : undefined;
+  try {
+    const document = buildLessonList(
+      reader,
+      config.lessons,
+      () => lessonScopeMap(config),
+      Date.now(),
+    );
+    process.stdout.write(`${JSON.stringify(document)}\n`);
+    return 0;
+  } finally {
+    reader?.close();
+  }
+}
+
+/** `suica lessons show <id> --json`: one Lesson with its occurrences, read-only. */
+function showLessonCommand(id: number): number {
+  const config = loadConfig(defaultConfigPath());
+  const reader = openLessonsReadOnly(config.statePath ?? defaultStatePath());
+  try {
+    const document = reader === undefined ? undefined : buildLessonShow(reader, id, Date.now());
+    process.stdout.write(`${JSON.stringify(document ?? { version: 1, status: "not-found" })}\n`);
+    return document === undefined ? 1 : 0;
+  } finally {
+    reader?.close();
+  }
+}
+
+/** `suica lessons archive|merge … --json`: the Owner's hand edits, then the vault again. */
+function changeLessonsCommand(
+  change: (store: ReturnType<typeof openStore>, now: number) => ChangeResult,
+): number {
+  const config = loadConfig(defaultConfigPath());
+  const statePath = config.statePath ?? defaultStatePath();
+  const reply = (result: ChangeResult): number => {
+    process.stdout.write(`${JSON.stringify({ version: 1, ...result })}\n`);
+    return result.status === "archived" || result.status === "merged" ? 0 : 1;
+  };
+  // No state yet means no lesson; opening the store would create one.
+  if (!existsSync(statePath)) return reply({ status: "not-found" });
+  const store = openStore(statePath);
+  try {
+    const now = Date.now();
+    const result = change(store, now);
+    const { enabled, scopes, vaultPath } = config.lessons;
+    if (result.status !== "not-found" && result.status !== "bad-request") {
+      try {
+        if (enabled && vaultPath !== undefined) exportVault(store.lessons, scopes, vaultPath, now);
+      } catch (error) {
+        // The change is made; the vault catches up on the next export.
+        const message = error instanceof Error ? error.message : "unknown error";
+        process.stderr.write(`suica: lessons vault not exported: ${message}\n`);
+      }
+    }
+    return reply(result);
+  } finally {
+    store.close();
+  }
+}
+
+/** `suica lessons mcp`: the lessons MCP server on stdio until stdin closes; stdout is JSON-RPC only. */
+async function lessonsMcp(): Promise<number> {
+  const path = defaultConfigPath();
+  await serveLessons(process.stdin, process.stdout, {
+    config: () => loadConfig(path).lessons,
+    openReader: () => openLessonsReadOnly(loadConfig(path).statePath ?? defaultStatePath()),
+    scan: () => lessonScopeMap(loadConfig(path)),
+    now: () => Date.now(),
+  });
+  return 0;
+}
+
+/** `suica lessons export`: writes the vault now; exits 1 when there is nowhere or nothing to write from. */
+function exportLessonsCommand(json: boolean): number {
+  const config = loadConfig(defaultConfigPath());
+  const { enabled, scopes, vaultPath } = config.lessons;
+  const say = (result: Record<string, unknown>, line: string, code: number): number => {
+    process.stdout.write(json ? `${JSON.stringify({ version: 1, ...result })}\n` : `${line}\n`);
+    return code;
+  };
+  if (!enabled) return say({ status: "disabled" }, "lessons are off", 0);
+  if (vaultPath === undefined) {
+    return say({ status: "no-vault-path" }, "set lessons.vaultPath to export", 1);
+  }
+  const reader = openLessonsReadOnly(config.statePath ?? defaultStatePath());
+  if (reader === undefined) return say({ status: "no-lessons" }, "no lessons stored yet", 1);
+  try {
+    const { written, removed, conflicts } = exportVault(reader, scopes, vaultPath, Date.now());
+    return say(
+      { status: "exported", written, removed, conflicts, path: vaultPath },
+      `exported to ${vaultPath}: ${String(written)} written, ${String(removed)} removed` +
+        (conflicts > 0 ? `, ${String(conflicts)} left alone (not written by Suica)` : ""),
+      0,
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "export failed";
+    return say({ status: "failed", message }, `export failed: ${message}`, 1);
+  } finally {
+    reader.close();
+  }
+}
+
+function lessonsPaths(): LessonsPaths {
+  return {
+    node: process.execPath,
+    cli: join(import.meta.dirname, "cli.ts"),
+    hook: join(import.meta.dirname, "lessons-hook.ts"),
+  };
+}
+
+/** The folders searched for claude and codex; SUICA_CLI_DIRS replaces them (tests, odd installs). */
+function lessonsClis() {
+  const override = process.env["SUICA_CLI_DIRS"];
+  const dirs = override?.split(delimiter).filter((dir) => dir !== "");
+  return detectModelClis(dirs);
+}
+
+/** `suica lessons install`: without `--yes` only prints the plan and exits 1. */
+async function installLessonsCommand(yes: boolean, json: boolean): Promise<number> {
+  const home = homedir();
+  const paths = lessonsPaths();
+  const clis = lessonsClis();
+  const plan = planInstall(home, clis, paths);
+  if (!yes) {
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({ version: 1, status: "needs-confirmation", plan })}\n`,
+      );
+    } else {
+      const lines = [
+        `would edit ${plan.settingsPath}, adding these hooks (command: ${plan.command}):`,
+        ...plan.hooks.map(
+          (hook) => `  ${hook.event}${hook.matcher === "" ? "" : ` (${hook.matcher})`}`,
+        ),
+        ...plan.commands.map((line) => `would run: ${line}`),
+        plan.note,
+        "run again with --yes to apply",
+      ];
+      process.stdout.write(`${lines.join("\n")}\n`);
+    }
+    return 1;
+  }
+  const result = await applyInstall(home, defaultExec, clis, paths);
+  if (json) {
+    process.stdout.write(`${JSON.stringify({ version: 1, ...result })}\n`);
+  } else if (result.status === "invalid-settings" || result.status === "unreadable-settings") {
+    process.stderr.write(
+      `${result.settingsPath} cannot be used (${result.status}); left unchanged\n`,
+    );
+  } else {
+    process.stdout.write(
+      `hooks ${result.changed ? "installed in" : "already in"} ${result.settingsPath}; registered: ${result.registered.join(", ") || "none"}; skipped: ${result.skipped.join(", ") || "none"}${result.failed.length > 0 ? `; failed: ${result.failed.join(", ")}` : ""}\n`,
+    );
+  }
+  return result.status === "installed" ? 0 : 1;
+}
+
+async function uninstallLessonsCommand(json: boolean): Promise<number> {
+  const result = await applyUninstall(homedir(), defaultExec, lessonsClis(), lessonsPaths());
+  if (json) process.stdout.write(`${JSON.stringify({ version: 1, ...result })}\n`);
+  else if (result.status === "invalid-settings" || result.status === "unreadable-settings")
+    process.stderr.write(`settings.json cannot be used (${result.status}); left unchanged\n`);
+  else
+    process.stdout.write(
+      `removed the hooks: ${result.hookRemoved}; unregistered: ${result.removed.join(", ") || "none"}${result.failed.length > 0 ? `; failed: ${result.failed.join(", ")}` : ""}\n`,
+    );
+  return result.status === "uninstalled" ? 0 : 1;
+}
+
 async function main(argv: readonly string[]): Promise<number> {
   const command = argv[0];
   if (
@@ -861,6 +1061,44 @@ async function main(argv: readonly string[]): Promise<number> {
     const result = await checkGitlab(host, defaultExec);
     process.stdout.write(`${JSON.stringify(result)}\n`);
     return result.status === "ok" ? 0 : 1;
+  }
+  if (command === "lessons") {
+    if (argv[1] === "mcp" && argv.length === 2) return lessonsMcp();
+    const flags = argv.slice(2);
+    const json = flags.includes("--json");
+    const known = (allowed: readonly string[]) => flags.every((flag) => allowed.includes(flag));
+    if (argv[1] === "install" && known(["--yes", "--json"])) {
+      return installLessonsCommand(flags.includes("--yes"), json);
+    }
+    if (argv[1] === "export" && known(["--json"])) return exportLessonsCommand(json);
+    if (argv[1] === "list" && json && flags.length === 1) return listLessonsCommand();
+    const ids = flags.filter((flag) => flag !== "--json");
+    const counts: Readonly<Record<string, number>> = { show: 1, archive: 1, merge: 2 };
+    if (json && ids.length === counts[argv[1] ?? ""] && flags.length === ids.length + 1) {
+      const numbers = ids.map(parseId);
+      const [first, second] = numbers;
+      if (first === undefined || numbers.includes(undefined)) {
+        process.stdout.write(
+          `${JSON.stringify({ version: 1, status: "bad-request", message: "lesson ids are whole numbers" })}\n`,
+        );
+        return 1;
+      }
+      if (argv[1] === "show") return showLessonCommand(first);
+      if (argv[1] === "archive") {
+        return changeLessonsCommand((store, now) => archiveLesson(store.lessons, first, now));
+      }
+      return changeLessonsCommand((store, now) =>
+        mergeLessons(store.lessons, first, second ?? first, now),
+      );
+    }
+    if (argv[1] === "uninstall" && known(["--json"])) return uninstallLessonsCommand(json);
+    if (argv[1] === "status" && json && flags.length === 1) {
+      const status = await lessonsStatus(homedir(), defaultExec, lessonsClis(), lessonsPaths());
+      process.stdout.write(`${JSON.stringify({ version: 1, ...status })}\n`);
+      return 0;
+    }
+    process.stderr.write(USAGE);
+    return 2;
   }
   if (command === "agent") {
     if (argv[1] === "restart" && argv.includes("--json")) return restartAgent();

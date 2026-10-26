@@ -50,7 +50,7 @@ describe("token usage", () => {
     expect(store.loadTokenUsage(0)).toEqual([]);
     store.close();
     const check = new DatabaseSync(path);
-    expect(check.prepare("PRAGMA user_version").get()?.["user_version"]).toBe(19);
+    expect(check.prepare("PRAGMA user_version").get()?.["user_version"]).toBe(20);
     check.close();
   });
 });
@@ -126,7 +126,7 @@ describe("schema 7", () => {
     });
     store.close();
     const check = new DatabaseSync(path);
-    expect(check.prepare("PRAGMA user_version").get()?.["user_version"]).toBe(19);
+    expect(check.prepare("PRAGMA user_version").get()?.["user_version"]).toBe(20);
     check.close();
   });
 });

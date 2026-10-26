@@ -61,7 +61,8 @@
           "action": null,
           "reply": "",
           "post": false,
-          "posted": false
+          "posted": false,
+          "repeat": null
         }
       ],
       "pipeline": null,
@@ -106,7 +107,13 @@
           "action": "changed",
           "reply": "Fixed in {{sha}}: renamed.",
           "post": true,
-          "posted": false
+          "posted": false,
+          "repeat": {
+            "lessonId": 1,
+            "title": "Name things for what they do",
+            "before": 1,
+            "repos": ["g/api"]
+          }
         },
         {
           "id": "gid://gitlab/Discussion/1111111111111111111111111111111111111111",
@@ -130,7 +137,8 @@
           "action": "reply",
           "reply": "This is on purpose.",
           "post": true,
-          "posted": false
+          "posted": false,
+          "repeat": null
         },
         {
           "id": "gid://gitlab/Discussion/2222222222222222222222222222222222222222",
@@ -154,7 +162,8 @@
           "action": "reply",
           "reply": "",
           "post": false,
-          "posted": false
+          "posted": false,
+          "repeat": null
         }
       ],
       "pipeline": null,

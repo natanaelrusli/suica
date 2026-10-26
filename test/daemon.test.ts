@@ -63,4 +63,50 @@ describe("runDaemon", () => {
       "polling paused",
     ]);
   });
+
+  it("starts the work beside the loop after every poll, failed ones too", async () => {
+    const controller = new AbortController();
+    const order: string[] = [];
+    await runDaemon({
+      poll: () => {
+        order.push("poll");
+        return Promise.resolve(order.length > 1 ? "ok" : "failed");
+      },
+      afterPoll: () => order.push("after"),
+      readIdleSeconds: () => Promise.resolve(0),
+      polling,
+      sleep: () => {
+        if (order.length >= 4) controller.abort();
+        return Promise.resolve();
+      },
+      log,
+      signal: controller.signal,
+    });
+    expect(order).toEqual(["poll", "after", "poll", "after"]);
+  });
+
+  it("keeps polling when the work after a poll throws", async () => {
+    const controller = new AbortController();
+    const logs: string[] = [];
+    let polls = 0;
+    await runDaemon({
+      poll: () => {
+        polls += 1;
+        return Promise.resolve("ok");
+      },
+      afterPoll: () => {
+        throw new Error("learner");
+      },
+      readIdleSeconds: () => Promise.resolve(0),
+      polling,
+      sleep: () => {
+        if (polls >= 2) controller.abort();
+        return Promise.resolve();
+      },
+      log: createLogger({ write: (line) => logs.push(line), minLevel: "info" }),
+      signal: controller.signal,
+    });
+    expect(polls).toBe(2);
+    expect(logs.some((line) => line.includes("after-poll work crashed"))).toBe(true);
+  });
 });

@@ -455,6 +455,52 @@
       "effective": 10
     },
     {
+      "path": ["lessons", "enabled"],
+      "type": "bool",
+      "label": "Review lessons",
+      "help": "Learn lessons from every Agent Review that gets ready (posted or discarded) and from the Finding Threads on your MRs, and hand them to your coding agent when a session starts and when it reads a file",
+      "value": null,
+      "effective": false
+    },
+    {
+      "path": ["lessons", "scopes"],
+      "type": "stringList",
+      "label": "Lesson folders",
+      "help": "One folder per line, for example ~/work: only repositories under these folders feed and use lessons; empty means none, so nothing is learned or served",
+      "value": null,
+      "effective": []
+    },
+    {
+      "path": ["lessons", "vaultPath"],
+      "type": "string",
+      "label": "Lessons vault",
+      "help": "Folder, such as an Obsidian vault, the lessons are also written to as Markdown; none when empty",
+      "placeholder": "None",
+      "format": "path",
+      "value": null,
+      "effective": null
+    },
+    {
+      "path": ["lessons", "perFile"],
+      "type": "int",
+      "label": "Lessons per file",
+      "help": "At most this many lessons are handed to your coding agent for one file it reads or edits",
+      "unit": "lessons",
+      "max": 20,
+      "value": null,
+      "effective": 5
+    },
+    {
+      "path": ["lessons", "perSession"],
+      "type": "int",
+      "label": "Lessons per session",
+      "help": "At most this many lessons are handed to your coding agent when a session starts in a lesson folder",
+      "unit": "lessons",
+      "max": 20,
+      "value": null,
+      "effective": 5
+    },
+    {
       "path": ["office", "agents"],
       "type": "stringList",
       "label": "Coding agents to show",

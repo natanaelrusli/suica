@@ -922,6 +922,7 @@ private func options() throws -> ReviewOptions {
 
     let golden = try decodeDocument(ReviewListDocument.self, from: contract("reviews.v1.json"))
     #expect(golden.mergeRequests.map(\.agentReviewPosted) == [false, true])
+    #expect(golden.mergeRequests.map { $0.agentReview?.repeats.map(\.lessonId) } == [[], [1]])
     let older = Data("""
         {"key": "g/p!2", "title": "t", "url": "https://x", "draft": false, "author": {"username": "a", "name": "A"}, "reviewers": []}
         """.utf8)

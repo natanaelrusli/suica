@@ -35,7 +35,8 @@
         "detail": "",
         "activity": [],
         "createdAt": 1792148400000,
-        "updatedAt": 1792152000000
+        "updatedAt": 1792152000000,
+        "repeats": []
       },
       "changedSinceReview": null,
       "agentReviewPosted": false,
@@ -68,11 +69,20 @@
         "startedAt": 1792152100000,
         "headSha": "89abcdef0123456789abcdef0123456789abcdef",
         "previousSha": "0123456789abcdef0123456789abcdef01234567",
-        "body": "# Code review: g/p!9\n\nNo new findings.",
+        "body": "# Code review: g/p!9\n\n## Findings\n### Major\n1. `src/http.ts:12` — the client has no timeout.\n### Minor\n1. `src/log.ts:3` — a debug line is left in.",
         "detail": "",
         "activity": [],
         "createdAt": 1792152050000,
-        "updatedAt": 1792152200000
+        "updatedAt": 1792152200000,
+        "repeats": [
+          {
+            "finding": "1",
+            "lessonId": 1,
+            "title": "HTTP clients need an explicit timeout",
+            "before": 3,
+            "repos": ["g/api", "g/web"]
+          }
+        ]
       },
       "changedSinceReview": {
         "code": true,

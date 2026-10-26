@@ -78,6 +78,13 @@ public struct FixThreadInfo: Codable, Equatable, Identifiable, Sendable {
     public let reply: String
     public let post: Bool
     public let posted: Bool
+    /// The Lesson this thread's finding repeats; nil when none, and from an agent without lessons.
+    public let lessonRepeat: ThreadRepeat?
+
+    private enum CodingKeys: String, CodingKey {
+        case id, author, filePath, line, notes, action, reply, post, posted
+        case lessonRepeat = "repeat"
+    }
 }
 
 /// The failed pipeline a Pipeline Fix works on.
