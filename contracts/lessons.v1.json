@@ -1,0 +1,92 @@
+{
+  "list": {
+    "version": 1,
+    "enabled": true,
+    "scopes": [
+      {
+        "path": "/work/acme",
+        "repos": 2,
+        "lessons": [
+          {
+            "id": 1,
+            "title": "HTTP clients need an explicit timeout",
+            "rule": "HTTP clients need an explicit timeout, because it keeps biting.",
+            "topics": ["http-client", "go"],
+            "weight": 7.07,
+            "count": 3,
+            "repos": ["acme/api", "acme/web"],
+            "lastSeen": "2026-10-24T12:00:00.000Z"
+          },
+          {
+            "id": 2,
+            "title": "Wrap errors with context",
+            "rule": "Wrap errors with context, because it keeps biting.",
+            "topics": ["errors"],
+            "weight": 1.39,
+            "count": 1,
+            "repos": ["acme/api"],
+            "lastSeen": "2026-10-16T12:00:00.000Z"
+          }
+        ]
+      }
+    ],
+    "pending": 1
+  },
+  "show": {
+    "version": 1,
+    "lesson": {
+      "id": 1,
+      "title": "HTTP clients need an explicit timeout",
+      "rule": "HTTP clients need an explicit timeout, because it keeps biting.",
+      "topics": ["http-client", "go"],
+      "globs": ["**/*.go"],
+      "scope": "/work/acme",
+      "archived": false,
+      "weight": 7.07,
+      "count": 3,
+      "repos": ["acme/api", "acme/web"],
+      "lastSeen": "2026-10-24T12:00:00.000Z",
+      "related": [
+        {
+          "id": 2,
+          "title": "Wrap errors with context"
+        }
+      ],
+      "occurrences": [
+        {
+          "mrKey": "acme/web!5",
+          "mrTitle": "MR 5",
+          "mrUrl": "https://gitlab.example/acme/web/-/merge_requests/5",
+          "path": "web/fetch.go",
+          "line": 40,
+          "severity": "",
+          "outcome": "changed",
+          "text": "fetch() waits forever when the host stalls.",
+          "at": "2026-10-24T12:00:00.000Z"
+        },
+        {
+          "mrKey": "acme/api!4",
+          "mrTitle": "MR 4",
+          "mrUrl": "https://gitlab.example/acme/api/-/merge_requests/4",
+          "path": "src/client.go",
+          "line": 12,
+          "severity": "Blocker",
+          "outcome": "open",
+          "text": "The client has no timeout.",
+          "at": "2026-10-16T12:00:00.000Z"
+        },
+        {
+          "mrKey": "acme/api!3",
+          "mrTitle": "MR 3",
+          "mrUrl": "https://gitlab.example/acme/api/-/merge_requests/3",
+          "path": "src/client.go",
+          "line": 12,
+          "severity": "Major",
+          "outcome": "open",
+          "text": "The client has no timeout.",
+          "at": "2026-09-26T12:00:00.000Z"
+        }
+      ]
+    }
+  }
+}
