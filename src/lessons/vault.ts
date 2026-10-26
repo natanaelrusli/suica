@@ -9,7 +9,7 @@ import {
 } from "node:fs";
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
-import { basename, dirname, isAbsolute, join, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import type { LessonStore, OccurrenceRow } from "../lesson-store.ts";
 import { weight } from "./match.ts";
 import { projectOfMrKey } from "./scopes.ts";
@@ -203,8 +203,9 @@ function listNote(title: string, entries: readonly Entry[]): string {
 
 function gather(reader: VaultReader, scopes: readonly string[], now: number): Entry[] {
   const out: Omit<Entry, "related">[] = [];
-  for (const scope of new Set(scopes)) {
-    if (scope === "") continue;
+  // Lessons store resolved scopes; a typed `…/acme/` or `…/x/../acme` must find the same ones,
+  // or the export would see no lessons and remove every note it wrote before.
+  for (const scope of new Set(scopes.filter((s) => s !== "").map((s) => resolve(s)))) {
     for (const lesson of reader.lessons(scope)) {
       if (lesson.archived || lesson.scope === "") continue;
       const occurrences = reader.occurrences(lesson.id);

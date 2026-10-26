@@ -370,6 +370,18 @@ describe("exportVault", () => {
     expect(readFileSync(join(dir, "Lessons/one-1.md"), "utf8")).toContain("# One");
   });
 
+  it("resolves scopes, so a trailing slash or .. exports the same files and deletes nothing", () => {
+    const exact = exportVault(data(), [SCOPE], dir, NOW);
+    const files = readdirSync(join(dir, "Lessons")).sort();
+    const again = exportVault(data(), [`${SCOPE}/`, "", "/work/x/../acme"], dir, NOW);
+    expect(again).toEqual({ written: 0, removed: 0, conflicts: 0 });
+    expect(readdirSync(join(dir, "Lessons")).sort()).toEqual(files);
+    expect(exact.written).toBeGreaterThan(1);
+    expect(render([lesson(1)], [occ(1, 1)], [], [`${SCOPE}/`])).toEqual(
+      render([lesson(1)], [occ(1, 1)]),
+    );
+  });
+
   it("creates the vault dir when missing", () => {
     const target = join(dir, "new", "vault");
     exportVault(data(), [SCOPE], target, NOW);
