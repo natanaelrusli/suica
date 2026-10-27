@@ -50,30 +50,49 @@ export const ALERT_PLACEHOLDERS: Readonly<Record<AlertName, readonly string[]>> 
   "alert.pipeline-fix-ready": ["mr.title"],
 };
 
+/**
+ * The sound an alert plays: a soft one for something that needs you, a low one for a failure.
+ * Alerts that only report progress are silent.
+ */
+export const ALERT_SOUNDS: Readonly<Partial<Record<AlertName, string>>> = {
+  "alert.review-requested": "Glass",
+  "alert.rereview": "Glass",
+  "alert.review-ready": "Glass",
+  "alert.fix-ready": "Glass",
+  "alert.pipeline-fix-ready": "Glass",
+  "alert.review-post-failed": "Basso",
+  "alert.review-failed": "Basso",
+  "alert.fix-failed": "Basso",
+  "alert.fix-pushed": "Basso",
+  "alert.pipeline-failed": "Basso",
+};
+
 /** Today's texts, title and body on separate lines. */
 export const DEFAULT_ALERTS: AlertTemplates = {
-  "alert.review-requested": "Diminta review: {{mr.title}}\n{{author.name}} · {{mr.project}}",
-  "alert.activity": "!{{mr.iid}}: {{mr.title}}\n{{activity.summary}}",
-  "alert.summary": "{{alert.count}} aktivitas MR baru\n{{alert.titles}}",
-  "alert.baseline": "Suica aktif\n{{alert.count}} MR menunggu review-mu",
+  "alert.review-requested":
+    "👀 Diminta review: {{mr.title}}\n{{author.name}} · {{mr.project}} !{{mr.iid}}",
+  "alert.activity": "💬 !{{mr.iid}} {{mr.title}}\n{{activity.summary}}",
+  "alert.summary": "📬 {{alert.count}} aktivitas MR baru\n{{alert.titles}}",
+  "alert.baseline": "🚃 Suica aktif\n{{alert.count}} MR menunggu review-mu",
   "alert.rereview":
-    "Minta review ulang?\nKamu push ke {{mr.title}} setelah {{reviewers.names}} review. Kirim pesan Teams?",
-  "alert.review-ready": "Review agen siap\n{{mr.title}}: periksa di Suica, lalu posting ke GitLab.",
-  "alert.review-posted": "Review agen diposting\n{{mr.title}}: sudah diposting ke GitLab.",
+    "🔁 Minta review ulang?\nKamu push ke {{mr.title}} setelah {{reviewers.names}} review. Kirim pesan Teams?",
+  "alert.review-ready":
+    "🤖 Review agen siap\n{{mr.title}}: periksa di Suica, lalu posting ke GitLab.",
+  "alert.review-posted": "✅ Review agen diposting\n{{mr.title}}: sudah diposting ke GitLab.",
   "alert.review-approved":
-    "Review agen diposting\n{{mr.title}}: sudah diposting ke GitLab dan MR di-approve.",
+    "✅ Review diposting, MR di-approve\n{{mr.title}}: sudah diposting ke GitLab dan MR di-approve.",
   "alert.review-post-failed":
-    "Review agen gagal diposting\n{{mr.title}}: periksa GitLab, lalu posting dari Suica.",
-  "alert.review-failed": "Review agen gagal\n{{mr.title}}: {{review.reason}}",
-  "alert.review-skipped": "Review agen dilewati\n{{mr.title}}: {{review.reason}}",
+    "⚠️ Review agen gagal diposting\n{{mr.title}}: periksa GitLab, lalu posting dari Suica.",
+  "alert.review-failed": "❌ Review agen gagal\n{{mr.title}}: {{review.reason}}",
+  "alert.review-skipped": "⏭️ Review agen dilewati\n{{mr.title}}: {{review.reason}}",
   "alert.fix-ready":
-    "Perbaikan agen siap\n{{mr.title}}: {{fix.threads}} thread dijawab. Periksa di Suica, lalu push.",
-  "alert.fix-failed": "Perbaikan agen gagal\n{{mr.title}}: {{fix.reason}}",
+    "🛠️ Perbaikan agen siap\n{{mr.title}}: {{fix.threads}} thread dijawab. Periksa di Suica, lalu push.",
+  "alert.fix-failed": "❌ Perbaikan agen gagal\n{{mr.title}}: {{fix.reason}}",
   "alert.fix-pushed":
-    "Perbaikan agen di-push\n{{mr.title}}: sebagian balasan gagal diposting. Kirim ulang dari Suica.",
-  "alert.pipeline-failed": "Pipeline gagal: {{mr.title}}\n!{{mr.iid}} · {{mr.project}}",
+    "⚠️ Perbaikan di-push, balasan belum lengkap\n{{mr.title}}: sebagian balasan gagal diposting. Kirim ulang dari Suica.",
+  "alert.pipeline-failed": "🔴 Pipeline gagal: {{mr.title}}\n!{{mr.iid}} · {{mr.project}}",
   "alert.pipeline-fix-ready":
-    "Perbaikan pipeline siap\n{{mr.title}}: periksa perubahannya di Suica, lalu push.",
+    "🛠️ Perbaikan pipeline siap\n{{mr.title}}: periksa perubahannya di Suica, lalu push.",
 };
 
 export function isAlertName(value: string): value is AlertName {

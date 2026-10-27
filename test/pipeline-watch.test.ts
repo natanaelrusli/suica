@@ -83,7 +83,7 @@ describe("watchPipelines", () => {
     expect(notifications).toEqual([]);
     await watchPipelines(run, snapshot({ authored: [mine(7, pipeline("41", "FAILED"))] }));
     await watchPipelines(run, snapshot({ authored: [mine(7, pipeline("41", "FAILED"))] }));
-    expect(notifications.map((n) => n.title)).toEqual(["Pipeline gagal: MR 7"]);
+    expect(notifications.map((n) => n.title)).toEqual(["🔴 Pipeline gagal: MR 7"]);
     expect(notifications[0]?.body).toBe("!7 · g/p");
     const fix = store.fixes.open("g/p!7");
     expect(fix).toMatchObject({
