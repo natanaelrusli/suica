@@ -1715,3 +1715,36 @@ extension Copy {
         }
     }
 }
+
+// MARK: - Plans
+
+extension Copy {
+    public static let plans = "Plans"
+    public static let searchPlans = "Search plans"
+    public static func planStatus(_ status: PlanStatus) -> String {
+        switch status {
+        case .planned: "Planned"
+        case .inProgress: "In progress"
+        case .inReview: "In review"
+        case .done: "Done"
+        case .dropped: "Dropped"
+        }
+    }
+    public static func planSteps(done: Int, total: Int) -> String {
+        total == 0 ? "No steps" : "\(done) of \(total) step\(total == 1 ? "" : "s")"
+    }
+    public static let plansFolders = "Plan folders"
+    public static let addPlanFolder = "Add folder"
+    public static let noPlanFoldersTitle = "No plan folders yet"
+    public static let noPlanFoldersHint = "Pick a folder that holds your repos or a docs/superpowers/plans folder."
+    public static let noPlansTitle = "No plans found"
+    public static let noPlansHint = "Plans written with the writing-plans skill show here."
+    public static let noPlansMatch = "No plans match."
+    public static let planStatusLabel = "Status"
+    public static let planStatusAuto = "Follows the steps"
+    public static let planNotePrompt = "Where it stands"
+    public static let openPlan = "Open plan"
+    public static let planSpec = "Spec"
+    public static let planTasks = "Tasks"
+    public static let rescanPlans = "Rescan"
+}

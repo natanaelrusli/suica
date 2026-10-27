@@ -136,6 +136,7 @@ struct SuicaApp: App {
     @State private var office: OfficeModel
     @State private var onboarding: OnboardingModel
     @State private var lessons: LessonsModel
+    @State private var plans = PlansModel(store: UserDefaults.standard)
     @State private var appearance = AppearanceSettings()
     @State private var navigator = Navigator()
     @State private var celebrations = CelebrationCounter()
@@ -209,7 +210,7 @@ struct SuicaApp: App {
         Window(Copy.appName, id: "main") {
             MainWindow(
                 window: window, editor: editor, reviews: reviews, fixes: fixes, templates: templates,
-                office: office, lessons: lessons, onboarding: onboarding, settings: appearance, navigator: navigator
+                office: office, lessons: lessons, plans: plans, onboarding: onboarding, settings: appearance, navigator: navigator
             )
             .modifier(Celebrations(model: model, reviews: reviews, settings: appearance, counter: celebrations))
             .appearance(appearance)
