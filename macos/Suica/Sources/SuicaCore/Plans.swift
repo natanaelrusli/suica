@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 
 /// Where a plan stands. The Owner sets it; until then it follows the plan's steps.
 public enum PlanStatus: String, CaseIterable, Identifiable, Codable, Sendable {
@@ -142,6 +143,109 @@ public enum PlanScanner {
             case (_?, nil): true
             default: $0.path < $1.path
             }
+        }
+    }
+}
+
+/// What the Owner set on a plan: a status that beats the derived one, and a note on where it stands.
+public struct PlanMark: Equatable, Codable, Sendable {
+    public var status: PlanStatus?
+    public var note: String
+}
+
+/// The plans of the Owner's folders with their marks, searched and filtered for the Plans page.
+/// Folders and marks are kept in `store`, keyed by the plan's absolute path.
+@MainActor @Observable
+public final class PlansModel {
+    public private(set) var folders: [String]
+    public private(set) var plans: [PlanDocument] = []
+    public private(set) var isScanning = false
+    public var query = ""
+    public var filter: PlanStatus?
+    private var marks: [String: PlanMark]
+    private let store: any PreferenceStore
+    private let home: String
+    private let scan: @Sendable ([String]) -> [PlanDocument]
+
+    private enum Key {
+        static let folders = "plans.folders"
+        static let marks = "plans.marks"
+    }
+
+    public init(
+        store: any PreferenceStore, home: String = NSHomeDirectory(),
+        scan: @escaping @Sendable ([String]) -> [PlanDocument] = { PlanScanner.scan(folders: $0) }
+    ) {
+        self.store = store
+        self.home = home
+        self.scan = scan
+        folders = (store.object(forKey: Key.folders) as? [String]) ?? []
+        marks =
+            store.string(forKey: Key.marks)
+            .flatMap { $0.data(using: .utf8) }
+            .flatMap { try? JSONDecoder().decode([String: PlanMark].self, from: $0) } ?? [:]
+    }
+
+    /// Scans off the main thread; the previous list stays until the scan is done.
+    public func refresh() async {
+        guard !folders.isEmpty else {
+            plans = []
+            return
+        }
+        isScanning = true
+        let folders = folders
+        let scan = scan
+        plans = await Task.detached { scan(folders) }.value
+        isScanning = false
+    }
+
+    public func addFolders(_ chosen: [String]) {
+        folders = Folders.adding(chosen, to: folders, home: home)
+        store.set(folders, forKey: Key.folders)
+    }
+
+    public func removeFolder(_ path: String) {
+        folders.removeAll { $0 == path }
+        store.set(folders, forKey: Key.folders)
+    }
+
+    public func status(of plan: PlanDocument) -> PlanStatus { marks[plan.path]?.status ?? plan.derivedStatus }
+    public func hasSetStatus(_ plan: PlanDocument) -> Bool { marks[plan.path]?.status != nil }
+    public func note(for plan: PlanDocument) -> String { marks[plan.path]?.note ?? "" }
+
+    /// Nil goes back to the status the steps give.
+    public func setStatus(_ status: PlanStatus?, for plan: PlanDocument) {
+        update(plan) { $0.status = status }
+    }
+
+    public func setNote(_ note: String, for plan: PlanDocument) {
+        update(plan) { $0.note = note.trimmingCharacters(in: .whitespacesAndNewlines) }
+    }
+
+    /// The plans the filter and the search leave, in list order.
+    public var visible: [PlanDocument] {
+        let words = query.trimmingCharacters(in: .whitespaces)
+        return plans.filter { plan in
+            if let filter, status(of: plan) != filter { return false }
+            guard !words.isEmpty else { return true }
+            let name = URL(fileURLWithPath: plan.path).lastPathComponent
+            return [plan.title, plan.goal ?? "", note(for: plan), name].contains {
+                $0.localizedCaseInsensitiveContains(words)
+            }
+        }
+    }
+
+    /// Plans per status over every plan, whatever the filter and the search.
+    public var counts: [PlanStatus: Int] {
+        Dictionary(grouping: plans, by: { status(of: $0) }).mapValues(\.count)
+    }
+
+    private func update(_ plan: PlanDocument, _ change: (inout PlanMark) -> Void) {
+        var mark = marks[plan.path] ?? PlanMark(status: nil, note: "")
+        change(&mark)
+        marks[plan.path] = mark.status == nil && mark.note.isEmpty ? nil : mark
+        if let data = try? JSONEncoder().encode(marks), let json = String(data: data, encoding: .utf8) {
+            store.set(json, forKey: Key.marks)
         }
     }
 }

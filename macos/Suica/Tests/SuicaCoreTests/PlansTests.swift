@@ -146,3 +146,101 @@ private func tree(_ files: [String: String]) throws -> URL {
         #expect(PlanScanner.scan(folders: ["~/a", "/nonexistent-suica"], home: root.path).count == 1)
     }
 }
+
+private final class MemoryStore: PreferenceStore {
+    var values: [String: Any] = [:]
+    func string(forKey key: String) -> String? { values[key] as? String }
+    func object(forKey key: String) -> Any? { values[key] }
+    func set(_ value: Any?, forKey key: String) { values[key] = value }
+    func removeObject(forKey key: String) { values[key] = nil }
+}
+
+private func plan(_ name: String, done: Int = 0, total: Int = 3, goal: String? = nil) -> PlanDocument {
+    PlanDocument(
+        path: "/p/plans/\(name).md", title: name, goal: goal, spec: nil, date: nil,
+        tasks: [], stepsDone: done, stepsTotal: total)
+}
+
+@MainActor @Suite struct PlansModelTests {
+    @Test func refreshListsThePlansOfTheFolders() async {
+        let stub = [plan("a")]
+        let model = PlansModel(store: MemoryStore(), scan: { _ in stub })
+        model.addFolders(["~/a"])
+        await model.refresh()
+        #expect(model.plans == stub)
+        #expect(!model.isScanning)
+    }
+
+    @Test func addFoldersKeepsEachFolderOnceAndPersists() {
+        let store = MemoryStore()
+        let model = PlansModel(store: store, home: "/h", scan: { _ in [] })
+        model.addFolders(["/x/", "/x"])
+        #expect(model.folders == ["/x"])
+        #expect(PlansModel(store: store, home: "/h", scan: { _ in [] }).folders == ["/x"])
+        model.removeFolder("/x")
+        #expect(model.folders.isEmpty)
+    }
+
+    @Test func aSetStatusBeatsTheDerivedOneAndResetBringsItBack() {
+        let model = PlansModel(store: MemoryStore(), scan: { _ in [] })
+        let p = plan("a")
+        #expect(model.status(of: p) == .planned)
+        model.setStatus(.inReview, for: p)
+        #expect(model.status(of: p) == .inReview)
+        #expect(model.hasSetStatus(p))
+        model.setStatus(nil, for: p)
+        #expect(model.status(of: p) == .planned)
+    }
+
+    @Test func marksSurviveARestartAndAnOrphanComesBack() async {
+        let store = MemoryStore()
+        let p = plan("a")
+        let first = PlansModel(store: store, scan: { _ in [p] })
+        first.addFolders(["/x"])
+        first.setStatus(.dropped, for: p)
+        first.setNote("  MR !42 open  ", for: p)
+        let gone = PlansModel(store: store, scan: { _ in [] })
+        await gone.refresh()
+        #expect(gone.plans.isEmpty)
+        let back = PlansModel(store: store, scan: { _ in [p] })
+        await back.refresh()
+        #expect(back.status(of: p) == .dropped)
+        #expect(back.note(for: p) == "MR !42 open")
+    }
+
+    @Test func anEmptyNoteWithNoStatusRemovesTheMark() throws {
+        let store = MemoryStore()
+        let model = PlansModel(store: store, scan: { _ in [] })
+        let p = plan("a")
+        model.setNote("x", for: p)
+        model.setNote("  ", for: p)
+        let json = try #require(store.string(forKey: "plans.marks"))
+        #expect(try JSONDecoder().decode([String: PlanMark].self, from: Data(json.utf8)).isEmpty)
+    }
+
+    @Test func visibleFiltersByStatusAndSearchesTitleGoalAndNote() async {
+        let list = [plan("one", done: 3), plan("three", goal: "Add HTTP client"), plan("sixsix")]
+        let model = PlansModel(store: MemoryStore(), scan: { _ in list })
+        model.addFolders(["/x"])
+        await model.refresh()
+        model.setNote("blocked on timeout", for: list[2])
+        model.filter = .done
+        #expect(model.visible == [list[0]])
+        model.filter = nil
+        model.query = "TIMEOUT"
+        #expect(model.visible == [list[2]])
+        model.query = "http"
+        #expect(model.visible == [list[1]])
+        model.filter = .planned
+        model.query = "one"
+        #expect(model.visible.isEmpty)
+        #expect(model.counts == [.done: 1, .planned: 2])
+    }
+
+    @Test func corruptStoredMarksAreIgnored() {
+        let store = MemoryStore()
+        store.set("not json", forKey: "plans.marks")
+        let model = PlansModel(store: store, scan: { _ in [] })
+        #expect(!model.hasSetStatus(plan("a")))
+    }
+}
