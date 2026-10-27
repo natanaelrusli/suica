@@ -101,3 +101,47 @@ public struct PlanDocument: Equatable, Identifiable, Sendable {
         return parts.count >= 3 ? String(parts[1]) : nil
     }
 }
+
+/// Finds the plans under a list of folders.
+public enum PlanScanner {
+    private static let maxBytes = 1_000_000
+
+    /// Every plan below `folders`, newest date first (undated last, then by path), each file once.
+    /// A file that cannot be read or is not UTF-8 is skipped.
+    public static func scan(folders: [String], home: String = NSHomeDirectory()) -> [PlanDocument] {
+        var seen = Set<String>()
+        var plans: [PlanDocument] = []
+        for folder in folders {
+            let root = URL(fileURLWithPath: Folders.expand(folder, home: home))
+            guard
+                let walker = FileManager.default.enumerator(
+                    at: root, includingPropertiesForKeys: [.isDirectoryKey, .isRegularFileKey, .fileSizeKey],
+                    options: [.skipsHiddenFiles])
+            else { continue }
+            for case let url as URL in walker {
+                let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isRegularFileKey, .fileSizeKey])
+                if values?.isDirectory == true {
+                    if ["node_modules", ".build"].contains(url.lastPathComponent) { walker.skipDescendants() }
+                    continue
+                }
+                guard url.pathExtension == "md", values?.isRegularFile == true,
+                    (values?.fileSize ?? 0) <= maxBytes
+                else { continue }
+                let path = url.standardizedFileURL.resolvingSymlinksInPath().path
+                guard !seen.contains(path), let text = try? String(contentsOf: url, encoding: .utf8),
+                    let plan = PlanDocument.parse(path: path, text: text)
+                else { continue }
+                seen.insert(path)
+                plans.append(plan)
+            }
+        }
+        return plans.sorted {
+            switch ($0.date, $1.date) {
+            case (let a?, let b?) where a != b: a > b
+            case (nil, _?): false
+            case (_?, nil): true
+            default: $0.path < $1.path
+            }
+        }
+    }
+}

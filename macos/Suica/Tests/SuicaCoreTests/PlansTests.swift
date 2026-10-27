@@ -88,3 +88,61 @@ private let lessonsPlan = """
         #expect(plan.title == "a-plan")
     }
 }
+
+private let marker = "# T\n> **For agentic workers:** x\n"
+
+/// A temp folder tree: `files` maps a relative path to its text.
+private func tree(_ files: [String: String]) throws -> URL {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).standardizedFileURL
+    for (name, text) in files {
+        let url = root.appendingPathComponent(name)
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try text.write(to: url, atomically: true, encoding: .utf8)
+    }
+    return root
+}
+
+@Suite struct PlanScannerTests {
+    @Test func scanFindsPlansRecursivelyNewestFirst() throws {
+        let root = try tree([
+            "a/docs/superpowers/plans/2026-10-14-one.md": marker.replacingOccurrences(of: "# T", with: "# One"),
+            "a/docs/superpowers/plans/2026-10-26-two.md": marker.replacingOccurrences(of: "# T", with: "# Two"),
+            "a/README.md": "# Readme\n", "a/plans/TRACKER.md": "# Tracker\n",
+        ])
+        defer { try? FileManager.default.removeItem(at: root) }
+        #expect(PlanScanner.scan(folders: [root.path]).map(\.title) == ["Two", "One"])
+    }
+
+    @Test func scanSkipsHiddenNodeModulesAndBuildFolders() throws {
+        let root = try tree([
+            ".claude/worktrees/x/a.md": marker, "node_modules/y/b.md": marker, ".build/z/c.md": marker,
+            "ok/d.md": marker,
+        ])
+        defer { try? FileManager.default.removeItem(at: root) }
+        #expect(PlanScanner.scan(folders: [root.path]).map { URL(fileURLWithPath: $0.path).lastPathComponent } == ["d.md"])
+    }
+
+    @Test func scanListsAFileOnceWhenFoldersOverlapAndSurvivesASymlinkLoop() throws {
+        let root = try tree(["a/p.md": marker])
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createSymbolicLink(
+            at: root.appendingPathComponent("a/loop"), withDestinationURL: root)
+        #expect(PlanScanner.scan(folders: [root.path, root.path + "/a"]).count == 1)
+    }
+
+    @Test func scanSkipsUnreadableNonUTF8AndHugeFiles() throws {
+        let root = try tree(["good.md": marker, "huge.md": marker + String(repeating: "x", count: 1_100_000)])
+        defer { try? FileManager.default.removeItem(at: root) }
+        try Data([0xFF, 0xFE]).write(to: root.appendingPathComponent("bad.md"))
+        let locked = root.appendingPathComponent("locked.md")
+        try marker.write(to: locked, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: locked.path)
+        #expect(PlanScanner.scan(folders: [root.path]).map { URL(fileURLWithPath: $0.path).lastPathComponent } == ["good.md"])
+    }
+
+    @Test func scanExpandsATildeAndIgnoresAMissingFolder() throws {
+        let root = try tree(["a/p.md": marker])
+        defer { try? FileManager.default.removeItem(at: root) }
+        #expect(PlanScanner.scan(folders: ["~/a", "/nonexistent-suica"], home: root.path).count == 1)
+    }
+}
