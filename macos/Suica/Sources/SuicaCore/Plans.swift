@@ -6,6 +6,7 @@ public enum PlanStatus: String, CaseIterable, Identifiable, Codable, Sendable {
     case planned, inProgress, inReview, done, dropped
 
     public var id: String { rawValue }
+    public var title: String { Copy.planStatus(self) }
 }
 
 /// One `### Task N: title` of a plan with how many of its steps are ticked.

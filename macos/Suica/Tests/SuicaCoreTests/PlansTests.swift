@@ -244,3 +244,11 @@ private func plan(_ name: String, done: Int = 0, total: Int = 3, goal: String? =
         #expect(!model.hasSetStatus(plan("a")))
     }
 }
+
+@Test func copyNamesEveryStatusAndPluralisesSteps() {
+    let titles = PlanStatus.allCases.map(\.title)
+    #expect(titles.allSatisfy { !$0.isEmpty } && Set(titles).count == titles.count)
+    #expect(Copy.planSteps(done: 3, total: 12) == "3 of 12 steps")
+    #expect(Copy.planSteps(done: 0, total: 1) == "0 of 1 step")
+    #expect(Copy.planSteps(done: 0, total: 0) == "No steps")
+}
