@@ -45,6 +45,8 @@ private let lessonsPlan = """
     @Test func parseRejectsAFileThatIsNotAPlan() {
         #expect(PlanDocument.parse(path: "/p/README.md", text: "# Notes\n") == nil)
         #expect(PlanDocument.parse(path: "/p/plans/TRACKER.md", text: "# Tracker\n") == nil)
+        let quoted = "# Readme\nFor agentic workers\n"
+        #expect(PlanDocument.parse(path: "/p/README.md", text: quoted) == nil)
         #expect(PlanDocument.parse(path: "/p/plans/2026-10-01-x.md", text: "# X\n") != nil)
     }
 
@@ -235,6 +237,24 @@ private func plan(_ name: String, done: Int = 0, total: Int = 3, goal: String? =
         model.query = "one"
         #expect(model.visible.isEmpty)
         #expect(model.counts == [.done: 1, .planned: 2])
+    }
+
+    @Test func anOlderSlowScanNeverOverwritesANewerOne() async {
+        let a = plan("a"), b = plan("b")
+        let model = PlansModel(
+            store: MemoryStore(),
+            scan: { folders in
+                if folders.count == 2 { Thread.sleep(forTimeInterval: 0.3) }
+                return folders.count == 2 ? [a, b] : [a]
+            })
+        model.addFolders(["/a", "/b"])
+        let slow = Task { await model.refresh() }
+        try? await Task.sleep(for: .milliseconds(50))
+        model.removeFolder("/b")
+        await model.refresh()
+        await slow.value
+        #expect(model.plans == [a])
+        #expect(!model.isScanning)
     }
 
     @Test func corruptStoredMarksAreIgnored() {

@@ -20,7 +20,9 @@ struct PlansView: View {
     @State private var selectedPath: String?
 
     var body: some View {
-        Group {
+        // One stable view carries the task: a modifier on the switching Group would run once per
+        // child it shows, and the empty page and the split would start a scan each, in a loop.
+        ZStack {
             if model.folders.isEmpty {
                 ContentUnavailableView {
                     Label(Copy.noPlanFoldersTitle, systemImage: "folder.badge.plus")
@@ -29,8 +31,8 @@ struct PlansView: View {
                 } actions: {
                     Button(Copy.addPlanFolder, action: addFolders).buttonStyle(.borderedProminent)
                 }
-            } else if model.plans.isEmpty && !model.isScanning {
-                ContentUnavailableView(Copy.noPlansTitle, systemImage: "list.bullet.clipboard", description: Text(Copy.noPlansHint))
+            } else if model.plans.isEmpty {
+                if model.isScanning { ProgressView(Copy.loading) } else { ContentUnavailableView(Copy.noPlansTitle, systemImage: "list.bullet.clipboard", description: Text(Copy.noPlansHint)) }
             } else {
                 split
             }

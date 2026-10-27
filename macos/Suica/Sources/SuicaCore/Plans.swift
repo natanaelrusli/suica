@@ -47,7 +47,7 @@ public struct PlanDocument: Equatable, Identifiable, Sendable {
         let date = datePrefix(of: name)
         let hasHeader = lines.prefix(12).contains { $0.contains("For agentic workers") }
         let inPlansFolder = url.deletingLastPathComponent().lastPathComponent == "plans" && date != nil
-        guard hasHeader || inPlansFolder else { return nil }
+        guard hasHeader || inPlansFolder, !Self.notPlanNames.contains(name.lowercased()) else { return nil }
 
         var title: String?
         var goal: String?
@@ -86,6 +86,9 @@ public struct PlanDocument: Equatable, Identifiable, Sendable {
             tasks: tasks.map { PlanTask(title: $0.title, done: $0.done, total: $0.total) },
             stepsDone: stepsDone, stepsTotal: stepsTotal)
     }
+
+    /// Files that name a folder's contents, not a plan, whatever they quote.
+    private static let notPlanNames: Set<String> = ["readme", "tracker"]
 
     /// `2026-10-26-review-lessons` → `2026-10-26`.
     private static func datePrefix(of name: String) -> String? {
@@ -167,6 +170,8 @@ public final class PlansModel {
     private let store: any PreferenceStore
     private let home: String
     private let scan: @Sendable ([String]) -> [PlanDocument]
+    /// Bumped by every refresh, so a slow scan that was overtaken drops its result.
+    private var generation = 0
 
     private enum Key {
         static let folders = "plans.folders"
@@ -187,16 +192,22 @@ public final class PlansModel {
             .flatMap { try? JSONDecoder().decode([String: PlanMark].self, from: $0) } ?? [:]
     }
 
-    /// Scans off the main thread; the previous list stays until the scan is done.
+    /// Scans off the main thread; the previous list stays until the scan is done. Only the newest
+    /// refresh sets the list: an older scan that finishes later is dropped.
     public func refresh() async {
+        generation += 1
+        let mine = generation
         guard !folders.isEmpty else {
             plans = []
+            isScanning = false
             return
         }
         isScanning = true
         let folders = folders
         let scan = scan
-        plans = await Task.detached { scan(folders) }.value
+        let found = await Task.detached { scan(folders) }.value
+        guard mine == generation else { return }
+        plans = found
         isScanning = false
     }
 
