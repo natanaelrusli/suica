@@ -13,6 +13,8 @@ enum WindowSection: String, CaseIterable, Identifiable {
     case myMergeRequests
     /// The Lessons learned from review findings; ⇧⌘L, listed under Insights after Statistics.
     case lessons
+    /// The plans written with the writing-plans skill and where each stands; ⇧⌘P, under Insights after Lessons.
+    case plans
 
     var id: String { rawValue }
 
@@ -30,6 +32,7 @@ enum WindowSection: String, CaseIterable, Identifiable {
         case .office: Copy.office
         case .system: Copy.systemPage
         case .lessons: Copy.lessons
+        case .plans: Copy.plans
         }
     }
 
@@ -48,6 +51,7 @@ enum WindowSection: String, CaseIterable, Identifiable {
         case .system: "cpu"
         // As Configuration's Lessons category.
         case .lessons: "book"
+        case .plans: "list.bullet.clipboard"
         }
     }
 
@@ -66,6 +70,7 @@ enum WindowSection: String, CaseIterable, Identifiable {
         case .office: .cyan
         case .system: .mint
         case .lessons: .brown
+        case .plans: .teal
         }
     }
 
@@ -73,6 +78,7 @@ enum WindowSection: String, CaseIterable, Identifiable {
     var shortcut: KeyboardShortcut {
         if self == .myMergeRequests { return KeyboardShortcut("2", modifiers: [.command, .shift]) }
         if self == .lessons { return KeyboardShortcut("l", modifiers: [.command, .shift]) }
+        if self == .plans { return KeyboardShortcut("p", modifiers: [.command, .shift]) }
         let index = Self.allCases.firstIndex(of: self) ?? 0
         return KeyboardShortcut(KeyEquivalent(Character(String((index + 1) % 10))))
     }
@@ -241,7 +247,7 @@ struct SidebarNode: Identifiable {
                     children: StatisticsPage.allCases.map {
                         SidebarNode(item: .statistics($0), title: $0.title, symbol: $0.symbol, tint: $0.tint)
                     }),
-                SidebarNode(.lessons), SidebarNode(.usage), SidebarNode(.logs), SidebarNode(.system),
+                SidebarNode(.lessons), SidebarNode(.plans), SidebarNode(.usage), SidebarNode(.logs), SidebarNode(.system),
             ]
         ),
         (

@@ -195,6 +195,7 @@ struct MainWindow: View {
     let templates: TemplateEditorModel
     let office: OfficeModel
     let lessons: LessonsModel
+    let plans: PlansModel
     @Bindable var onboarding: OnboardingModel
     let settings: AppearanceSettings
     @Bindable var navigator: Navigator
@@ -434,6 +435,7 @@ struct MainWindow: View {
         case .office: OfficeView(model: office, settings: settings)
         case .system: SystemView()
         case .lessons: LessonsView(model: lessons, navigator: navigator)
+        case .plans: PlansView(model: plans)
         }
     }
 }

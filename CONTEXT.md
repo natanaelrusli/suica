@@ -84,6 +84,10 @@ _Avoid_: root, workspace
 A kind of code or concern a Lesson is about (`http-client`, `db-pool`, `auth`, `sql`, `logging`, a language). The graph's link between Lessons.
 _Avoid_: tag, category
 
+**Plan Mark**:
+The status and note the Owner sets on a plan on the Plans page. Kept in the app, never in the plan file.
+_Avoid_: tracker entry
+
 **Pending Message**:
 A Reviewer Nudge, Re-review Nudge or Review Notice written by the agent but held until the Owner sends or skips it, when that flow is set to require approval.
 _Avoid_: Draft, queued message
