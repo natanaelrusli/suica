@@ -1,0 +1,27 @@
+{
+  "check": {
+    "up-to-date": { "version": 1, "status": "up-to-date", "current": "0.1.0" },
+    "available": { "version": 1, "status": "available", "current": "0.1.0", "latest": "0.1.1" },
+    "unavailable": {
+      "version": 1,
+      "status": "unavailable",
+      "message": "manifest signature is invalid"
+    }
+  },
+  "apply": {
+    "staged": {
+      "version": 1,
+      "status": "staged",
+      "release": "0.1.1",
+      "staged": "/Users/me/Library/Application Support/Suica/update/staged/Suica.app",
+      "target": "/Users/me/Applications/Suica.app",
+      "swapScript": "/Users/me/Library/Application Support/Suica/update/staged/swap-app.sh"
+    },
+    "up-to-date": { "version": 1, "status": "up-to-date" },
+    "failed": {
+      "version": 1,
+      "status": "failed",
+      "message": "downloaded release does not match its sha256"
+    }
+  }
+}
