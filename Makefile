@@ -15,7 +15,7 @@ export SUICA_PREFIX := $(PREFIX)
 .PHONY: help install install-cli config agent-install agent-uninstall install-app \
         update update-app uninstall uninstall-cli uninstall-app migrate \
         deps check typecheck lint format format-fix test test-app test-all run \
-        status once pause resume restart logs errors
+        status once pause resume restart logs errors release
 
 help: ## Show this list
 	@awk 'BEGIN { FS = ":.*## " } \
@@ -97,6 +97,11 @@ test-all: check test-app ## Every check and every test
 
 run: ## Run the CLI from the checkout: make run ARGS="status --json"
 	scripts/suica $(ARGS)
+
+## Release
+
+release: ## Build, sign and publish a GitHub release (DRY_RUN=1 skips publishing)
+	scripts/release.sh
 
 ## Operate (the installed CLI)
 
