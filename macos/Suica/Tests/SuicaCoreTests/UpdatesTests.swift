@@ -99,3 +99,34 @@ private func store() -> UserDefaults {
     await model.install()
     #expect(model.state == .installing && relaunches.applied.count == 2)
 }
+
+/// Holds `applyUpdate` open so a second call can arrive while the first is installing.
+private actor InstallGate {
+    private var open = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+    func wait() async { if !open { await withCheckedContinuation { waiters.append($0) } } }
+    func release() { open = true; waiters.forEach { $0.resume() }; waiters = [] }
+}
+
+private struct SlowUpdates: UpdatesClient {
+    let gate = InstallGate()
+    let inner = StubUpdates()
+    func checkUpdate() async throws(AgentError) -> UpdateCheck { try await inner.checkUpdate() }
+    func applyUpdate() async throws(AgentError) -> UpdateApplied { await gate.wait(); return try await inner.applyUpdate() }
+}
+
+@MainActor @Test func installWhileInstallingAndChecksDuringInstallLeaveItAlone() async {
+    let slow = SlowUpdates()
+    let relaunches = Relaunches()
+    let model = UpdatesModel(
+        client: slow, store: store(), now: { Date() }, relaunch: { relaunches.applied.append($0); return true })
+    let first = Task { await model.install() }
+    while model.state != .installing { await Task.yield() }
+    await model.install()
+    await model.checkNow()
+    await model.checkIfDue()
+    #expect(model.state == .installing && slow.inner.calls.applies == 0 && slow.inner.calls.checks == 0)
+    await slow.gate.release()
+    await first.value
+    #expect(slow.inner.calls.applies == 1 && relaunches.applied.count == 1)
+}

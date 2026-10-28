@@ -72,6 +72,7 @@ public final class UpdatesModel {
     public func checkNow() async { await check(surfaceUnavailable: true) }
 
     private func check(surfaceUnavailable: Bool) async {
+        guard state != .installing else { return }
         guard let result = try? await client.checkUpdate() else {
             if surfaceUnavailable { state = .failed(Copy.updateCheckFailed) }
             return
@@ -85,6 +86,7 @@ public final class UpdatesModel {
     }
 
     public func install() async {
+        guard state != .installing else { return }
         state = .installing
         let applied: UpdateApplied
         do { applied = try await client.applyUpdate() } catch {
