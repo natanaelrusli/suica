@@ -6,12 +6,15 @@ import type { Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { VERSION } from "../src/version.ts";
 
 type Golden = { check: Record<string, object>; apply: Record<string, object> };
 const golden = JSON.parse(readFileSync("contracts/update.v1.json", "utf8")) as Golden;
 
 const { publicKey, privateKey } = generateKeyPairSync("ed25519");
 let server: Server;
+// Far ahead of the real version, so a version bump of the package never turns this fixture into "up to date".
+const LATEST = "99.0.0";
 let home: string;
 let base: string;
 
@@ -21,9 +24,9 @@ beforeEach(async () => {
   await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
   base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
   const manifest = JSON.stringify({
-    version: "0.1.1",
+    version: LATEST,
     arch: process.arch,
-    url: `${base}/download/v0.1.1/suica.tar.gz`,
+    url: `${base}/download/v${LATEST}/suica.tar.gz`,
     sha256: "0".repeat(64),
   });
   server.on("request", (req, res) => {
@@ -60,7 +63,11 @@ describe("suica update --json", () => {
   it("check prints the golden available document", async () => {
     const out = await suica("update", "check", "--json");
     expect(out.status).toBe(0);
-    expect(JSON.parse(out.stdout)).toEqual(golden.check["available"]);
+    expect(JSON.parse(out.stdout)).toEqual({
+      ...golden.check["available"],
+      current: VERSION,
+      latest: LATEST,
+    });
   }, 20_000);
 
   it("apply fails cleanly for a tampered tarball and stages nothing", async () => {
