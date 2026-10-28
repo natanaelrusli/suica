@@ -1,7 +1,7 @@
 # Suica plans: tracker
 
-- **As of:** 2026-10-27, read from `git` in this checkout (`main` at 51d1980) and from the plan files in this folder.
-- **Scope:** the 10 plans in this folder. Suica is a personal project, so there are no planner keys and no MRs: every branch is `feat/no-ticket-*` and work lands by a local `git merge --no-ff` into `main`.
+- **As of:** 2026-10-28, read from `git` in this checkout (`main` at 51d1980; P11 from `feat/no-ticket-ota-updates`) and from the plan files in this folder.
+- **Scope:** the 11 plans in this folder. Suica is a personal project, so there are no planner keys and no MRs: every branch is `feat/no-ticket-*` and work lands by a local `git merge --no-ff` into `main`.
 - **"Merged"** means the branch head is an ancestor of `main` (`git merge-base --is-ancestor`). Merged does not say the app was installed or tried on the real machine.
 - **The plan files' own checkboxes are all unticked** and are not the status; this file is.
 - Update this file in the same change that adds a plan or merges its branch.
@@ -20,6 +20,7 @@
 | P8 | [Agent Fix, comments and merging](2026-10-21-agent-fix-comment-merge.md) | [design](../specs/2026-10-21-agent-fix-comment-merge-design.md) | Agent Fix commits 5f9af2e to ba89acd | **Merged** | 2026-10-21 (c869b8d) | 42 |
 | P9 | [Virtual office](2026-10-21-virtual-office.md) | [design](../specs/2026-10-21-virtual-office-design.md) | `feat/no-ticket-virtual-office` | **Merged** | 2026-10-21 (3525407) | 31 |
 | P10 | [Review lessons](2026-10-26-review-lessons.md) | [design](../specs/2026-10-26-review-lessons-design.md) | `feat/no-ticket-review-lessons` | **Merged** | 2026-10-26 (a4f3020), folder picker 51d1980 | 69 |
+| P11 | [OTA updates](2026-10-28-ota-updates.md) | none (decisions in the plan) | `feat/no-ticket-ota-updates` | **Implemented on branch, not merged** | not merged | 37 |
 
 ## 2. Branches and merge commits per plan
 
@@ -34,6 +35,7 @@
 | P8 | `feat/no-ticket-mr-fixes` (Agent Fix commits 5f9af2e to ba89acd) | 8c591bb | c869b8d | 2026-10-21 | Later: Watch/Unwatch e8338c4, My MRs split 190cd39. |
 | P9 | `feat/no-ticket-virtual-office` | 70a8229 | 3525407 | 2026-10-21 | Many office follow-ups, each with its own merge. |
 | P10 | `feat/no-ticket-review-lessons` | 06edbf3 | a4f3020 | 2026-10-26 | Folder picker merged in 51d1980. |
+| P11 | `feat/no-ticket-ota-updates` | see `git log` | not merged | – | Updater is inert until the real public key is committed; not exercised on a real release. |
 
 ## 3. Work in the checkout that no plan covers
 
