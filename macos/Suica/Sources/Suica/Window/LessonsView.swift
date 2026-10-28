@@ -1,5 +1,7 @@
+import AppKit
 import SuicaCore
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Opens a Lesson on the Lessons page, from a repeat marker on another page.
 struct OpenLessonAction {
@@ -74,7 +76,7 @@ struct LessonsView: View {
                     emptyPage(Copy.nothingLearnedTitle, symbol: "book", hint: Copy.nothingLearnedHint,
                               action: nil, pending: list.pending, unscoped: list.unscoped)
                 } else {
-                    LessonsSplit(model: model)
+                    LessonsSplit(model: model, navigator: navigator)
                 }
             } else if let error = model.errorText {
                 VStack(alignment: .leading) {
@@ -125,19 +127,52 @@ struct LessonsView: View {
 /// The list on the left and the selected Lesson on the right.
 private struct LessonsSplit: View {
     @Bindable var model: LessonsModel
+    let navigator: Navigator
+    @State private var showsGraph = false
 
     var body: some View {
         UnderTitleBar { titleBar in
             HStack(spacing: 0) {
-                list(titleBar: titleBar)
-                    .frame(width: 320)
+                if showsGraph {
+                    graph(titleBar: titleBar)
+                        .frame(maxWidth: .infinity)
+                } else {
+                    list(titleBar: titleBar)
+                        .frame(width: 320)
+                }
                 Divider()
                 detail
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .frame(maxWidth: showsGraph ? 440 : .infinity, maxHeight: .infinity)
                     .padding(.top, titleBar)
             }
         }
         .searchable(text: $model.filter.query, placement: .toolbar, prompt: Copy.searchLessons)
+        .toolbar {
+            Picker(Copy.lessonsView, selection: $showsGraph) {
+                Label(Copy.lessonsAsList, systemImage: "list.bullet").tag(false)
+                Label(Copy.lessonsAsGraph, systemImage: "point.3.connected.trianglepath.dotted").tag(true)
+            }
+            .pickerStyle(.segmented)
+            .help(Copy.lessonsView)
+        }
+    }
+
+    private func graph(titleBar: CGFloat) -> some View {
+        VStack(spacing: 0) {
+            filterBar(several: (model.list?.scopes.count ?? 0) > 1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Divider()
+            LessonsGraphView(lessons: model.shownScopes.flatMap(\.lessons), selection: selection)
+        }
+        .padding(.top, titleBar)
+        .overlay(alignment: .topLeading) { exportControls.padding(.top, titleBar + 52).padding(.leading, 10) }
+        .overlay(alignment: .bottomLeading) {
+            Text(Copy.lessonsGraphHint)
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .padding(10)
+                .allowsHitTesting(false)
+        }
     }
 
     private var selection: Binding<Int?> {
@@ -181,13 +216,65 @@ private struct LessonsSplit: View {
         .modifier(ListTopBar(titleBar: titleBar) { filterBar(several: several) })
     }
 
+    /// Export to Obsidian, and what it answered with a way on: open the vault, or set its folder.
+    private var exportControls: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Button { Task { await model.exportVault() } } label: {
+                    Label(Copy.exportToObsidian, systemImage: "square.and.arrow.up")
+                }
+                .help(Copy.exportToObsidianHelp)
+                Button { chooseZip() } label: { Label(Copy.exportAsZip, systemImage: "doc.zipper") }
+                    .help(Copy.exportAsZipHelp)
+            }
+            .controlSize(.small)
+            .disabled(model.setupIsBusy)
+            if let notice = model.setupNotice {
+                VStack(alignment: .leading, spacing: 6) {
+                    NoticeBox(text: notice, tint: .secondary, onClose: model.dismissSetupNotice)
+                    if let zip = model.lastExport?.zipURL {
+                        Button(Copy.showInFinder) { NSWorkspace.shared.activateFileViewerSelecting([zip]) }
+                            .buttonStyle(.link)
+                    } else if let url = model.lastExport?.obsidianURL {
+                        Button(Copy.openInObsidian) { NSWorkspace.shared.open(url) }.buttonStyle(.link)
+                    } else if model.lastExport?.status == "no-vault-path" {
+                        Button(Copy.vaultSettings) {
+                            navigator.selection = .settings(ConfigCategory(key: "lessons"))
+                        }
+                        .buttonStyle(.link)
+                    }
+                }
+                .frame(maxWidth: 320, alignment: .leading)
+            }
+        }
+        .motion(value: model.setupNotice)
+    }
+
+    /// Asks where to save, then writes the zip there; the panel replaces a file you pick.
+    private func chooseZip() {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.zip]
+        panel.nameFieldStringValue = Copy.zipFileName
+        panel.canCreateDirectories = true
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        Task { await model.exportVault(zipTo: url.path) }
+    }
+
     private func scopeHeader(_ scope: LessonScope) -> some View {
-        HStack(spacing: 4) {
-            Image(systemName: "folder")
-            Text(DisplayText.clean(scope.path, max: 200)).lineLimit(1).truncationMode(.head)
-            Spacer(minLength: 4)
-            Text("\(Copy.lessonCount(scope.lessons.count)) · \(Copy.lessonScopeRepos(scope.repos))")
-                .fixedSize()
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 4) {
+                Image(systemName: "folder")
+                Text(DisplayText.clean(scope.path, max: 200)).lineLimit(1).truncationMode(.head)
+                Spacer(minLength: 4)
+                Text("\(Copy.lessonCount(scope.lessons.count)) · \(Copy.lessonScopeRepos(scope.repos))")
+                    .fixedSize()
+            }
+            if !scope.lessons.isEmpty {
+                Text(Copy.lessonScopeTokens(scope.contextTokens))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .help(Copy.lessonContextTokensHelp)
+            }
         }
         .help(scope.path)
     }
@@ -258,6 +345,8 @@ private struct LessonRow: View {
             HStack(spacing: 4) {
                 Badge(text: "\(lesson.count)×", tint: .brown)
                     .accessibilityLabel(Copy.lessonFlaggedCount(lesson.count))
+                Text("~\(Copy.tokens(lesson.contextTokens)) tok")
+                    .accessibilityLabel(Copy.lessonContextTokens(lesson.contextTokens))
                 Text(lesson.repos.map(DisplayText.shortKey).joined(separator: ", "))
                     .lineLimit(1)
                     .truncationMode(.tail)
@@ -362,6 +451,9 @@ private struct LessonDetailView: View {
                 if lesson.archived { Badge(text: Copy.lessonArchived, tint: .gray, symbol: "archivebox") }
                 Badge(text: Copy.lessonFlagged(lesson.count), tint: .brown)
                 Text(Copy.lessonWeight(lesson.weight))
+                Text("·")
+                Text(Copy.lessonContextTokens(lesson.contextTokens))
+                    .help(Copy.lessonContextTokensHelp)
                 if let seen = lesson.lastSeen.flatMap(parseISO) {
                     Text("·")
                     Text(seen.formatted(.relative(presentation: .named)))

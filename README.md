@@ -134,6 +134,7 @@ Config file: `~/.config/suica/config.yaml` (override the path with `SUICA_CONFIG
 | `lessons.vaultPath`                | none                             | Folder, such as an Obsidian vault, the lessons are also written to as Markdown |
 | `lessons.perFile`                  | `5`                              | At most this many Lessons your Coding Agent gets for one file it reads or writes, from the Claude Code hook or `lessons_for_path` (1 to 20) |
 | `lessons.perSession`               | `5`                              | At most this many Lessons your Coding Agent gets when a session starts in a Lesson Scope, from the Claude Code hook or `lessons_for_path` on a folder (1 to 20) |
+| `lessons.tokenCap`                 | `4000`                           | Most tokens (about four characters each) the Lessons of one Lesson Scope may take together; when learning pushes a scope past it, a model run merges and shortens its Lessons to fit (500 or more) |
 | `office.agents`                    | `[claude, codex, gemini]`        | Which Coding Agents the Office looks for on this Mac |
 | `office.custom`                    | `[]`                             | More Coding Agents, one entry each: `name\|process\|log glob\|cwd key\|activity key` (the program's name, a JSONL log pattern such as `~/.aider/*.jsonl`, and the dotted keys of the working folder and the activity in a log line) |
 | `statePath`                        | `~/Library/Application Support/suica/state.db` | SQLite state file |

@@ -16,6 +16,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { LessonRow, OccurrenceRow } from "../src/lesson-store.ts";
 import { createHash } from "node:crypto";
 import { exportVault, renderVault, slug } from "../src/lessons/vault.ts";
+import { zipFiles } from "../src/lessons/zip.ts";
+import { crc32, inflateRawSync } from "node:zlib";
 import { openStore } from "../src/store.ts";
 
 const NOW = Date.UTC(2026, 9, 26, 9);
@@ -623,5 +625,73 @@ describe("suica lessons export", () => {
     });
     expect(existsSync(join(vault, `Lessons/wrap-errors-${id}.md`))).toBe(true);
     expect(run().stdout.trim().split("\n")).toHaveLength(1);
+  }, 20_000);
+});
+
+describe("suica lessons export --zip", () => {
+  it("zips the same notes the vault holds", () => {
+    const files = new Map([
+      ["index.md", "# Lessons\n"],
+      ["Lessons/a-1.md", "naïve — ünï\n".repeat(50)],
+    ]);
+    const zip = zipFiles(files, NOW);
+    // Read it back through the central directory, the way an unzipper would.
+    const end = zip.length - 22;
+    expect(zip.readUInt32LE(end)).toBe(0x06054b50);
+    expect(zip.readUInt16LE(end + 10)).toBe(2);
+    let at = zip.readUInt32LE(end + 16);
+    const read = new Map<string, string>();
+    for (let i = 0; i < 2; i++) {
+      expect(zip.readUInt32LE(at)).toBe(0x02014b50);
+      const size = zip.readUInt32LE(at + 20);
+      const nameLength = zip.readUInt16LE(at + 28);
+      const local = zip.readUInt32LE(at + 42);
+      const name = zip.subarray(at + 46, at + 46 + nameLength).toString("utf8");
+      const start = local + 30 + zip.readUInt16LE(local + 26) + zip.readUInt16LE(local + 28);
+      const text = inflateRawSync(zip.subarray(start, start + size)).toString("utf8");
+      expect(crc32(Buffer.from(text))).toBe(zip.readUInt32LE(at + 16));
+      read.set(name, text);
+      at += 46 + nameLength;
+    }
+    expect(read).toEqual(files);
+  });
+
+  it("writes a zip file without a vault folder, and refuses a relative path", () => {
+    const configPath = join(dir, "config.yaml");
+    const statePath = join(dir, "state", "state.db");
+    writeFileSync(
+      configPath,
+      `gitlab:\n  hostname: h\nstatePath: ${statePath}\nlessons:\n  enabled: true\n  scopes: [${dir}]\n`,
+    );
+    const store = openStore(statePath);
+    store.lessons.addOccurrences([
+      {
+        sourceKey: "review:1:1",
+        source: "review",
+        mrKey: "acme/api!7",
+        mrTitle: "T",
+        mrUrl: "https://g/7",
+        path: "a.go",
+        line: 1,
+        severity: "Major",
+        title: "t",
+        text: "text",
+        outcome: "open",
+        at: Date.now(),
+      },
+    ]);
+    store.close();
+    const run = (...args: string[]) =>
+      spawnSync(process.execPath, ["src/cli.ts", "lessons", "export", ...args], {
+        encoding: "utf8",
+        env: { ...process.env, SUICA_CONFIG: configPath },
+      });
+    const target = join(dir, "out.zip");
+    const ok = run("--zip", target, "--json");
+    expect(JSON.parse(ok.stdout)).toMatchObject({ status: "zipped", path: target });
+    expect(readFileSync(target).subarray(0, 4).toString("latin1")).toBe("PK\x03\x04");
+    const relative = run("--zip", "out.zip", "--json");
+    expect(JSON.parse(relative.stdout)).toMatchObject({ status: "failed" });
+    expect(relative.status).toBe(1);
   }, 20_000);
 });

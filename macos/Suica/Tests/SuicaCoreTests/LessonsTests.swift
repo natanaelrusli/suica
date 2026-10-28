@@ -254,7 +254,7 @@ private let solo = LessonScope(
     #expect(try await client.lessonsStatus() == LessonsSetupStatus(hook: true, claude: true, codex: false))
     let removed = try await client.uninstallLessons()
     #expect(removed.status == "uninstalled" && removed.hookRemoved == true)
-    let exported = try await client.exportLessons()
+    let exported = try await client.exportLessons(zipTo: nil)
     #expect(exported.status == "exported" && exported.written == 4 && exported.conflicts == 2)
     let calls = await runner.invocations.map(\.arguments)
     #expect(
@@ -340,7 +340,7 @@ actor FakeLessonsClient: LessonsClient {
         calls.append("uninstall")
         return LessonsUninstallReply(status: "uninstalled", hookRemoved: true, removed: ["claude"], failed: [])
     }
-    func exportLessons() async throws(AgentError) -> LessonsExportReply {
+    func exportLessons(zipTo: String?) async throws(AgentError) -> LessonsExportReply {
         calls.append("export")
         return LessonsExportReply(status: "exported", written: 3, removed: 0, conflicts: 1, path: "/v", message: nil)
     }
@@ -461,6 +461,7 @@ private func reply(_ json: String) throws -> LessonsInstallReply {
     let model = LessonsModel(client: client)
     await model.exportVault()
     #expect(model.setupNotice == Copy.lessonsExported(written: 3, removed: 0, conflicts: 1))
+    #expect(model.lastExport?.obsidianURL?.absoluteString == "obsidian://open?path=/v")
     await model.uninstall()
     #expect(model.setupNotice == Copy.lessonsUninstalled)
 }
@@ -521,7 +522,7 @@ actor FailingStatusClient: LessonsClient {
     }
     func installLessons(confirm: Bool) async throws(AgentError) -> LessonsInstallReply { throw AgentError.launchFailed }
     func uninstallLessons() async throws(AgentError) -> LessonsUninstallReply { throw AgentError.launchFailed }
-    func exportLessons() async throws(AgentError) -> LessonsExportReply { throw AgentError.launchFailed }
+    func exportLessons(zipTo: String?) async throws(AgentError) -> LessonsExportReply { throw AgentError.launchFailed }
 }
 
 @MainActor @Test func aFailedStatusReadSaysSoAndARetryClearsIt() async {
@@ -583,4 +584,81 @@ actor FailingStatusClient: LessonsClient {
     #expect(!model.canRemove)
     await model.refreshSetup()
     #expect(!model.canRemove && model.canInstall)
+}
+
+@Suite struct LessonGraphTests {
+    @Test func sharedTopicsBecomeEdges() {
+        let graph = LessonGraph(lessons: [
+            summary(1, "a", topics: ["sql", "auth"]),
+            summary(2, "b", topics: ["auth", "sql"]),
+            summary(3, "c", topics: ["logs"]),
+        ])
+        #expect(graph.edges == [LessonGraph.Edge(a: 1, b: 2, shared: 2)])
+        #expect(graph.neighbours(of: 1) == [2])
+        #expect(graph.neighbours(of: 3).isEmpty)
+    }
+
+    @Test func lessonsGroupByTheirMostSharedTopicHeaviestInTheMiddle() throws {
+        let graph = LessonGraph(lessons: [
+            summary(1, "heavy", topics: ["sql"]),
+            summary(2, "mid", topics: ["sql", "auth"]),
+            summary(3, "light", topics: ["sql"]),
+            summary(4, "other", topics: ["auth"]),
+            summary(5, "none"),
+        ])
+        #expect(graph.clusters.map(\.topic) == ["sql", "auth", nil])
+        #expect(graph.clusters.map(\.count) == [3, 1, 1])
+        let heavy = try #require(graph.node(1))
+        let sql = graph.clusters[0]
+        #expect(heavy.rank == 0 && heavy.x == sql.x && heavy.y == sql.y)
+        #expect(graph.node(3)?.rank == 2)
+        #expect(graph.node(2)?.cluster == 0 && graph.node(4)?.cluster == 1 && graph.node(5)?.cluster == 2)
+    }
+
+    @Test func layoutIsDeterministicAndNodesStayInsideTheBounds() {
+        let lessons = (1...30).map { summary($0, "l\($0)", topics: ["t\($0 % 4)"]) }
+        let first = LessonGraph(lessons: lessons)
+        #expect(first == LessonGraph(lessons: lessons.reversed()))
+        for node in first.nodes { #expect(first.bounds.contains(CGPoint(x: node.x, y: node.y))) }
+        let twoNodes = Set(first.nodes.map { "\($0.x),\($0.y)" })
+        #expect(twoNodes.count == first.nodes.count)
+    }
+
+    @Test func nodeNearFindsTheClosestWithinReach() {
+        let graph = LessonGraph(lessons: [summary(1, "a"), summary(2, "b")])
+        let a = graph.node(1)!
+        #expect(graph.node(near: CGPoint(x: a.x + 3, y: a.y), reach: 10)?.id == 1)
+        #expect(graph.node(near: CGPoint(x: a.x + 1000, y: a.y), reach: 10) == nil)
+    }
+
+    @Test func oneLessonAndNoneAreFine() {
+        #expect(LessonGraph(lessons: [summary(1, "a")]).nodes.count == 1)
+        let none = LessonGraph(lessons: [])
+        #expect(none.nodes.isEmpty && none.bounds.isNull)
+    }
+}
+
+@Test func obsidianOpensOnlyAVaultThatWasWritten() {
+    func reply(_ status: String, _ path: String?) -> LessonsExportReply {
+        LessonsExportReply(status: status, written: 0, removed: 0, conflicts: 0, path: path, message: nil)
+    }
+    #expect(reply("exported", "/My Vault/x").obsidianURL?.absoluteString == "obsidian://open?path=/My%20Vault/x")
+    #expect(reply("failed", "/v").obsidianURL == nil && reply("exported", nil).obsidianURL == nil)
+}
+
+@Test func aZipReplyNamesTheFileAndHasNoObsidianLink() {
+    let reply = LessonsExportReply(status: "zipped", written: 12, removed: 0, conflicts: 0, path: "/d/out.zip", message: nil)
+    #expect(Copy.lessonsExportOutcome(reply) == "Saved 12 notes to out.zip.")
+    #expect(reply.zipURL?.path == "/d/out.zip" && reply.obsidianURL == nil)
+}
+
+@Test func contextTokensCountTheHookLineAndCapLongRules() {
+    #expect(LessonContext.tokens(title: "", rule: "") == 15)
+    #expect(LessonContext.tokens(title: String(repeating: "t", count: 500), rule: String(repeating: "r", count: 5000)) == 185)
+}
+
+@Test func aScopeSumsItsLessonsContextTokens() {
+    let one = LessonSummary(id: 1, title: "t", rule: "r", topics: [], weight: 1, count: 1, repos: [], lastSeen: "")
+    #expect(LessonScope(path: "/p", repos: 1, lessons: [one, one]).contextTokens == 2 * one.contextTokens)
+    #expect(LessonScope(path: "/p", repos: 0, lessons: []).contextTokens == 0)
 }

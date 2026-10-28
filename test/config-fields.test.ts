@@ -23,7 +23,7 @@ describe("CONFIG_FIELDS", () => {
     const fromFields = CONFIG_FIELDS.map((field) => field.path.join(".")).sort();
     expect(fromFields).toEqual(fromSchema);
     expect(new Set(fromFields).size).toBe(fromFields.length);
-    expect(fromFields).toHaveLength(59);
+    expect(fromFields).toHaveLength(60);
   });
 
   it("gives enum fields the schema's options", () => {
@@ -48,6 +48,7 @@ describe("CONFIG_FIELDS", () => {
       ["lessons.vaultPath", "string"],
       ["lessons.perFile", "int"],
       ["lessons.perSession", "int"],
+      ["lessons.tokenCap", "int"],
     ]);
     expect(lessons.find((field) => field.path[1] === "vaultPath")?.format).toBe("path");
     expect(lessons.find((field) => field.path[1] === "scopes")?.format).toBe("path");

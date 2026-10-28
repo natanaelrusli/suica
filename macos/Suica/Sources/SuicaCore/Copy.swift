@@ -1576,6 +1576,10 @@ extension Copy {
     public static func lessonCount(_ count: Int) -> String { count == 1 ? "1 lesson" : "\(count) lessons" }
     public static func lessonFlagged(_ count: Int) -> String { count == 1 ? "Flagged once" : "Flagged \(count) times" }
     public static func lessonWeight(_ weight: Double) -> String { "Weight \(weight.formatted(.number.precision(.fractionLength(0...2))))" }
+    public static func lessonContextTokens(_ count: Int) -> String { "~\(tokens(count)) tokens of context" }
+    public static let lessonContextTokensHelp =
+        "An estimate of what this lesson adds to the agent's context each time it is handed over: about 4 characters per token."
+    public static func lessonScopeTokens(_ count: Int) -> String { "~\(tokens(count)) tokens if all were handed over" }
     public static func lessonScopeRepos(_ count: Int) -> String { count == 1 ? "1 repo" : "\(count) repos" }
     public static let lessonsOffTitle = "Lessons are off"
     public static let lessonsOffHint =
@@ -1587,6 +1591,26 @@ extension Copy {
     public static let nothingLearnedTitle = "Nothing learned yet"
     public static let nothingLearnedHint = "Lessons appear here once reviews of MRs in your lesson scopes have findings."
     public static let noLessonsMatch = "No lessons match."
+    public static let lessonsView = "View"
+    public static let lessonsAsList = "List"
+    public static let lessonsAsGraph = "Graph"
+    public static let lessonsGraphHint =
+        "Grouped by main topic, heaviest in the middle. Drag to pan, pinch or ⌘-scroll to zoom."
+    public static let noTopic = "No topic"
+    public static let exportToObsidian = "Export to Obsidian"
+    public static let exportToObsidianHelp =
+        "Writes every lesson, topic and repo as a linked note in your vault folder; Obsidian's graph view then shows the same links."
+    public static let exportAsZip = "Export as zip…"
+    public static let exportAsZipHelp = "Saves every lesson, topic and repo as a Markdown note in one zip file; unzip it into an Obsidian vault."
+    public static let zipFileName = "suica-lessons.zip"
+    public static let openInObsidian = "Open in Obsidian"
+    public static let vaultSettings = "Vault settings"
+    public static let zoomIn = "Zoom in"
+    public static let zoomOut = "Zoom out"
+    public static let fitGraph = "Fit to window"
+    public static func lessonNodeLabel(title: String, count: Int) -> String {
+        "\(title), \(lessonFlagged(count).lowercased())"
+    }
     public static let noLessonsInScope = "No lessons in this scope yet."
     public static let selectLesson = "Select a lesson"
     public static let selectLessonHint = "Its rule, related lessons and every place it was flagged show here."
@@ -1708,6 +1732,7 @@ extension Copy {
     public static func lessonsExportOutcome(_ reply: LessonsExportReply) -> String {
         switch reply.status {
         case "exported": lessonsExported(written: reply.written, removed: reply.removed, conflicts: reply.conflicts)
+        case "zipped": "Saved \(reply.written) notes to \(URL(fileURLWithPath: reply.path ?? "").lastPathComponent)."
         case "disabled": "Lessons are off, so nothing was exported."
         case "no-vault-path": "Set the vault folder and save before exporting."
         case "no-lessons": "No lessons are stored yet."

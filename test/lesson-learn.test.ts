@@ -7,6 +7,7 @@ import type { Exec } from "../src/exec.ts";
 import type { NewOccurrence, OccurrenceRow } from "../src/lesson-store.ts";
 import {
   applyAnswer,
+  applyCompaction,
   buildLearnPrompt,
   candidatesFor,
   createLessonLearner,
@@ -518,5 +519,86 @@ describe("answer bounds and atomicity", () => {
     expect(() => applyAnswer(failing, SCOPE, batch, answer, NOW)).toThrow("disk full");
     expect(db.lessons.lessons(SCOPE)).toEqual([]);
     expect(db.lessons.countPending()).toBe(2);
+  });
+});
+
+describe("compacting past the token cap", () => {
+  const wordy = (title: string, globs: string[]) => ({
+    ...lesson(SCOPE, title),
+    rule: "x".repeat(1000),
+    globs,
+  });
+
+  it("a merge rewrites the kept lesson, carries the others' globs and occurrences, and deletes them", () => {
+    const db = store();
+    const keep = db.lessons.createLesson(wordy("A", ["**/*.ts"]), NOW);
+    const gone = db.lessons.createLesson({ ...wordy("B", ["**/*.go"]), topics: ["errors"] }, NOW);
+    const [row] = add(db, occurrence("a"));
+    db.lessons.attach([row?.id ?? 0], gone, NOW);
+    const answer = { merges: [{ keep, gone: [gone], title: "AB", rule: "Short." }] };
+    expect(applyCompaction(db.lessons, SCOPE, answer, NOW)).toBe("applied");
+    expect(db.lessons.lessons(SCOPE)).toEqual([
+      expect.objectContaining({
+        id: keep,
+        title: "AB",
+        rule: "Short.",
+        topics: ["null-safety", "errors"],
+        globs: ["**/*.ts", "**/*.go"],
+      }),
+    ]);
+    expect(db.lessons.occurrences(keep)).toHaveLength(1);
+  });
+
+  it("an answer naming a lesson twice, of another scope or unknown changes nothing", () => {
+    const db = store();
+    const a = db.lessons.createLesson(wordy("A", ["**/*.ts"]), NOW);
+    const b = db.lessons.createLesson(wordy("B", ["**/*.ts"]), NOW);
+    const other = db.lessons.createLesson({ ...wordy("C", ["**/*.ts"]), scope: OTHER }, NOW);
+    for (const merges of [
+      [
+        { keep: a, gone: [b], title: "t", rule: "r" },
+        { keep: b, gone: [], title: "t", rule: "r" },
+      ],
+      [{ keep: a, gone: [other], title: "t", rule: "r" }],
+      [{ keep: a, gone: [999], title: "t", rule: "r" }],
+      [{ keep: a, gone: [], title: "t", rule: "r".repeat(601) }],
+    ]) {
+      expect(applyCompaction(db.lessons, SCOPE, { merges }, NOW)).toBe("invalid");
+    }
+    expect(db.lessons.lessons(SCOPE).map((each) => each.id)).toEqual([a, b]);
+  });
+
+  it("learning that takes a scope over the cap runs one compaction pass", async () => {
+    const h = harness();
+    const keep = h.db.lessons.createLesson(wordy("A", ["**/*.ts"]), NOW);
+    const gone = h.db.lessons.createLesson(wordy("B", ["**/*.ts"]), NOW);
+    // A Lesson with no occurrence is remapped away, so each needs one.
+    const [one, two] = add(
+      h.db,
+      occurrence("o1", { at: NOW - 1 }),
+      occurrence("o2", { at: NOW - 2 }),
+    );
+    h.db.lessons.attach([one?.id ?? 0], keep, NOW);
+    h.db.lessons.attach([two?.id ?? 0], gone, NOW);
+    const rows = add(h.db, occurrence("a"));
+    h.deps.config.lessons.tokenCap = 500;
+    h.answer = (prompt) =>
+      prompt.includes("over the cap")
+        ? fenced({ merges: [{ keep, gone: [gone], title: "AB", rule: "Short." }] })
+        : fenced({ findings: [newLesson(rows[0]?.id ?? 0)] });
+    await createLessonLearner(h.deps).tick();
+    expect(h.prompts).toHaveLength(2);
+    expect(h.db.lessons.lessons(SCOPE).map((each) => each.title)).toEqual([
+      "AB",
+      "Check for null before use",
+    ]);
+  });
+
+  it("stays under the cap, no compaction pass runs", async () => {
+    const h = harness();
+    const rows = add(h.db, occurrence("a"));
+    h.answer = () => fenced({ findings: [newLesson(rows[0]?.id ?? 0)] });
+    await createLessonLearner(h.deps).tick();
+    expect(h.prompts).toHaveLength(1);
   });
 });

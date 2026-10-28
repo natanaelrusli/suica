@@ -674,7 +674,8 @@ extension CLIAgentClient: LessonsClient {
             LessonsUninstallReply.self, ["lessons", "uninstall", "--json"], timeout: Self.lessonsInstallTimeout)
     }
 
-    public func exportLessons() async throws(AgentError) -> LessonsExportReply {
-        try await lessonsReply(LessonsExportReply.self, ["lessons", "export", "--json"], timeout: Self.gitlabTimeout)
+    public func exportLessons(zipTo: String?) async throws(AgentError) -> LessonsExportReply {
+        let arguments = zipTo.map { ["lessons", "export", "--zip", $0, "--json"] } ?? ["lessons", "export", "--json"]
+        return try await lessonsReply(LessonsExportReply.self, arguments, timeout: Self.gitlabTimeout)
     }
 }

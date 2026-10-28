@@ -107,6 +107,12 @@ export interface LessonStore {
   link(a: number, b: number): void;
   links(lessonId: number): number[];
   archive(id: number, at: number): void;
+  /** Replaces a Lesson's title, rule, topics and globs. */
+  rewrite(
+    id: number,
+    fields: Pick<LessonRow, "title" | "rule" | "topics" | "globs">,
+    at: number,
+  ): void;
   /** Moves the occurrences and links of `goneId` to `keepId` and deletes `goneId`. */
   merge(keepId: number, goneId: number, at: number): void;
   /** Runs `work` in one transaction: a throw leaves none of its writes. */
@@ -462,6 +468,18 @@ export function createLessonStore(db: DatabaseSync): LessonStore {
     },
     archive(id, at) {
       db.prepare("UPDATE lesson SET archived = 1, updated_at = ? WHERE id = ?").run(at, id);
+    },
+    rewrite(id, fields, at) {
+      db.prepare(
+        "UPDATE lesson SET title = ?, rule = ?, topics = ?, globs = ?, updated_at = ? WHERE id = ?",
+      ).run(
+        fields.title,
+        fields.rule,
+        JSON.stringify(fields.topics),
+        JSON.stringify(fields.globs),
+        at,
+        id,
+      );
     },
     merge(keepId, goneId, at) {
       if (keepId === goneId) return;
