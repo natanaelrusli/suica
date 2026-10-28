@@ -130,3 +130,21 @@ private struct SlowUpdates: UpdatesClient {
     await first.value
     #expect(slow.inner.calls.applies == 1 && relaunches.applied.count == 1)
 }
+
+@MainActor @Test func retryRepeatsWhatFailed() async {
+    var checkFails = StubUpdates()
+    checkFails.check = .unavailable(message: "offline")
+    let model = UpdatesModel(client: checkFails, store: store(), now: { Date() }, relaunch: { _ in true })
+    await model.checkNow()
+    #expect(model.state == .failed("offline") && !model.failureWasInstall)
+    await model.retry()
+    #expect(checkFails.calls.checks == 2 && checkFails.calls.applies == 0)
+
+    var installFails = StubUpdates()
+    installFails.apply = UpdateApplied(status: "failed", release: nil, staged: nil, target: nil, swapScript: nil, message: "bad sha")
+    let other = UpdatesModel(client: installFails, store: store(), now: { Date() }, relaunch: { _ in true })
+    await other.install()
+    #expect(other.state == .failed("bad sha") && other.failureWasInstall)
+    await other.retry()
+    #expect(installFails.calls.applies == 2 && installFails.calls.checks == 0)
+}

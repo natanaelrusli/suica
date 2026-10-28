@@ -28,7 +28,7 @@ struct UpdatesFooterItem: View {
                     .font(.caption).foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
-                Button(Copy.retry) { Task { await model.install() } }
+                Button(Copy.retry) { Task { await model.retry() } }
             }
         }
     }

@@ -216,10 +216,11 @@ struct SuicaApp: App {
         _reviews = State(initialValue: reviewsModel)
         Task { @MainActor in
             await onboardingModel.checkNeeded()
-            await updatesModel.checkIfDue()
             // Opening the app runs the re-reviews that only wait for a push to settle.
             if !onboardingModel.needsSetup { await reviewsModel.runWaitingRereviews() }
         }
+        // Its own task: a slow network must not delay the launch work above.
+        if AgentConfig.fromBundle(.main) != nil { Task { @MainActor in await updatesModel.checkIfDue() } }
         Task { @MainActor in await model.runRefreshLoop(every: refreshInterval) }
     }
 

@@ -44,7 +44,13 @@ public protocol UpdatesClient: Sendable {
 public final class UpdatesModel {
     public enum State: Equatable { case idle, available(String), installing, failed(String) }
 
-    public private(set) var state: State = .idle
+    public private(set) var state: State = .idle {
+        didSet { if case .failed = state { failureWasInstall = failing == .install } }
+    }
+    /// Which action left `.failed`, so the page retries that one.
+    public private(set) var failureWasInstall = false
+    private enum Action { case check, install }
+    private var failing = Action.check
     private let client: any UpdatesClient
     private let store: UserDefaults
     private let now: () -> Date
@@ -73,6 +79,7 @@ public final class UpdatesModel {
 
     private func check(surfaceUnavailable: Bool) async {
         guard state != .installing else { return }
+        failing = .check
         guard let result = try? await client.checkUpdate() else {
             if surfaceUnavailable { state = .failed(Copy.updateCheckFailed) }
             return
@@ -85,8 +92,11 @@ public final class UpdatesModel {
         }
     }
 
+    public func retry() async { if failureWasInstall { await install() } else { await checkNow() } }
+
     public func install() async {
         guard state != .installing else { return }
+        failing = .install
         state = .installing
         let applied: UpdateApplied
         do { applied = try await client.applyUpdate() } catch {
