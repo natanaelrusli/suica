@@ -17,6 +17,10 @@ if [ -z "$NODE" ]; then
   echo "node not found on PATH" >&2
   exit 1
 fi
+# npm is a `#!/usr/bin/env node` script: it needs this node on the PATH, which a LaunchAgent or the
+# app does not provide.
+PATH="$(dirname "$NODE"):$PATH"
+export PATH
 MAJOR=$("$NODE" -p 'process.versions.node.split(".")[0]')
 if [ "$MAJOR" -lt 24 ]; then
   echo "Node 24 or newer is required, found $("$NODE" --version)" >&2

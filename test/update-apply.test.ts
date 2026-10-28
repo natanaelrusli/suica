@@ -35,7 +35,7 @@ function tarball(root: string): Buffer {
   return readFileSync(out);
 }
 
-function setup(over: { sha?: string; failCli?: boolean; url?: string } = {}) {
+function setup(over: { sha?: string; failCli?: boolean; failFinish?: boolean; url?: string } = {}) {
   const root = mkdtempSync(join(tmpdir(), "apply test-"));
   const home = join(root, "home dir");
   mkdirSync(home);
@@ -58,6 +58,7 @@ function setup(over: { sha?: string; failCli?: boolean; url?: string } = {}) {
   };
   const run = async (cmd: string, args: string[], env?: Record<string, string>) => {
     if (over.failCli && args[0]?.endsWith("install-cli.sh")) throw new Error("cli failed");
+    if (over.failFinish && args[0]?.endsWith("finish-app.sh")) throw new Error("finish failed");
     await exec(cmd, args, { env: { ...process.env, ...env, MARKS: marks } });
   };
   const deps = {
@@ -81,7 +82,7 @@ function setup(over: { sha?: string; failCli?: boolean; url?: string } = {}) {
 }
 
 describe("applyUpdate", () => {
-  it("stages a verified release after installing the CLI, in order", async () => {
+  it("finishes and stages the app, then installs the CLI last", async () => {
     const { deps, home, marks, stagedDir } = setup();
     const r = await applyUpdate(deps);
     expect(r).toEqual({
@@ -95,8 +96,8 @@ describe("applyUpdate", () => {
     expect(existsSync(r.status === "staged" ? r.swapScript : "")).toBe(true);
     const lines = readFileSync(marks, "utf8").trim().split("\n");
     expect(lines).toHaveLength(2);
-    expect(lines[0]).toBe(`install-cli /opt/node ${deps.prefix}`);
-    expect(lines[1]).toMatch(/^finish-app .*Suica\.app .*\/\.local\/bin\/suica$/);
+    expect(lines[0]).toMatch(/^finish-app .*Suica\.app .*\/\.local\/bin\/suica$/);
+    expect(lines[1]).toBe(`install-cli /opt/node ${deps.prefix}`);
     const left = readdirSync(join(home, "Library/Application Support/Suica/update"));
     expect(left).toEqual(["staged"]);
   });
@@ -113,6 +114,15 @@ describe("applyUpdate", () => {
     const { deps, home, stagedDir } = setup({ failCli: true });
     const r = await applyUpdate(deps);
     expect(r).toEqual({ status: "failed", message: "cli failed" });
+    expect(existsSync(stagedDir)).toBe(false);
+    expect(readdirSync(join(home, "Library/Application Support/Suica/update"))).toEqual([]);
+  });
+
+  it("installs no CLI and leaves no staged app when finishing the app fails", async () => {
+    const { deps, home, marks, stagedDir } = setup({ failFinish: true });
+    const r = await applyUpdate(deps);
+    expect(r).toEqual({ status: "failed", message: "finish failed" });
+    expect(existsSync(marks)).toBe(false);
     expect(existsSync(stagedDir)).toBe(false);
     expect(readdirSync(join(home, "Library/Application Support/Suica/update"))).toEqual([]);
   });

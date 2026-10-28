@@ -104,6 +104,7 @@ export async function applyUpdate(
   deps: CheckDeps & { run: Run; home: string; execPath: string; prefix: string },
 ): Promise<ApplyResult> {
   const updateDir = join(deps.home, "Library", "Application Support", "Suica", "update");
+  const stagedDir = join(updateDir, "staged");
   let tmp: string | undefined;
   try {
     const m = await latestManifest(deps);
@@ -120,10 +121,8 @@ export async function applyUpdate(
     await writeFile(archive, bytes);
     await deps.run("tar", ["-xzf", archive, "-C", out]);
 
-    await deps.run("sh", [join(out, "scripts", "install-cli.sh")], {
-      SUICA_NODE: deps.execPath,
-      SUICA_PREFIX: deps.prefix,
-    });
+    // The CLI goes last: it is the one step that changes the machine, so a failure before it
+    // leaves the old CLI and old app together. finish-app.sh only needs the CLI's path.
     const app = join(out, "Suica.app");
     await deps.run("sh", [
       join(out, "scripts", "finish-app.sh"),
@@ -132,11 +131,14 @@ export async function applyUpdate(
     ]);
 
     // The swap script outlives the temp dir, so it is staged beside the app.
-    const stagedDir = join(updateDir, "staged");
     await rm(stagedDir, { recursive: true, force: true });
     await mkdir(stagedDir);
     await cp(join(out, "scripts", "swap-app.sh"), join(stagedDir, "swap-app.sh"));
     await rename(app, join(stagedDir, "Suica.app"));
+    await deps.run("sh", [join(out, "scripts", "install-cli.sh")], {
+      SUICA_NODE: deps.execPath,
+      SUICA_PREFIX: deps.prefix,
+    });
     return {
       status: "staged",
       release: m.version,
@@ -145,6 +147,7 @@ export async function applyUpdate(
       swapScript: join(stagedDir, "swap-app.sh"),
     };
   } catch (e) {
+    await rm(stagedDir, { recursive: true, force: true });
     return { status: "failed", message: e instanceof Error ? e.message : String(e) };
   } finally {
     if (tmp) await rm(tmp, { recursive: true, force: true });
