@@ -678,3 +678,28 @@ extension CLIAgentClient: LessonsClient {
         try await lessonsReply(LessonsExportReply.self, ["lessons", "export", "--json"], timeout: Self.gitlabTimeout)
     }
 }
+
+// MARK: - Updates client
+
+extension CLIAgentClient: UpdatesClient {
+    // Downloading and verifying a release.
+    private static let updateApplyTimeout: TimeInterval = 300
+
+    /// These commands answer with JSON even when they exit 1 (a refusal): the last line.
+    private func updateReply<T: Decodable>(_ type: T.Type, _ arguments: [String], timeout: TimeInterval)
+        async throws(AgentError) -> T
+    {
+        let result = try await runner.run(invocation(arguments, timeout: timeout))
+        if let line = lastLine(of: result.stdout), let parsed = try? decodeDocument(T.self, from: line) { return parsed }
+        guard result.exitCode == 0 else { throw AgentError.failed(exitCode: result.exitCode) }
+        throw AgentError.badOutput
+    }
+
+    public func checkUpdate() async throws(AgentError) -> UpdateCheck {
+        try await updateReply(UpdateCheck.self, ["update", "check", "--json"], timeout: Self.gitlabTimeout)
+    }
+
+    public func applyUpdate() async throws(AgentError) -> UpdateApplied {
+        try await updateReply(UpdateApplied.self, ["update", "apply", "--json"], timeout: Self.updateApplyTimeout)
+    }
+}

@@ -72,6 +72,11 @@ extension UnconfiguredClient: SetupClient {
     func installAgent() async throws(AgentError) -> ActionResult { throw AgentError.launchFailed }
 }
 
+extension UnconfiguredClient: UpdatesClient {
+    func checkUpdate() async throws(AgentError) -> UpdateCheck { throw AgentError.launchFailed }
+    func applyUpdate() async throws(AgentError) -> UpdateApplied { throw AgentError.launchFailed }
+}
+
 extension UnconfiguredClient: LessonsClient {
     func lessons() async throws(AgentError) -> LessonListDocument { throw AgentError.launchFailed }
     func lesson(id: Int) async throws(AgentError) -> LessonDetailDocument? { throw AgentError.launchFailed }
@@ -93,6 +98,19 @@ extension UnconfiguredClient: TemplatesClient {
 }
 
 private let refreshInterval: Duration = .seconds(30)
+
+/// Hands the staged app to the swap script, which waits for this process to exit, then quit.
+@MainActor private func relaunchAfterUpdate(_ applied: UpdateApplied) {
+    guard let script = applied.swapScript, let staged = applied.staged, let target = applied.target else { return }
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: script)
+    process.arguments = [String(ProcessInfo.processInfo.processIdentifier), staged, target]
+    process.standardInput = FileHandle.nullDevice
+    process.standardOutput = FileHandle.nullDevice
+    process.standardError = FileHandle.nullDevice
+    do { try process.run() } catch { return }
+    NSApp.terminate(nil)
+}
 
 /// Receives `suica://` links. SwiftUI would open them by building the window's content again, so the
 /// window scene turns that off (`handlesExternalEvents`) and the links come here instead.
@@ -136,6 +154,7 @@ struct SuicaApp: App {
     @State private var office: OfficeModel
     @State private var onboarding: OnboardingModel
     @State private var lessons: LessonsModel
+    @State private var updates: UpdatesModel
     @State private var plans = PlansModel(store: UserDefaults.standard)
     @State private var appearance = AppearanceSettings()
     @State private var navigator = Navigator()
@@ -150,6 +169,7 @@ struct SuicaApp: App {
         let officeClient: any OfficeClient
         let setupClient: any SetupClient
         let lessonsClient: any LessonsClient
+        let updatesClient: any UpdatesClient
         if let config = AgentConfig.fromBundle(.main) {
             let client = CLIAgentClient(config: config, runner: ProcessRunner())
             agent = client
@@ -160,6 +180,7 @@ struct SuicaApp: App {
             officeClient = client
             setupClient = client
             lessonsClient = client
+            updatesClient = client
         } else {
             agent = UnconfiguredClient()
             dashboard = UnconfiguredClient()
@@ -169,6 +190,7 @@ struct SuicaApp: App {
             officeClient = UnconfiguredClient()
             setupClient = UnconfiguredClient()
             lessonsClient = UnconfiguredClient()
+            updatesClient = UnconfiguredClient()
         }
         let model = MenuModel(client: agent)
         _model = State(initialValue: model)
@@ -181,6 +203,9 @@ struct SuicaApp: App {
         _templates = State(initialValue: TemplateEditorModel(client: templatesClient))
         _office = State(initialValue: OfficeModel(client: officeClient))
         _lessons = State(initialValue: LessonsModel(client: lessonsClient))
+        _updates = State(
+            initialValue: UpdatesModel(
+                client: updatesClient, store: UserDefaults.standard, now: Date.init, relaunch: relaunchAfterUpdate))
         let onboardingModel = OnboardingModel(dashboard: dashboard, setup: setupClient)
         _onboarding = State(initialValue: onboardingModel)
         let reviewsModel = ReviewsModel(client: reviewsClient)
