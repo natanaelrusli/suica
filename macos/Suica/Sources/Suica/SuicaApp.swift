@@ -161,6 +161,9 @@ struct SuicaApp: App {
     @State private var navigator = Navigator()
     @State private var celebrations = CelebrationCounter()
 
+    /// Updates need the agent the bundle names; a bare `swift run` has none, so nothing is offered.
+    private var updatesOffered: UpdatesModel? { AgentConfig.fromBundle(.main) == nil ? nil : updates }
+
     init() {
         let agent: any AgentClient
         let dashboard: any DashboardClient
@@ -204,15 +207,16 @@ struct SuicaApp: App {
         _templates = State(initialValue: TemplateEditorModel(client: templatesClient))
         _office = State(initialValue: OfficeModel(client: officeClient))
         _lessons = State(initialValue: LessonsModel(client: lessonsClient))
-        _updates = State(
-            initialValue: UpdatesModel(
-                client: updatesClient, store: UserDefaults.standard, now: Date.init, relaunch: relaunchAfterUpdate))
+        let updatesModel = UpdatesModel(
+            client: updatesClient, store: UserDefaults.standard, now: Date.init, relaunch: relaunchAfterUpdate)
+        _updates = State(initialValue: updatesModel)
         let onboardingModel = OnboardingModel(dashboard: dashboard, setup: setupClient)
         _onboarding = State(initialValue: onboardingModel)
         let reviewsModel = ReviewsModel(client: reviewsClient)
         _reviews = State(initialValue: reviewsModel)
         Task { @MainActor in
             await onboardingModel.checkNeeded()
+            await updatesModel.checkIfDue()
             // Opening the app runs the re-reviews that only wait for a push to settle.
             if !onboardingModel.needsSetup { await reviewsModel.runWaitingRereviews() }
         }
@@ -223,7 +227,7 @@ struct SuicaApp: App {
         MenuBarExtra {
             MenuView(
                 model: model, window: window, reviews: reviews, settings: appearance, navigator: navigator,
-                onboarding: onboarding)
+                onboarding: onboarding, updates: updatesOffered)
                 .modifier(Celebrations(model: model, reviews: reviews, settings: appearance, counter: celebrations))
                 .appearance(appearance)
         } label: {
@@ -236,7 +240,7 @@ struct SuicaApp: App {
         Window(Copy.appName, id: "main") {
             MainWindow(
                 window: window, editor: editor, reviews: reviews, fixes: fixes, templates: templates,
-                office: office, lessons: lessons, plans: plans, onboarding: onboarding, settings: appearance, navigator: navigator
+                office: office, lessons: lessons, plans: plans, updates: updatesOffered, onboarding: onboarding, settings: appearance, navigator: navigator
             )
             .modifier(Celebrations(model: model, reviews: reviews, settings: appearance, counter: celebrations))
             .appearance(appearance)

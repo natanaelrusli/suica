@@ -5,6 +5,7 @@ import SwiftUI
 /// bar badge and where the window opens. Every choice applies at once.
 struct AppearanceView: View {
     @Bindable var settings: AppearanceSettings
+    var updates: UpdatesModel?
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     @Environment(\.motionLevel) private var motion
     @Environment(CelebrationCounter.self) private var celebrations: CelebrationCounter?
@@ -165,6 +166,10 @@ struct AppearanceView: View {
                 }
             } header: {
                 heading(Copy.windowHeading, "macwindow")
+            }
+
+            if let updates {
+                UpdatesSection(model: updates)
             }
 
             Section {

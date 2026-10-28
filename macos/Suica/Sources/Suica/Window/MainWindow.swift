@@ -196,6 +196,8 @@ struct MainWindow: View {
     let office: OfficeModel
     let lessons: LessonsModel
     let plans: PlansModel
+    /// Nil when the app has no agent to update through.
+    let updates: UpdatesModel?
     @Bindable var onboarding: OnboardingModel
     let settings: AppearanceSettings
     @Bindable var navigator: Navigator
@@ -431,7 +433,7 @@ struct MainWindow: View {
         case .configuration: ConfigurationView(
                 window: window, editor: editor, reviews: reviews, lessons: lessons, navigator: navigator,
                 category: item.category)
-        case .appearance: AppearanceView(settings: settings)
+        case .appearance: AppearanceView(settings: settings, updates: updates)
         case .office: OfficeView(model: office, settings: settings)
         case .system: SystemView()
         case .lessons: LessonsView(model: lessons, navigator: navigator)

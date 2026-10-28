@@ -9,6 +9,7 @@ struct MenuView: View {
     let settings: AppearanceSettings
     let navigator: Navigator
     let onboarding: OnboardingModel
+    var updates: UpdatesModel?
     @State private var tab: PanelTab = .recent
     /// Set once the Owner picks a tab, so the opening refresh does not switch it back.
     @State private var tabPicked = false
@@ -261,6 +262,13 @@ struct MenuView: View {
     }
 
     private var footer: some View {
+        VStack(alignment: .leading, spacing: metrics.gap * 0.5) {
+            if let updates { UpdatesFooterItem(model: updates) }
+            footerButtons
+        }
+    }
+
+    private var footerButtons: some View {
         HStack {
             // With the quick actions hidden, Pause stays reachable here.
             if !settings.showsPopoverCounters {
