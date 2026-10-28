@@ -48,6 +48,10 @@ cp "$BIN" "$APP/Contents/MacOS/Suica"
 iconutil -c icns "$ICONS/AppIcon.iconset" -o "$APP/Contents/Resources/AppIcon.icns"
 cp "$REPO/macos/Info.plist.template" "$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :SuicaCLIPath $CLI" "$APP/Contents/Info.plist"
+V=$(node -p "require('$REPO/package.json').version")
+for KEY in CFBundleShortVersionString CFBundleVersion; do
+  /usr/libexec/PlistBuddy -c "Set :$KEY $V" "$APP/Contents/Info.plist"
+done
 codesign --force --sign - "$APP"
 
 # macOS shows a notification with the icon of the app that sent it, so the agent sends its
