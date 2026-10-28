@@ -43,19 +43,15 @@ it("still succeeds when the agent cannot be reloaded", { timeout: 20_000 }, () =
   const root = mkdtempSync(join(tmpdir(), "install cli-"));
   const nodeDir = join(root, "node");
   mkdirSync(nodeDir);
-  for (const [name, body] of [
-    ["node", "echo 24"],
-    ["npm", "true"],
-  ]) {
-    writeFileSync(join(nodeDir, name), `#!/bin/sh\n${body}\n`);
-    chmodSync(join(nodeDir, name), 0o755);
-  }
+  writeFileSync(join(nodeDir, "npm"), "#!/bin/sh\n");
+  chmodSync(join(nodeDir, "npm"), 0o755);
   const home = join(root, "home");
   mkdirSync(join(home, "Library", "LaunchAgents"), { recursive: true });
   writeFileSync(join(home, "Library", "LaunchAgents", "com.madhani.suica.agent.plist"), "");
   const prefix = join(root, "prefix");
   // The installed wrapper execs `node .../cli.ts agent install`; the stub node fails for that.
   writeFileSync(join(nodeDir, "node"), '#!/bin/sh\n[ "$1" = -p ] && echo 24 && exit 0\nexit 1\n');
+  chmodSync(join(nodeDir, "node"), 0o755);
   const r = spawnSync("sh", [SCRIPT], {
     env: {
       PATH: "/usr/bin:/bin",
