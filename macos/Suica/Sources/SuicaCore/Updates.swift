@@ -48,13 +48,13 @@ public final class UpdatesModel {
     private let client: any UpdatesClient
     private let store: UserDefaults
     private let now: () -> Date
-    private let relaunch: @MainActor (UpdateApplied) -> Void
+    private let relaunch: @MainActor (UpdateApplied) -> Bool
     private static let lastCheckKey = "updates.lastCheck"
 
-    /// `relaunch` runs the swap script and quits the app; it lives in the app target.
+    /// `relaunch` runs the swap script and quits the app (it lives in the app target); false when it could not start.
     public init(
         client: any UpdatesClient, store: UserDefaults, now: @escaping () -> Date,
-        relaunch: @escaping @MainActor (UpdateApplied) -> Void
+        relaunch: @escaping @MainActor (UpdateApplied) -> Bool
     ) {
         self.client = client
         self.store = store
@@ -95,6 +95,6 @@ public final class UpdatesModel {
             state = applied.status == "up-to-date" ? .idle : .failed(applied.message ?? Copy.updateInstallFailed)
             return
         }
-        relaunch(applied)
+        if !relaunch(applied) { state = .failed(Copy.updateInstallFailed) }
     }
 }

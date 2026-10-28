@@ -47,12 +47,12 @@ private func store() -> UserDefaults {
     return defaults
 }
 
-@MainActor private final class Relaunches { var applied: [UpdateApplied] = [] }
+@MainActor private final class Relaunches { var applied: [UpdateApplied] = []; var works = false }
 
 @MainActor @Test func checkIfDueRunsOncePerDay() async {
     let stub = StubUpdates()
     var clock = Date(timeIntervalSince1970: 1_000_000)
-    let model = UpdatesModel(client: stub, store: store(), now: { clock }, relaunch: { _ in })
+    let model = UpdatesModel(client: stub, store: store(), now: { clock }, relaunch: { _ in true })
     await model.checkIfDue()
     #expect(model.state == .available("2"))
     clock += 3600
@@ -66,7 +66,7 @@ private func store() -> UserDefaults {
 @MainActor @Test func unavailableIsSilentWhenDueButShownByCheckNow() async {
     var stub = StubUpdates()
     stub.check = .unavailable(message: "offline")
-    let model = UpdatesModel(client: stub, store: store(), now: { Date() }, relaunch: { _ in })
+    let model = UpdatesModel(client: stub, store: store(), now: { Date() }, relaunch: { _ in true })
     await model.checkIfDue()
     #expect(model.state == .idle)
     await model.checkNow()
@@ -76,14 +76,26 @@ private func store() -> UserDefaults {
 @MainActor @Test func installRelaunchesOnStagedAndFailsOtherwise() async {
     let relaunches = Relaunches()
     let stub = StubUpdates()
-    let model = UpdatesModel(client: stub, store: store(), now: { Date() }, relaunch: { relaunches.applied.append($0) })
+    let model = UpdatesModel(client: stub, store: store(), now: { Date() }, relaunch: { relaunches.applied.append($0); return true })
     await model.install()
     #expect(relaunches.applied.count == 1 && relaunches.applied[0].release == "2")
     #expect(model.state == .installing)
 
     var failing = StubUpdates()
     failing.apply = UpdateApplied(status: "failed", release: nil, staged: nil, target: nil, swapScript: nil, message: "bad sha")
-    let other = UpdatesModel(client: failing, store: store(), now: { Date() }, relaunch: { relaunches.applied.append($0) })
+    let other = UpdatesModel(client: failing, store: store(), now: { Date() }, relaunch: { relaunches.applied.append($0); return true })
     await other.install()
     #expect(other.state == .failed("bad sha") && relaunches.applied.count == 1)
+}
+
+@MainActor @Test func aRelaunchThatCannotStartFailsAndCanBeRetried() async {
+    let relaunches = Relaunches()
+    let model = UpdatesModel(
+        client: StubUpdates(), store: store(), now: { Date() },
+        relaunch: { relaunches.applied.append($0); return relaunches.works })
+    await model.install()
+    #expect(model.state == .failed(Copy.updateInstallFailed))
+    relaunches.works = true
+    await model.install()
+    #expect(model.state == .installing && relaunches.applied.count == 2)
 }

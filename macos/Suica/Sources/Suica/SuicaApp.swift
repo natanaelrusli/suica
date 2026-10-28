@@ -100,16 +100,17 @@ extension UnconfiguredClient: TemplatesClient {
 private let refreshInterval: Duration = .seconds(30)
 
 /// Hands the staged app to the swap script, which waits for this process to exit, then quit.
-@MainActor private func relaunchAfterUpdate(_ applied: UpdateApplied) {
-    guard let script = applied.swapScript, let staged = applied.staged, let target = applied.target else { return }
+@MainActor private func relaunchAfterUpdate(_ applied: UpdateApplied) -> Bool {
+    guard let script = applied.swapScript, let staged = applied.staged, let target = applied.target else { return false }
     let process = Process()
     process.executableURL = URL(fileURLWithPath: script)
     process.arguments = [String(ProcessInfo.processInfo.processIdentifier), staged, target]
     process.standardInput = FileHandle.nullDevice
     process.standardOutput = FileHandle.nullDevice
     process.standardError = FileHandle.nullDevice
-    do { try process.run() } catch { return }
+    do { try process.run() } catch { return false }
     NSApp.terminate(nil)
+    return true
 }
 
 /// Receives `suica://` links. SwiftUI would open them by building the window's content again, so the
