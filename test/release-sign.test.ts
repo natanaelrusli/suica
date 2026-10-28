@@ -3,11 +3,13 @@ import { createHash } from "node:crypto";
 import {
   chmodSync,
   copyFileSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -93,12 +95,12 @@ describe("pack-release", () => {
   });
 });
 
-describe("release.sh", () => {
+describe("release.sh", { timeout: 20_000 }, () => {
   // A throwaway repo holding copies of the release scripts and a fake build-app.sh (no swift).
   function throwaway(): string {
     const repo = tmp();
     mkdirSync(join(repo, "scripts"));
-    for (const f of ["release.sh", "pack-release.sh", "release-sign.ts"])
+    for (const f of ["release.sh", "pack-release.sh", "release-sign.ts", "release-verify.ts"])
       copyFileSync(join(REPO, "scripts", f), join(repo, "scripts", f));
     writeFileSync(
       join(repo, "scripts", "build-app.sh"),
@@ -108,6 +110,11 @@ describe("release.sh", () => {
       chmodSync(join(repo, "scripts", f), 0o755);
     mkdirSync(join(repo, "src"));
     writeFileSync(join(repo, "src", "a.ts"), "");
+    for (const f of ["update.ts", "update-key.ts"])
+      copyFileSync(join(REPO, "src", f), join(repo, "src", f));
+    // The copied src/update.ts needs zod; the ignore keeps the symlink from dirtying the tree.
+    symlinkSync(join(REPO, "node_modules"), join(repo, "node_modules"));
+    writeFileSync(join(repo, ".gitignore"), "node_modules\n");
     writeFileSync(join(repo, "package.json"), '{"type":"module","version":"3.4.5"}');
     writeFileSync(join(repo, "package-lock.json"), "{}");
     const git = (...a: string[]) => execFileSync("git", ["-C", repo, ...a], { stdio: "pipe" });
@@ -141,8 +148,10 @@ describe("release.sh", () => {
   it("dry-runs build, pack and sign, and prints the gh command", () => {
     const repo = throwaway();
     const { key, pem } = keygen();
-    const r = run(repo, key);
+    const r = run(repo, key, { SUICA_RELEASE_VERIFY_KEY: pem });
     expect(r.status).toBe(0);
+    const sha = execFileSync("git", ["-C", repo, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+    expect(r.stdout).toContain(`--target ${sha}`);
     const m =
       /DRY_RUN: gh release create v3\.4\.5 (\S+\.tar\.gz) (\S+latest\.json) (\S+\.sig)/.exec(
         r.stdout,
@@ -154,5 +163,31 @@ describe("release.sh", () => {
     const verified = verifyManifest(readFileSync(manifest, "utf8"), readFileSync(sig, "utf8"), pem);
     expect(verified.version).toBe("3.4.5");
     expect(verified.sha256).toBe(createHash("sha256").update(readFileSync(tarball)).digest("hex"));
+  });
+
+  it("aborts before publishing when the signing key does not match the verify key", () => {
+    const r = run(throwaway(), keygen().key, { SUICA_RELEASE_VERIFY_KEY: keygen().pem });
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain("does not verify");
+    expect(r.stdout).not.toContain("gh release create");
+  });
+
+  it("aborts with the embedded placeholder key", () => {
+    const r = run(throwaway(), keygen().key);
+    expect(r.status).not.toBe(0);
+    expect(r.stdout).not.toContain("gh release create");
+  });
+
+  it("refuses an unpushed HEAD without calling gh", () => {
+    const bin = tmp();
+    writeFileSync(join(bin, "gh"), '#!/bin/sh\necho called > "$0.called"\nexit 99\n');
+    chmodSync(join(bin, "gh"), 0o755);
+    const r = run(throwaway(), keygen().key, {
+      DRY_RUN: "",
+      PATH: `${bin}:${process.env["PATH"] ?? ""}`,
+    });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("not pushed");
+    expect(existsSync(join(bin, "gh.called"))).toBe(false);
   });
 });
