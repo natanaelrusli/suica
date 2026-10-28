@@ -3,7 +3,8 @@
 #   $PREFIX/lib/suica   the code and its production dependencies, installed from package-lock.json
 #   $PREFIX/bin/suica   the command
 # PREFIX is ~/.local unless SUICA_PREFIX is set. Re-run to update, and after switching Node
-# versions: the absolute node path is baked into the command and into the LaunchAgent.
+# versions: the absolute node path is baked into the command and into the LaunchAgent. SUICA_NODE
+# picks that node instead of the first one on the PATH.
 set -eu
 
 REPO=$(cd "$(dirname "$0")/.." && pwd)
@@ -11,7 +12,7 @@ PREFIX=${SUICA_PREFIX:-$HOME/.local}
 LIB="$PREFIX/lib/suica"
 BIN="$PREFIX/bin/suica"
 
-NODE=$(command -v node || true)
+NODE=${SUICA_NODE:-$(command -v node || true)}
 if [ -z "$NODE" ]; then
   echo "node not found on PATH" >&2
   exit 1
