@@ -34,40 +34,52 @@ struct UpdatesFooterItem: View {
     }
 }
 
-/// A Form section: the running version, a manual check and what it found.
-struct UpdatesSection: View {
+/// The Updates page: the running version, a manual check, what it found, and the way to install.
+struct UpdatesView: View {
     let model: UpdatesModel
     @State private var checked = false
     @State private var checking = false
+    @Environment(\.metrics) private var metrics
 
     /// Absent under `swift run`, where there is no bundle version to show.
     private var version: String? { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String }
 
+    private var busy: Bool { checking || model.state == .installing }
+
     var body: some View {
-        Section {
-            if let version { LabeledContent(Copy.currentVersion, value: version) }
-            LabeledContent {
-                HStack(spacing: 8) {
-                    if checking || model.state == .installing { ProgressView().controlSize(.small) }
-                    if case .available(let latest) = model.state {
-                        Button(Copy.installUpdate) { Task { await model.install() } }
-                            .help(Copy.updateTo(latest))
+        ScrollView {
+            Card(title: Copy.updatesHeading, symbol: WindowSection.updates.symbol) {
+                VStack(alignment: .leading, spacing: metrics.gap) {
+                    if let version { LabeledContent(Copy.currentVersion, value: version) }
+                    HStack(spacing: 8) {
+                        if busy { ProgressView().controlSize(.small) }
+                        result
                     }
-                    Button(Copy.checkNow) {
-                        Task {
-                            checking = true
-                            await model.checkNow()
-                            checking = false
-                            checked = true
+                    .frame(minHeight: 22, alignment: .leading)
+                    HStack(spacing: 8) {
+                        Button(Copy.checkNow) {
+                            Task {
+                                checking = true
+                                await model.checkNow()
+                                checking = false
+                                checked = true
+                            }
+                        }
+                        .disabled(busy)
+                        if case .available(let latest) = model.state {
+                            Button(Copy.installUpdate) { Task { await model.install() } }
+                                .buttonStyle(.borderedProminent)
+                                .help(Copy.updateTo(latest))
+                        }
+                        if case .failed = model.state {
+                            Button(Copy.retry) { Task { await model.retry() } }
                         }
                     }
-                    .disabled(checking || model.state == .installing)
                 }
-            } label: {
-                result
             }
-        } header: {
-            Label(Copy.updatesHeading, systemImage: "arrow.down.circle").font(.headline)
+            .frame(maxWidth: 560)
+            .padding(metrics.gap + 4)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
     }
 
@@ -76,7 +88,7 @@ struct UpdatesSection: View {
         case .idle: if checked { Text(Copy.upToDate) } else { EmptyView() }
         case .available(let latest): Text(Copy.updateAvailable(latest))
         case .installing: Text(Copy.installing)
-        case .failed(let message): Text(message).foregroundStyle(.orange)
+        case .failed(let message): Label(message, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
         }
     }
 }

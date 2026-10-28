@@ -250,7 +250,7 @@ struct SuicaApp: App {
         .handlesExternalEvents(matching: [])
         .commands {
             SidebarCommands()
-            NavigationCommands(navigator: navigator)
+            NavigationCommands(navigator: navigator, updatesOffered: updatesOffered != nil)
         }
     }
 }

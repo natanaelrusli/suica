@@ -15,6 +15,8 @@ enum WindowSection: String, CaseIterable, Identifiable {
     case lessons
     /// The plans written with the writing-plans skill and where each stands; ⇧⌘P, under Insights after Lessons.
     case plans
+    /// Check for updates and install one; ⇧⌘U, under Settings after Configuration. Hidden when the app has no CLI to update.
+    case updates
 
     var id: String { rawValue }
 
@@ -33,6 +35,7 @@ enum WindowSection: String, CaseIterable, Identifiable {
         case .system: Copy.systemPage
         case .lessons: Copy.lessons
         case .plans: Copy.plans
+        case .updates: Copy.updatesHeading
         }
     }
 
@@ -52,6 +55,7 @@ enum WindowSection: String, CaseIterable, Identifiable {
         // As Configuration's Lessons category.
         case .lessons: "book"
         case .plans: "list.bullet.clipboard"
+        case .updates: "arrow.down.circle"
         }
     }
 
@@ -71,6 +75,7 @@ enum WindowSection: String, CaseIterable, Identifiable {
         case .system: .mint
         case .lessons: .brown
         case .plans: .teal
+        case .updates: .green
         }
     }
 
@@ -79,6 +84,7 @@ enum WindowSection: String, CaseIterable, Identifiable {
         if self == .myMergeRequests { return KeyboardShortcut("2", modifiers: [.command, .shift]) }
         if self == .lessons { return KeyboardShortcut("l", modifiers: [.command, .shift]) }
         if self == .plans { return KeyboardShortcut("p", modifiers: [.command, .shift]) }
+        if self == .updates { return KeyboardShortcut("u", modifiers: [.command, .shift]) }
         let index = Self.allCases.firstIndex(of: self) ?? 0
         return KeyboardShortcut(KeyEquivalent(Character(String((index + 1) % 10))))
     }
@@ -252,7 +258,7 @@ struct SidebarNode: Identifiable {
         ),
         (
             Copy.settingsGroup,
-            [SidebarNode(.configuration)]
+            [SidebarNode(.configuration), SidebarNode(.updates)]
         ),
     ]
 }
@@ -281,6 +287,8 @@ struct OpenPageAction {
 /// The Go menu (⌘1 to ⌘9, ⌘0 and ⇧⌘2, one per section) and Settings… (⌘,), which opens Appearance.
 struct NavigationCommands: Commands {
     let navigator: Navigator
+    /// False when there is nothing to update (no CLI in the bundle): Updates is then left out.
+    let updatesOffered: Bool
 
     var body: some Commands {
         CommandGroup(replacing: .appSettings) {
@@ -288,7 +296,7 @@ struct NavigationCommands: Commands {
                 .keyboardShortcut(",")
         }
         CommandMenu(Copy.goMenu) {
-            ForEach(WindowSection.menuOrder) { section in
+            ForEach(WindowSection.menuOrder.filter { $0 != .updates || updatesOffered }) { section in
                 PageButton(navigator: navigator, item: .section(section), title: section.title)
                     .keyboardShortcut(section.shortcut)
             }

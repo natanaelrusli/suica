@@ -67,7 +67,7 @@ make uninstall      # app, agent and CLI; config, state database and logs stay
 
 ### Updating
 
-The app checks for a newer release when it starts, at most once every 24 hours, and says nothing when you are offline or no release exists. When one is found, the popover footer shows **Update to X** and the Updates section of the Appearance page shows the same; click it and the app downloads and verifies the release, quits and reopens as the new version. The same from a terminal (JSON on stdout, [contract](contracts/update.v1.json)):
+The app checks for a newer release when it starts, at most once every 24 hours, and says nothing when you are offline or no release exists. When one is found, the popover footer shows **Update to X** and the Updates page (⇧⌘U, under Settings) shows the same; click it and the app downloads and verifies the release, quits and reopens as the new version. The same from a terminal (JSON on stdout, [contract](contracts/update.v1.json)):
 
 ```bash
 suica --version

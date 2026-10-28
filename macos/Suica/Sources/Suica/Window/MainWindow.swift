@@ -328,7 +328,7 @@ struct MainWindow: View {
         List(selection: sidebarSelection) {
             ForEach(SidebarNode.groups, id: \.title) { group in
                 Section(group.title) {
-                    ForEach(group.nodes) { node in
+                    ForEach(group.nodes.filter { $0.item != .section(.updates) || updates != nil }) { node in
                         sidebarRow(node)
                             .tag(node.item)
                             // The row is already marked on Configuration's own pages, so picking it
@@ -433,11 +433,13 @@ struct MainWindow: View {
         case .configuration: ConfigurationView(
                 window: window, editor: editor, reviews: reviews, lessons: lessons, navigator: navigator,
                 category: item.category)
-        case .appearance: AppearanceView(settings: settings, updates: updates)
+        case .appearance: AppearanceView(settings: settings)
         case .office: OfficeView(model: office, settings: settings)
         case .system: SystemView()
         case .lessons: LessonsView(model: lessons, navigator: navigator)
         case .plans: PlansView(model: plans)
+        case .updates:
+            if let updates { UpdatesView(model: updates) } else { ContentUnavailableView(Copy.updatesHeading, systemImage: WindowSection.updates.symbol) }
         }
     }
 }
