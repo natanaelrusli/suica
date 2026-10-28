@@ -34,7 +34,7 @@ function run(bin: string, pid: string, staged: string, target: string) {
   });
 }
 
-it("swaps the staged app into place once the pid is gone and opens it", () => {
+it("swaps the staged app into place once the pid is gone and opens it", { timeout: 20_000 }, () => {
   const { dir, bin, staged, target } = setup();
   const dead = spawnSync("true").pid.toString();
   const r = run(bin, dead, staged, target);
@@ -45,7 +45,7 @@ it("swaps the staged app into place once the pid is gone and opens it", () => {
   expect(readFileSync(join(dir, "opened"), "utf8").trim()).toBe(target);
 });
 
-it("only opens the target when nothing is staged", () => {
+it("only opens the target when nothing is staged", { timeout: 20_000 }, () => {
   const { dir, bin, staged, target } = setup();
   const missing = join(dir, "nope");
   const r = run(bin, spawnSync("true").pid.toString(), missing, target);

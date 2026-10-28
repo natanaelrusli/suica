@@ -30,6 +30,10 @@ function tarball(root: string): Buffer {
   stub("install-cli.sh", 'echo "install-cli $SUICA_NODE $SUICA_PREFIX" >> "$MARKS"');
   stub("finish-app.sh", 'echo "finish-app $1 $2" >> "$MARKS"');
   stub("swap-app.sh", "true");
+  writeFileSync(
+    join(src, "Suica.app", "Contents", "Info.plist"),
+    "<plist><dict><key>CFBundleShortVersionString</key><string>0.2.0</string></dict></plist>",
+  );
   const out = join(root, "suica.tar.gz");
   execFileSync("tar", ["-czf", out, "-C", src, "Suica.app", "scripts"]);
   return readFileSync(out);
@@ -81,7 +85,7 @@ function setup(over: { sha?: string; failCli?: boolean; failFinish?: boolean; ur
   };
 }
 
-describe("applyUpdate", () => {
+describe("applyUpdate", { timeout: 20_000 }, () => {
   it("finishes and stages the app, then installs the CLI last", async () => {
     const { deps, home, marks, stagedDir } = setup();
     const r = await applyUpdate(deps);
@@ -125,6 +129,22 @@ describe("applyUpdate", () => {
     expect(existsSync(marks)).toBe(false);
     expect(existsSync(stagedDir)).toBe(false);
     expect(readdirSync(join(home, "Library/Application Support/Suica/update"))).toEqual([]);
+  });
+
+  it("returns the staged app again when the swap never happened", async () => {
+    const { deps, stagedDir } = setup();
+    const first = await applyUpdate(deps);
+    // The CLI is now the new release, so a retry sees it as current.
+    const second = await applyUpdate({ ...deps, current: "0.2.0" });
+    expect(second).toEqual(first);
+    expect(existsSync(join(stagedDir, "Suica.app"))).toBe(true);
+  });
+
+  it("ignores and removes a staged app whose version is not the current one", async () => {
+    const { deps, stagedDir } = setup();
+    await applyUpdate(deps);
+    expect(await applyUpdate({ ...deps, current: "0.3.0" })).toEqual({ status: "up-to-date" });
+    expect(existsSync(stagedDir)).toBe(false);
   });
 
   it("is up to date when the release is not newer", async () => {

@@ -72,7 +72,7 @@ The app checks for a newer release when it starts, at most once every 24 hours, 
 ```bash
 suica --version
 suica update check --json    # up-to-date, available or unavailable (with the reason)
-suica update apply --json    # download, verify and stage; the app swaps itself in
+suica update apply --json    # download, verify and stage; the app swaps itself in. The CLI is replaced as the last step, before the app swaps in; a retry after a half-finished update reopens the staged app
 ```
 
 A release is a GitHub Release holding a tarball (`Suica.app`, the install scripts and the CLI sources), `latest.json` and its ed25519 signature `latest.json.sig`. The CLI verifies the signature, then the tarball's sha256, before running anything from it. Tests only: `SUICA_UPDATE_BASE_URL` and `SUICA_UPDATE_PUBLIC_KEY` override the release host and key, and only when `NODE_ENV=test`.

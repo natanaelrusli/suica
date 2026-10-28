@@ -683,7 +683,7 @@ extension CLIAgentClient: LessonsClient {
 
 extension CLIAgentClient: UpdatesClient {
     // Downloading and verifying a release.
-    private static let updateApplyTimeout: TimeInterval = 300
+    private static let updateApplyTimeout: TimeInterval = 1800
 
     /// These commands answer with JSON even when they exit 1 (a refusal): the last line.
     private func updateReply<T: Decodable>(_ type: T.Type, _ arguments: [String], timeout: TimeInterval)

@@ -1,5 +1,5 @@
 import { createHash, verify } from "node:crypto";
-import { cp, mkdir, mkdtemp, rename, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
 
@@ -108,7 +108,25 @@ export async function applyUpdate(
   let tmp: string | undefined;
   try {
     const m = await latestManifest(deps);
-    if (!isNewer(m.version, deps.current)) return { status: "up-to-date" };
+    const result = (): ApplyResult => ({
+      status: "staged",
+      release: m.version,
+      staged: join(stagedDir, "Suica.app"),
+      target: join(deps.home, "Applications", "Suica.app"),
+      swapScript: join(stagedDir, "swap-app.sh"),
+    });
+    if (!isNewer(m.version, deps.current)) {
+      // The CLI is replaced last, so a staged app of the current version means the swap never
+      // happened: offer it again. Any other staged app is stale.
+      const plist = await readFile(
+        join(stagedDir, "Suica.app", "Contents", "Info.plist"),
+        "utf8",
+      ).catch(() => "");
+      const staged = /CFBundleShortVersionString<\/key>\s*<string>([^<]*)</.exec(plist)?.[1];
+      if (staged === deps.current) return result();
+      await rm(stagedDir, { recursive: true, force: true });
+      return { status: "up-to-date" };
+    }
     const bytes = Buffer.from(await (await fetchOk(deps, m.url, 120_000)).arrayBuffer());
     if (createHash("sha256").update(bytes).digest("hex") !== m.sha256.toLowerCase())
       throw new Error("downloaded release does not match its sha256");
@@ -139,13 +157,7 @@ export async function applyUpdate(
       SUICA_NODE: deps.execPath,
       SUICA_PREFIX: deps.prefix,
     });
-    return {
-      status: "staged",
-      release: m.version,
-      staged: join(stagedDir, "Suica.app"),
-      target: join(deps.home, "Applications", "Suica.app"),
-      swapScript: join(stagedDir, "swap-app.sh"),
-    };
+    return result();
   } catch (e) {
     await rm(stagedDir, { recursive: true, force: true });
     return { status: "failed", message: e instanceof Error ? e.message : String(e) };

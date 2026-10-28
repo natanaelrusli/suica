@@ -53,7 +53,8 @@ echo "installed $BIN (node: $NODE)"
 
 # A LaunchAgent from an earlier install (or from a checkout) is moved over to this copy.
 if [ -f "$HOME/Library/LaunchAgents/com.madhani.suica.agent.plist" ]; then
-  "$BIN" agent install
+  # The CLI swap is complete here, so a failing agent reload must not fail the install.
+  "$BIN" agent install || echo "warning: agent not reloaded; run suica agent install" >&2
 else
   echo "start the background agent with: suica agent install"
 fi
