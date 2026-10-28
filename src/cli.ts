@@ -1,3 +1,4 @@
+import { execFile } from "node:child_process";
 import { existsSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, dirname, isAbsolute, join } from "node:path";
@@ -80,9 +81,12 @@ import { geminiResumeId, sendToSession } from "./office/send.ts";
 import { adaptersFor, collectOffice } from "./office/collect.ts";
 import { realProbe } from "./office/probe.ts";
 import { buildUsage } from "./usage.ts";
+import { PUBLIC_KEY_PEM } from "./update-key.ts";
+import { applyUpdate, checkForUpdate } from "./update.ts";
+import { VERSION } from "./version.ts";
 
 const USAGE =
-  "usage: suica <once|status|state|stats|usage|office --json|office chat <agent> <sessionId> --json|office send <agent> <sessionId> --json (message on stdin)|pause|resume|pending [--all]|send <id> [--json]|skip <id> [--json]|retry <id> [--json]|clear <id|yours|others|all> [--json]|selftest|message <key> --json (request on stdin)|reviews --json|mr <key> --json|mr approve <key> <sha> --json|mr comment <key> --json (body on stdin)|mr close <key> --json|mr merge <key> <sha> [--squash] [--remove-source-branch] [--when-pipeline-succeeds] --json (message on stdin)|review options [--cli <id>] --json|review queue <key> [--skill <name>] [--model <name>] [--auto] --json|review post <id> [--inline|--comment] --json|review discard <id> --json|review cancel <id> --json|fix list --json|fix queue <key> [--pipeline] --json|fix watch <key> --json|fix unwatch <key> --json|fix confirm <id> --json (edits on stdin)|fix retry <id> --json (note on stdin)|fix discard <id> --json|fix cancel <id> --json|fix replies <id> --json|config show --json|config set --json|templates show --json|templates set --json|gitlab check <host> --json|lessons mcp|lessons install [--yes] [--json]|lessons uninstall [--json]|lessons status --json|lessons export [--zip <file>] [--json]|lessons list --json|lessons show <id> --json|lessons archive <id> --json|lessons merge <keep> <gone> --json|agent install [--json]|agent uninstall|agent restart --json>\n";
+  "usage: suica <version|once|status|state|stats|usage|office --json|office chat <agent> <sessionId> --json|office send <agent> <sessionId> --json (message on stdin)|pause|resume|pending [--all]|send <id> [--json]|skip <id> [--json]|retry <id> [--json]|clear <id|yours|others|all> [--json]|selftest|message <key> --json (request on stdin)|reviews --json|mr <key> --json|mr approve <key> <sha> --json|mr comment <key> --json (body on stdin)|mr close <key> --json|mr merge <key> <sha> [--squash] [--remove-source-branch] [--when-pipeline-succeeds] --json (message on stdin)|review options [--cli <id>] --json|review queue <key> [--skill <name>] [--model <name>] [--auto] --json|review post <id> [--inline|--comment] --json|review discard <id> --json|review cancel <id> --json|fix list --json|fix queue <key> [--pipeline] --json|fix watch <key> --json|fix unwatch <key> --json|fix confirm <id> --json (edits on stdin)|fix retry <id> --json (note on stdin)|fix discard <id> --json|fix cancel <id> --json|fix replies <id> --json|config show --json|config set --json|templates show --json|templates set --json|gitlab check <host> --json|lessons mcp|lessons install [--yes] [--json]|lessons uninstall [--json]|lessons status --json|lessons export [--zip <file>] [--json]|lessons list --json|lessons show <id> --json|lessons archive <id> --json|lessons merge <keep> <gone> --json|update check --json|update apply --json|agent install [--json]|agent uninstall|agent restart --json>\n";
 const TEAMS_DISABLED = "teams is disabled: set teams.enabled to true in the config\n";
 const SHOWN_WITH_ALL = 50;
 
@@ -994,8 +998,54 @@ async function uninstallLessonsCommand(json: boolean): Promise<number> {
   return result.status === "uninstalled" ? 0 : 1;
 }
 
+/** `suica update check|apply --json`: always exits 0; the app reads `status`. */
+async function updateCommand(apply: boolean): Promise<number> {
+  // The overrides exist so tests can run offline; they are ignored outside NODE_ENV=test.
+  const testing = process.env["NODE_ENV"] === "test";
+  const baseUrl = testing ? process.env["SUICA_UPDATE_BASE_URL"] : undefined;
+  const publicKeyPem = (testing && process.env["SUICA_UPDATE_PUBLIC_KEY"]) || PUBLIC_KEY_PEM;
+  const deps = {
+    fetch,
+    current: VERSION,
+    arch: process.arch,
+    publicKeyPem,
+    ...(baseUrl && { baseUrl }),
+  };
+  // <prefix>/lib/suica/src is the installed layout; anything else (a checkout) falls back to ~/.local.
+  const installed = dirname(dirname(dirname(import.meta.dirname)));
+  const prefix =
+    process.env["SUICA_PREFIX"] ||
+    (join(installed, "lib", "suica", "src") === import.meta.dirname
+      ? installed
+      : join(homedir(), ".local"));
+  const result = apply
+    ? await applyUpdate({
+        ...deps,
+        home: homedir(),
+        execPath: process.execPath,
+        prefix,
+        run: (cmd, args, env) =>
+          new Promise<void>((done, fail) => {
+            execFile(
+              cmd,
+              args,
+              { env: { ...process.env, ...env }, timeout: 600_000 },
+              (error, _stdout, stderr) =>
+                error ? fail(new Error(`${cmd} failed: ${stderr || error.message}`)) : done(),
+            );
+          }),
+      })
+    : await checkForUpdate(deps);
+  process.stdout.write(`${JSON.stringify({ version: 1, ...result })}\n`);
+  return 0;
+}
+
 async function main(argv: readonly string[]): Promise<number> {
   const command = argv[0];
+  if (command === "version" || command === "--version") {
+    process.stdout.write(`${VERSION}\n`);
+    return 0;
+  }
   if (
     command === "templates" &&
     (argv[1] === "show" || argv[1] === "set") &&
@@ -1129,6 +1179,9 @@ async function main(argv: readonly string[]): Promise<number> {
     }
     process.stderr.write(USAGE);
     return 2;
+  }
+  if (command === "update" && argv.length === 3 && argv[2] === "--json") {
+    if (argv[1] === "check" || argv[1] === "apply") return updateCommand(argv[1] === "apply");
   }
   if (command === "agent") {
     if (argv[1] === "restart" && argv.includes("--json")) return restartAgent();

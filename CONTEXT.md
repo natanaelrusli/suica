@@ -68,6 +68,14 @@ _Avoid_: auto fix, bot commit
 An Agent Fix whose input is the failed head pipeline of the Owner's own MR: the agent reads the failed jobs' logs, the model changes the code, and it waits for the Owner like any Agent Fix. Queued by hand, or automatically when the pipeline watch sees the pipeline fail.
 _Avoid_: CI fix, auto fix
 
+**Release**:
+A signed build of Suica published as a GitHub Release: a tarball with Suica.app, the install scripts and the CLI sources, plus an ed25519-signed `latest.json`. Cut by `make release`.
+_Avoid_: Version, build, download
+
+**Update**:
+Replacing the installed CLI and Suica.app with a newer Release, started by the Owner with **Update to X** or `suica update apply`. It checks the signature and sha256 first.
+_Avoid_: Upgrade, auto-update
+
 **Lesson**:
 A general rule learned from one or more review findings, with every occurrence.
 _Avoid_: rule, knowledge, memory

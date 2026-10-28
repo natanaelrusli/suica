@@ -72,6 +72,11 @@ extension UnconfiguredClient: SetupClient {
     func installAgent() async throws(AgentError) -> ActionResult { throw AgentError.launchFailed }
 }
 
+extension UnconfiguredClient: UpdatesClient {
+    func checkUpdate() async throws(AgentError) -> UpdateCheck { throw AgentError.launchFailed }
+    func applyUpdate() async throws(AgentError) -> UpdateApplied { throw AgentError.launchFailed }
+}
+
 extension UnconfiguredClient: LessonsClient {
     func lessons() async throws(AgentError) -> LessonListDocument { throw AgentError.launchFailed }
     func lesson(id: Int) async throws(AgentError) -> LessonDetailDocument? { throw AgentError.launchFailed }
@@ -93,6 +98,20 @@ extension UnconfiguredClient: TemplatesClient {
 }
 
 private let refreshInterval: Duration = .seconds(30)
+
+/// Hands the staged app to the swap script, which waits for this process to exit, then quit.
+@MainActor private func relaunchAfterUpdate(_ applied: UpdateApplied) -> Bool {
+    guard let script = applied.swapScript, let staged = applied.staged, let target = applied.target else { return false }
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: script)
+    process.arguments = [String(ProcessInfo.processInfo.processIdentifier), staged, target]
+    process.standardInput = FileHandle.nullDevice
+    process.standardOutput = FileHandle.nullDevice
+    process.standardError = FileHandle.nullDevice
+    do { try process.run() } catch { return false }
+    NSApp.terminate(nil)
+    return true
+}
 
 /// Receives `suica://` links. SwiftUI would open them by building the window's content again, so the
 /// window scene turns that off (`handlesExternalEvents`) and the links come here instead.
@@ -136,10 +155,14 @@ struct SuicaApp: App {
     @State private var office: OfficeModel
     @State private var onboarding: OnboardingModel
     @State private var lessons: LessonsModel
+    @State private var updates: UpdatesModel
     @State private var plans = PlansModel(store: UserDefaults.standard)
     @State private var appearance = AppearanceSettings()
     @State private var navigator = Navigator()
     @State private var celebrations = CelebrationCounter()
+
+    /// Updates need the agent the bundle names; a bare `swift run` has none, so nothing is offered.
+    private var updatesOffered: UpdatesModel? { AgentConfig.fromBundle(.main) == nil ? nil : updates }
 
     init() {
         let agent: any AgentClient
@@ -150,6 +173,7 @@ struct SuicaApp: App {
         let officeClient: any OfficeClient
         let setupClient: any SetupClient
         let lessonsClient: any LessonsClient
+        let updatesClient: any UpdatesClient
         if let config = AgentConfig.fromBundle(.main) {
             let client = CLIAgentClient(config: config, runner: ProcessRunner())
             agent = client
@@ -160,6 +184,7 @@ struct SuicaApp: App {
             officeClient = client
             setupClient = client
             lessonsClient = client
+            updatesClient = client
         } else {
             agent = UnconfiguredClient()
             dashboard = UnconfiguredClient()
@@ -169,6 +194,7 @@ struct SuicaApp: App {
             officeClient = UnconfiguredClient()
             setupClient = UnconfiguredClient()
             lessonsClient = UnconfiguredClient()
+            updatesClient = UnconfiguredClient()
         }
         let model = MenuModel(client: agent)
         _model = State(initialValue: model)
@@ -181,6 +207,9 @@ struct SuicaApp: App {
         _templates = State(initialValue: TemplateEditorModel(client: templatesClient))
         _office = State(initialValue: OfficeModel(client: officeClient))
         _lessons = State(initialValue: LessonsModel(client: lessonsClient))
+        let updatesModel = UpdatesModel(
+            client: updatesClient, store: UserDefaults.standard, now: Date.init, relaunch: relaunchAfterUpdate)
+        _updates = State(initialValue: updatesModel)
         let onboardingModel = OnboardingModel(dashboard: dashboard, setup: setupClient)
         _onboarding = State(initialValue: onboardingModel)
         let reviewsModel = ReviewsModel(client: reviewsClient)
@@ -190,6 +219,8 @@ struct SuicaApp: App {
             // Opening the app runs the re-reviews that only wait for a push to settle.
             if !onboardingModel.needsSetup { await reviewsModel.runWaitingRereviews() }
         }
+        // Its own task: a slow network must not delay the launch work above.
+        if AgentConfig.fromBundle(.main) != nil { Task { @MainActor in await updatesModel.checkIfDue() } }
         Task { @MainActor in await model.runRefreshLoop(every: refreshInterval) }
     }
 
@@ -197,7 +228,7 @@ struct SuicaApp: App {
         MenuBarExtra {
             MenuView(
                 model: model, window: window, reviews: reviews, settings: appearance, navigator: navigator,
-                onboarding: onboarding)
+                onboarding: onboarding, updates: updatesOffered)
                 .modifier(Celebrations(model: model, reviews: reviews, settings: appearance, counter: celebrations))
                 .appearance(appearance)
         } label: {
@@ -210,7 +241,7 @@ struct SuicaApp: App {
         Window(Copy.appName, id: "main") {
             MainWindow(
                 window: window, editor: editor, reviews: reviews, fixes: fixes, templates: templates,
-                office: office, lessons: lessons, plans: plans, onboarding: onboarding, settings: appearance, navigator: navigator
+                office: office, lessons: lessons, plans: plans, updates: updatesOffered, onboarding: onboarding, settings: appearance, navigator: navigator
             )
             .modifier(Celebrations(model: model, reviews: reviews, settings: appearance, counter: celebrations))
             .appearance(appearance)
@@ -219,7 +250,7 @@ struct SuicaApp: App {
         .handlesExternalEvents(matching: [])
         .commands {
             SidebarCommands()
-            NavigationCommands(navigator: navigator)
+            NavigationCommands(navigator: navigator, updatesOffered: updatesOffered != nil)
         }
     }
 }

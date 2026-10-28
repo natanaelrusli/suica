@@ -6,7 +6,6 @@ set -eu
 
 BUNDLE_ID=com.madhani.suica
 REPO=$(cd "$(dirname "$0")/.." && pwd)
-PACKAGE="$REPO/macos/Suica"
 APP="$HOME/Applications/Suica.app"
 
 CLI=${SUICA_CLI:-$(command -v suica || echo "$HOME/.local/bin/suica")}
@@ -15,13 +14,10 @@ if [ ! -x "$CLI" ]; then
   exit 1
 fi
 CLI=$(cd "$(dirname "$CLI")" && pwd)/$(basename "$CLI")
-if ! command -v swift >/dev/null 2>&1; then
-  echo "swift not found: install Xcode or the Command Line Tools" >&2
-  exit 1
-fi
 
-(cd "$PACKAGE" && swift build -c release)
-BIN="$(cd "$PACKAGE" && swift build -c release --show-bin-path)/Suica"
+BUILT=$(mktemp -d)
+trap 'rm -rf "$BUILT"' EXIT
+OUT_APP="$BUILT/Suica.app" "$REPO/scripts/build-app.sh"
 
 # Quit a running copy so its binary can be replaced.
 osascript -e "tell application id \"$BUNDLE_ID\" to quit" >/dev/null 2>&1 || true
@@ -30,25 +26,10 @@ for _ in 1 2 3 4 5 6 7 8 9 10; do
   sleep 0.5
 done
 
-# The icon is drawn by macos/make-icon.swift with the app's own AppIconArt.swift, so no image is
-# kept in git.
-ICONS=$(mktemp -d)
-trap 'rm -rf "$ICONS"' EXIT
-swiftc -parse-as-library -O "$PACKAGE/Sources/Suica/AppIconArt.swift" "$REPO/macos/make-icon.swift" -o "$ICONS/make-icon"
-"$ICONS/make-icon" "$ICONS/icon.png"
-mkdir -p "$ICONS/AppIcon.iconset"
-for px in 16 32 128 256 512; do
-  sips -z "$px" "$px" "$ICONS/icon.png" --out "$ICONS/AppIcon.iconset/icon_${px}x${px}.png" >/dev/null
-  double=$((px * 2))
-  sips -z "$double" "$double" "$ICONS/icon.png" --out "$ICONS/AppIcon.iconset/icon_${px}x${px}@2x.png" >/dev/null
-done
-
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp "$BIN" "$APP/Contents/MacOS/Suica"
-iconutil -c icns "$ICONS/AppIcon.iconset" -o "$APP/Contents/Resources/AppIcon.icns"
-cp "$REPO/macos/Info.plist.template" "$APP/Contents/Info.plist"
-/usr/libexec/PlistBuddy -c "Set :SuicaCLIPath $CLI" "$APP/Contents/Info.plist"
-codesign --force --sign - "$APP"
+rm -rf "$APP"
+mkdir -p "$(dirname "$APP")"
+cp -R "$BUILT/Suica.app" "$APP"
+"$REPO/scripts/finish-app.sh" "$APP" "$CLI"
 
 # macOS shows a notification with the icon of the app that sent it, so the agent sends its
 # notifications through a copy of terminal-notifier that carries the Suica icon. It is a separate

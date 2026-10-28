@@ -65,6 +65,30 @@ make uninstall      # app, agent and CLI; config, state database and logs stay
 
 `make uninstall-cli` and `make uninstall-app` remove one of them. After switching Node versions, run `make update` (and `make install-app` if the CLI path changed); coming from the old name, run `make migrate` first (see Moving from MR Review Assistant).
 
+### Updating
+
+The app checks for a newer release when it starts, at most once every 24 hours, and says nothing when you are offline or no release exists. When one is found, the popover footer shows **Update to X** and the Updates page (⇧⌘U, under Settings) shows the same; click it and the app downloads and verifies the release, quits and reopens as the new version. The same from a terminal (JSON on stdout, [contract](contracts/update.v1.json)):
+
+```bash
+suica --version
+suica update check --json    # up-to-date, available or unavailable (with the reason)
+suica update apply --json    # download, verify and stage; the app swaps itself in. The CLI is replaced as the last step, before the app swaps in; a retry after a half-finished update reopens the staged app
+```
+
+A release is a GitHub Release holding a tarball (`Suica.app`, the install scripts and the CLI sources), `latest.json` and its ed25519 signature `latest.json.sig`. The CLI verifies the signature, then the tarball's sha256, before running anything from it. Tests only: `SUICA_UPDATE_BASE_URL` and `SUICA_UPDATE_PUBLIC_KEY` override the release host and key, and only when `NODE_ENV=test`.
+
+To cut a release (arm64 only; needs `gh` signed in, a clean worktree and a pushed `HEAD`):
+
+```bash
+node scripts/release-keygen.ts   # once: writes the private key to ~/.config/suica/release-key.pem (SUICA_RELEASE_KEY), prints the public key
+# paste the public key into src/update-key.ts and commit it
+# bump "version" in package.json, commit and push
+make release                     # build, pack, sign, verify, then gh release create
+DRY_RUN=1 make release           # the same without publishing; prints the gh command
+```
+
+**Status:** the updater is inert until the real public key is committed: `src/update-key.ts` holds a placeholder, so every check reports unavailable. The whole path (keygen, a real release, check, apply and the app swap) has not been exercised end to end on a real release. Install the first updater-capable build by hand with `make update-app`.
+
 ### Everyday commands
 
 ```bash

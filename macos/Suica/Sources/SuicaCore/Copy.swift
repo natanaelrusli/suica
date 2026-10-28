@@ -1773,3 +1773,18 @@ extension Copy {
     public static let planTasks = "Tasks"
     public static let rescanPlans = "Rescan"
 }
+
+// MARK: - Updates
+
+extension Copy {
+    public static func updateAvailable(_ version: String) -> String { "Suica \(version) is available" }
+    public static let installing = "Installing the update"
+    public static let checkNow = "Check for updates"
+    public static let upToDate = "Suica is up to date"
+    public static let updatesHeading = "Updates"
+    public static let currentVersion = "Version"
+    public static let installUpdate = "Install"
+    public static func updateTo(_ version: String) -> String { "Update to \(version)" }
+    public static let updateCheckFailed = "Could not check for updates"
+    public static let updateInstallFailed = "Could not install the update"
+}
