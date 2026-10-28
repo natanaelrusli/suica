@@ -35,9 +35,27 @@ public struct LessonSummary: Codable, Equatable, Identifiable, Sendable {
 
     public var lastSeenDate: Date? { MRNote.parse(lastSeen) }
 
+    public var contextTokens: Int { LessonContext.tokens(title: title, rule: rule) }
+
     /// By its title, rule and Topics.
     public func matches(_ query: String) -> Bool {
         Search.matches(query, [title, rule] + topics)
+    }
+}
+
+/// What a Lesson costs the agent's context: the hook's line (`src/lessons/match.ts` renderLessons).
+public enum LessonContext {
+    // Mirrors MAX_TITLE and MAX_RULE in match.ts.
+    static let maxTitle = 80
+    static let maxRule = 600
+    /// The line's fixed text: bullet, separators and "(flagged N times, last in group/project !iid)".
+    static let lineOverhead = 60
+    /// shortcut: a flat 4 characters per token, not the model's tokenizer; fine for a size hint.
+    static let charsPerToken = 4
+
+    public static func tokens(title: String, rule: String) -> Int {
+        let chars = min(title.count, maxTitle) + min(rule.count, maxRule) + lineOverhead
+        return (chars + charsPerToken - 1) / charsPerToken
     }
 }
 
@@ -57,6 +75,9 @@ public struct LessonScope: Codable, Equatable, Identifiable, Sendable {
     }
 
     public var id: String { path }
+
+    /// Every lesson of the scope, if all were handed to an agent.
+    public var contextTokens: Int { lessons.reduce(0) { $0 + $1.contextTokens } }
 }
 
 /// `suica lessons list --json`.
@@ -134,6 +155,7 @@ public struct LessonDetail: Codable, Equatable, Identifiable, Sendable {
     public let title: String
     public let rule: String
     public let topics: [String]
+    public var contextTokens: Int { LessonContext.tokens(title: title, rule: rule) }
     /// The file globs the hook matches it by.
     public let globs: [String]
     /// The Lesson Scope's path; "" when its occurrences fall in no scope.
@@ -550,6 +572,24 @@ public struct LessonsUninstallReply: Decodable, Equatable, Sendable {
     }
 }
 
+extension LessonsExportReply {
+    /// The zip archive just written.
+    public var zipURL: URL? {
+        guard status == "zipped", let path, !path.isEmpty else { return nil }
+        return URL(fileURLWithPath: path)
+    }
+
+    /// `obsidian://open?path=<vault>` for a vault just written; nil when nothing was.
+    public var obsidianURL: URL? {
+        guard status == "exported", let path, !path.isEmpty else { return nil }
+        var parts = URLComponents()
+        parts.scheme = "obsidian"
+        parts.host = "open"
+        parts.queryItems = [URLQueryItem(name: "path", value: path)]
+        return parts.url
+    }
+}
+
 /// `suica lessons export --json`.
 public struct LessonsExportReply: Decodable, Equatable, Sendable {
     /// exported, disabled, no-vault-path, no-lessons or failed.
@@ -596,7 +636,8 @@ public protocol LessonsClient: Sendable {
     /// Without `confirm` only the plan comes back; nothing changes.
     func installLessons(confirm: Bool) async throws(AgentError) -> LessonsInstallReply
     func uninstallLessons() async throws(AgentError) -> LessonsUninstallReply
-    func exportLessons() async throws(AgentError) -> LessonsExportReply
+    /// Writes the vault; with `zipTo`, the same notes as one zip archive at that absolute path.
+    func exportLessons(zipTo: String?) async throws(AgentError) -> LessonsExportReply
 }
 
 // MARK: - Model
@@ -668,6 +709,8 @@ public final class LessonsModel {
     public private(set) var setupBusy = false
     /// The outcome of the last install, uninstall or export.
     public private(set) var setupNotice: String?
+    /// What the last export answered; nil before one, or when it failed to run.
+    public private(set) var lastExport: LessonsExportReply?
 
     @ObservationIgnored private let client: any LessonsClient
     @ObservationIgnored private var latestRefresh = 0
@@ -861,12 +904,16 @@ public final class LessonsModel {
         await refreshSetup()
     }
 
-    public func exportVault() async {
+    /// Writes the vault folder, or with `zipTo` one zip archive of the same notes.
+    public func exportVault(zipTo: String? = nil) async {
         guard !setupBusy else { return }
         setupBusy = true
         do {
-            setupNotice = Copy.lessonsExportOutcome(try await client.exportLessons())
+            let reply = try await client.exportLessons(zipTo: zipTo)
+            lastExport = reply
+            setupNotice = Copy.lessonsExportOutcome(reply)
         } catch {
+            lastExport = nil
             setupNotice = MenuModel.message(for: error)
         }
         setupBusy = false

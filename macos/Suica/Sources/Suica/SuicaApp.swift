@@ -82,7 +82,7 @@ extension UnconfiguredClient: LessonsClient {
     func lessonsStatus() async throws(AgentError) -> LessonsSetupStatus { throw AgentError.launchFailed }
     func installLessons(confirm: Bool) async throws(AgentError) -> LessonsInstallReply { throw AgentError.launchFailed }
     func uninstallLessons() async throws(AgentError) -> LessonsUninstallReply { throw AgentError.launchFailed }
-    func exportLessons() async throws(AgentError) -> LessonsExportReply { throw AgentError.launchFailed }
+    func exportLessons(zipTo: String?) async throws(AgentError) -> LessonsExportReply { throw AgentError.launchFailed }
 }
 
 extension UnconfiguredClient: TemplatesClient {

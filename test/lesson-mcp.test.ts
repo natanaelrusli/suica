@@ -122,6 +122,7 @@ function deps(): LessonsServerDeps {
       scopes: [scopeA, scopeB],
       perFile: 5,
       perSession: 2,
+      tokenCap: 4000,
     }),
     openReader: () => openLessonsReadOnly(statePath),
     scan: () => map,

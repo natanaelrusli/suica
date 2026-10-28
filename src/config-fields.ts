@@ -413,6 +413,13 @@ export const CONFIG_FIELDS: readonly ConfigField[] = [
     max: 20,
   },
   {
+    path: ["lessons", "tokenCap"],
+    type: "int",
+    label: "Lesson token cap",
+    help: "Most tokens the lessons of one folder may take together; past it, a model merges and shortens them",
+    unit: "tokens",
+  },
+  {
     path: ["office", "agents"],
     type: "stringList",
     label: "Coding agents to show",

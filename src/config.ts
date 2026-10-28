@@ -163,6 +163,8 @@ export const configSchema = z
         // How many lessons one file and one session show at most.
         perFile: z.number().int().min(1).max(20).default(5),
         perSession: z.number().int().min(1).max(20).default(5),
+        // Most tokens a scope's lessons may take together; past it the learner has a model merge and shorten them.
+        tokenCap: z.number().int().min(500).default(4000),
       })
       .strict()
       .default({}),

@@ -35,7 +35,7 @@ describe("showConfig", () => {
     const doc = showConfig(join(dir, "absent.yaml"));
     expect(doc.exists).toBe(false);
     expect(doc.sha256).toBeNull();
-    expect(doc.fields).toHaveLength(59);
+    expect(doc.fields).toHaveLength(60);
     for (const each of doc.fields) {
       expect(each.value).toBeNull();
       expect(each.effective).toBeNull();

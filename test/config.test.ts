@@ -42,7 +42,7 @@ describe("parseConfig", () => {
         agentName: "Suica",
       },
       model: { cli: "auto" },
-      lessons: { enabled: false, scopes: [], perFile: 5, perSession: 5 },
+      lessons: { enabled: false, scopes: [], perFile: 5, perSession: 5, tokenCap: 4000 },
       office: { agents: ["claude", "codex", "gemini"], custom: [] },
       review: {
         auto: true,
@@ -331,6 +331,7 @@ describe("lessons", () => {
       scopes: [],
       perFile: 5,
       perSession: 5,
+      tokenCap: 4000,
     });
   });
 

@@ -108,7 +108,7 @@ function deps(extra: Partial<HookDeps> = {}): HookDeps {
   const reader = openLessonsReadOnly(statePath);
   if (reader) readers.push(reader);
   return {
-    config: { enabled: true, scopes: [scope], perFile: 5, perSession: 5 },
+    config: { enabled: true, scopes: [scope], perFile: 5, perSession: 5, tokenCap: 4000 },
     hostname: "gitlab.example.com",
     reader,
     seen: memorySeen(),
@@ -165,7 +165,9 @@ describe("answerHook", () => {
     seed(statePath, scope);
     const answer = answerHook(
       { hook_event_name: "SessionStart", session_id: "s1", cwd: join(repo, "src") },
-      deps({ config: { enabled: true, scopes: [scope], perFile: 5, perSession: 2 } }),
+      deps({
+        config: { enabled: true, scopes: [scope], perFile: 5, perSession: 2, tokenCap: 4000 },
+      }),
     );
     expectOnlyContext(answer, "SessionStart");
     expect(context(answer)).toBe(
@@ -231,7 +233,9 @@ describe("answerHook", () => {
 
   it("SessionStart then Read in one session does not repeat a lesson", () => {
     const { go, ts, fresh } = seed(statePath, scope);
-    const shared = deps({ config: { enabled: true, scopes: [scope], perFile: 5, perSession: 2 } });
+    const shared = deps({
+      config: { enabled: true, scopes: [scope], perFile: 5, perSession: 2, tokenCap: 4000 },
+    });
     const start = { hook_event_name: "SessionStart", session_id: "s1", cwd: repo };
     expect(context(answerHook(start, shared))).toContain("Close rows");
     expect(answerHook(read(join(repo, "a.go")), shared)).toBe("");
@@ -275,7 +279,13 @@ describe("answerHook", () => {
     const inner = join(scope, "team");
     addLesson(scope, "Outer");
     addLesson(inner, "Inner");
-    const config = { enabled: true, scopes: [scope, inner], perFile: 5, perSession: 5 };
+    const config = {
+      enabled: true,
+      scopes: [scope, inner],
+      perFile: 5,
+      perSession: 5,
+      tokenCap: 4000,
+    };
     const inTeam = context(answerHook(start(join(inner, "docs")), deps({ config })));
     expect(inTeam).toContain("Inner");
     expect(inTeam).not.toContain("Outer");
@@ -356,7 +366,7 @@ describe("answerHook", () => {
       throw new Error("must not be called");
     };
     const answer = answerHook(read(join(repo, "a.go")), {
-      config: { enabled: false, scopes: [scope], perFile: 5, perSession: 5 },
+      config: { enabled: false, scopes: [scope], perFile: 5, perSession: 5, tokenCap: 4000 },
       hostname: "gitlab.example.com",
       reader: undefined,
       seen: { get: untouched, add: untouched, reset: untouched },
