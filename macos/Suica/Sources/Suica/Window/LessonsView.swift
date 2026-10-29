@@ -124,33 +124,42 @@ struct LessonsView: View {
     }
 }
 
+private enum LessonsMode: Hashable { case list, graph, usage }
+
 /// The list on the left and the selected Lesson on the right.
 private struct LessonsSplit: View {
     @Bindable var model: LessonsModel
     let navigator: Navigator
-    @State private var showsGraph = false
+    @State private var mode: LessonsMode = .list
 
     var body: some View {
         UnderTitleBar { titleBar in
-            HStack(spacing: 0) {
-                if showsGraph {
-                    graph(titleBar: titleBar)
-                        .frame(maxWidth: .infinity)
-                } else {
-                    list(titleBar: titleBar)
-                        .frame(width: 320)
-                }
-                Divider()
-                detail
-                    .frame(maxWidth: showsGraph ? 440 : .infinity, maxHeight: .infinity)
+            if mode == .usage {
+                LessonsUsageView(model: model)
                     .padding(.top, titleBar)
+            } else {
+                HStack(spacing: 0) {
+                    if mode == .graph {
+                        graph(titleBar: titleBar)
+                            .frame(maxWidth: .infinity)
+                    } else {
+                        list(titleBar: titleBar)
+                            .frame(width: 320)
+                    }
+                    Divider()
+                    detail
+                        .frame(maxWidth: mode == .graph ? 440 : .infinity, maxHeight: .infinity)
+                        .padding(.top, titleBar)
+                }
             }
         }
+        .task(id: mode) { if mode == .usage { await model.refreshUsage() } }
         .searchable(text: $model.filter.query, placement: .toolbar, prompt: Copy.searchLessons)
         .toolbar {
-            Picker(Copy.lessonsView, selection: $showsGraph) {
-                Label(Copy.lessonsAsList, systemImage: "list.bullet").tag(false)
-                Label(Copy.lessonsAsGraph, systemImage: "point.3.connected.trianglepath.dotted").tag(true)
+            Picker(Copy.lessonsView, selection: $mode) {
+                Label(Copy.lessonsAsList, systemImage: "list.bullet").tag(LessonsMode.list)
+                Label(Copy.lessonsAsGraph, systemImage: "point.3.connected.trianglepath.dotted").tag(LessonsMode.graph)
+                Label(Copy.lessonsAsUsage, systemImage: "chart.bar.xaxis").tag(LessonsMode.usage)
             }
             .pickerStyle(.segmented)
             .help(Copy.lessonsView)

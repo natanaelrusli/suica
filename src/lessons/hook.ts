@@ -16,6 +16,8 @@ import { lessonsForFile, rankLessons, renderLessons } from "./match.ts";
 import type { RankedLesson } from "./match.ts";
 import { repoForPath } from "./scopes.ts";
 import type { ScopeMap, ScopedRepo } from "./scopes.ts";
+import { estimateTokens } from "./usage.ts";
+import type { UsageLog, UsageSource } from "./usage.ts";
 
 export const SESSION_INTRO =
   "Lessons from past code reviews in this folder. More come per file as you read; ask the `suica-lessons` MCP server for others.";
@@ -48,6 +50,8 @@ export interface HookDeps {
   readonly hostname: string;
   readonly reader: LessonReader | undefined;
   readonly seen: SeenStore;
+  /** Where each delivery is noted; a failing log never costs the agent its Lessons. */
+  readonly usage: UsageLog;
   readonly now: number;
   /** The scope map; called only when an answer needs it. */
   readonly scan: () => ScopeMap;
@@ -91,6 +95,8 @@ function absolutePath(path: string, cwd: string): string | undefined {
 interface Target {
   /** The lesson scope: the configured folder, resolved, as `scanScopes` stores it. */
   readonly scope: string;
+  /** The repo holding the cwd (session start) or the file; undefined for a session outside any. */
+  readonly repo?: ScopedRepo;
   /** Path relative to the repo for a file event; undefined for a session start. */
   readonly file?: string;
 }
@@ -122,7 +128,9 @@ function target(input: HookInput, deps: HookDeps): Target | undefined {
     const cwd = absolutePath(input.cwd, "");
     if (cwd === undefined) return undefined;
     const found = resolveScope(cwd, deps.config.scopes, deps.scan);
-    return found === undefined ? undefined : { scope: found.scope };
+    return found === undefined
+      ? undefined
+      : { scope: found.scope, ...(found.repo === undefined ? {} : { repo: found.repo }) };
   }
   const tools = FILE_TOOLS[input.hook_event_name] ?? [];
   if (input.tool_name === undefined || !tools.includes(input.tool_name)) return undefined;
@@ -134,7 +142,7 @@ function target(input: HookInput, deps: HookDeps): Target | undefined {
   const file = relative(repo.dir, path);
   // repoForPath already keeps the path inside the repo; this guards the relative form too.
   if (file === "" || file === ".." || file.startsWith("../") || isAbsolute(file)) return undefined;
-  return { scope: repo.scope, file };
+  return { scope: repo.scope, repo, file };
 }
 
 function answer(input: unknown, deps: HookDeps): string {
@@ -165,11 +173,29 @@ function answer(input: unknown, deps: HookDeps): string {
     // Not remembering only means a lesson may come again.
   }
   const intro = where.file === undefined ? SESSION_INTRO : FILE_INTRO;
+  const additionalContext = `${intro}\n${renderLessons(shown)}`;
+  try {
+    const source: UsageSource =
+      where.file === undefined
+        ? "session"
+        : parsed.hook_event_name === "PostToolUse"
+          ? "read"
+          : "edit";
+    deps.usage.append({
+      at: deps.now,
+      project: where.repo?.project ?? null,
+      scope: where.scope,
+      source,
+      ...(SESSION_ID.test(parsed.session_id) ? { sessionId: parsed.session_id } : {}),
+      ...(where.file === undefined ? {} : { file: where.file }),
+      lessonIds: shown.map((r) => r.lesson.id),
+      tokens: estimateTokens(additionalContext),
+    });
+  } catch {
+    // An unlogged delivery is only a gap in the report.
+  }
   return JSON.stringify({
-    hookSpecificOutput: {
-      hookEventName: parsed.hook_event_name,
-      additionalContext: `${intro}\n${renderLessons(shown)}`,
-    },
+    hookSpecificOutput: { hookEventName: parsed.hook_event_name, additionalContext },
   });
 }
 

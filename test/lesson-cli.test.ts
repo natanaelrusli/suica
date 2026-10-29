@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { LessonStore, NewOccurrence } from "../src/lesson-store.ts";
 import { openLessonsReadOnly } from "../src/lesson-store.ts";
 import { buildLessonList, buildLessonShow, mergeLessons } from "../src/lessons/owner.ts";
+import { buildLessonUsage, fileUsageLog } from "../src/lessons/usage.ts";
+import type { UsageEntry } from "../src/lessons/usage.ts";
 import { openStore } from "../src/store.ts";
 
 const NOW = Date.UTC(2026, 9, 26, 12);
@@ -141,6 +143,60 @@ describe("the Lessons view documents", () => {
       buildLessonList(store.lessons, { enabled: true, scopes: [SCOPE, `${SCOPE}/`] }, SCAN, NOW),
     ).toEqual(golden.list);
     expect(buildLessonShow(store.lessons, timeout, NOW)).toEqual(golden.show);
+  });
+
+  it("lessons usage matches the golden", () => {
+    const store = openStore(":memory:");
+    const { timeout, errors, beta } = seed(store.lessons);
+    const base = { source: "session" as const, tokens: 0 };
+    const entries: UsageEntry[] = [
+      {
+        ...base,
+        at: NOW - 3 * DAY,
+        project: "acme/api",
+        scope: SCOPE,
+        sessionId: "s1",
+        lessonIds: [timeout, errors],
+        tokens: 120,
+      },
+      {
+        ...base,
+        at: NOW - 3 * DAY + 60_000,
+        project: "acme/api",
+        scope: SCOPE,
+        source: "read",
+        sessionId: "s1",
+        file: "src/client.go",
+        lessonIds: [timeout],
+        tokens: 40,
+      },
+      {
+        ...base,
+        at: NOW - 2 * DAY,
+        project: "acme/web",
+        scope: SCOPE,
+        source: "mcp",
+        tool: "lessons_for_path",
+        file: "web/fetch.go",
+        lessonIds: [timeout],
+        tokens: 30,
+      },
+      {
+        ...base,
+        at: NOW - DAY,
+        project: null,
+        scope: OTHER,
+        sessionId: "s2",
+        lessonIds: [beta, 999],
+        tokens: 20,
+      },
+    ];
+    const golden = JSON.parse(readFileSync("contracts/lessons.v1.json", "utf8")) as {
+      usage: unknown;
+    };
+    expect(buildLessonUsage(entries, (id) => store.lessons.lesson(id)?.title, NOW)).toEqual(
+      golden.usage,
+    );
   });
 
   it("lists nothing, reading nothing, while lessons are off", () => {
@@ -284,6 +340,49 @@ describe("suica lessons list|show|archive|merge", () => {
       [SCOPE, 2],
       [OTHER, 1],
     ]);
+  }, 20_000);
+
+  it("lessons usage reads the last 30 days of the log, with titles, even while lessons are off", () => {
+    write(`  enabled: false\n  scopes: ["${SCOPE}"]\n`);
+    const now = Date.now();
+    const log = fileUsageLog(join(dir, "state", "lessons-usage"), now);
+    const entry = (at: number, lessonIds: number[]): UsageEntry => ({
+      at,
+      project: "acme/api",
+      scope: SCOPE,
+      source: "session",
+      lessonIds,
+      tokens: 12,
+    });
+    log.append(entry(now - DAY, [ids.timeout, 999]));
+    log.append(entry(now - 40 * DAY, [ids.errors]));
+    const result = run("usage", "--json");
+    expect(result.status).toBe(0);
+    expect(result.json).toMatchObject({
+      version: 1,
+      days: 30,
+      totals: { deliveries: 1, tokens: 12, lessons: 2 },
+      projects: [
+        {
+          project: "acme/api",
+          topLessons: [
+            { id: ids.timeout, title: "HTTP clients need an explicit timeout", times: 1 },
+            { id: 999, title: null, times: 1 },
+          ],
+        },
+      ],
+    });
+  }, 20_000);
+
+  it("lessons usage with no log is an empty document", () => {
+    const result = run("usage", "--json");
+    expect(result.status).toBe(0);
+    expect(result.json).toMatchObject({
+      version: 1,
+      totals: { deliveries: 0, sessions: 0, tokens: 0, lessons: 0 },
+      projects: [],
+      recent: [],
+    });
   }, 20_000);
 
   it("lessons list says off while lessons are disabled", () => {

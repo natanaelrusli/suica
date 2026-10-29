@@ -10,6 +10,8 @@ import { openLessonsReadOnly } from "../src/lesson-store.ts";
 import { serveLessons } from "../src/lessons/mcp-server.ts";
 import type { LessonsServerDeps } from "../src/lessons/mcp-server.ts";
 import type { ScopeMap } from "../src/lessons/scopes.ts";
+import { estimateTokens } from "../src/lessons/usage.ts";
+import type { UsageEntry, UsageLog } from "../src/lessons/usage.ts";
 import { openStore } from "../src/store.ts";
 import { openMcpSession } from "../src/teams/mcp.ts";
 
@@ -25,6 +27,7 @@ let repoA: string;
 let repoB: string;
 let map: ScopeMap;
 let enabled: boolean;
+let usage: UsageLog & { readonly entries: UsageEntry[] };
 let ids: { go: number; ts: number; other: number; secret: number };
 
 function occurrence(
@@ -115,6 +118,16 @@ function seed(): void {
   store.close();
 }
 
+function memoryUsage(): UsageLog & { readonly entries: UsageEntry[] } {
+  const entries: UsageEntry[] = [];
+  return {
+    entries,
+    append: (entry) => {
+      entries.push(entry);
+    },
+  };
+}
+
 function deps(): LessonsServerDeps {
   return {
     config: (): Config["lessons"] => ({
@@ -126,6 +139,7 @@ function deps(): LessonsServerDeps {
     }),
     openReader: () => openLessonsReadOnly(statePath),
     scan: () => map,
+    usage,
     now: () => NOW,
   };
 }
@@ -184,6 +198,7 @@ beforeEach(() => {
     ],
   };
   enabled = true;
+  usage = memoryUsage();
   seed();
 });
 
@@ -432,6 +447,94 @@ describe("tools", () => {
     expect(frame?.result?.["isError"]).toBe(true);
     expect(text(frame as Frame)).not.toContain(dir);
     expect(text(frame as Frame)).not.toContain("boom");
+  });
+});
+
+describe("usage log", () => {
+  const idsIn = (body: string): number[] =>
+    [...body.matchAll(/^(?:- )?#(\d+) /gm)].map((m) => Number(m[1]));
+
+  it("logs lessons_for_path on a file", async () => {
+    const body = text(await call("lessons_for_path", { path: join(repoA, "src", "main.go") }));
+    expect(usage.entries).toEqual([
+      {
+        at: NOW,
+        project: "g/app",
+        scope: scopeA,
+        source: "mcp",
+        tool: "lessons_for_path",
+        file: "src/main.go",
+        lessonIds: idsIn(body),
+        tokens: estimateTokens(body),
+      },
+    ]);
+    expect(idsIn(body)).toEqual([ids.go]);
+  });
+
+  it("logs a folder and a search without a file", async () => {
+    const folder = text(await call("lessons_for_path", { path: repoA }));
+    const search = text(await call("search_lessons", { path: repoA, query: "close" }));
+    expect(usage.entries).toHaveLength(2);
+    expect(usage.entries[0]).toMatchObject({ tool: "lessons_for_path", lessonIds: idsIn(folder) });
+    expect(usage.entries[1]).toMatchObject({
+      tool: "search_lessons",
+      lessonIds: idsIn(search),
+      tokens: estimateTokens(search),
+    });
+    for (const entry of usage.entries) expect(entry).not.toHaveProperty("file");
+    for (const entry of usage.entries) expect(entry).not.toHaveProperty("sessionId");
+  });
+
+  it("logs get_lesson with its one id", async () => {
+    const body = text(await call("get_lesson", { path: repoA, id: ids.ts }));
+    expect(usage.entries).toEqual([
+      {
+        at: NOW,
+        project: "g/app",
+        scope: scopeA,
+        source: "mcp",
+        tool: "get_lesson",
+        lessonIds: [ids.ts],
+        tokens: estimateTokens(body),
+      },
+    ]);
+  });
+
+  it("logs a scope folder outside any repo with project null", async () => {
+    await call("lessons_for_path", { path: scopeB });
+    expect(usage.entries).toHaveLength(1);
+    expect(usage.entries[0]).toMatchObject({ project: null, scope: scopeB });
+  });
+
+  it("logs nothing for a reply without lessons", async () => {
+    expect(text(await call("get_lesson", { path: repoA, id: ids.other }))).toBe(NONE);
+    expect(text(await call("search_lessons", { path: repoA, query: "nothing matches this" }))).toBe(
+      NONE,
+    );
+    const store = openStore(statePath);
+    store.lessons.archive(ids.ts, NOW);
+    store.close();
+    expect(text(await call("get_lesson", { path: repoA, id: ids.ts }))).toBe(NONE);
+    enabled = false;
+    expect(text(await call("lessons_for_path", { path: repoA }))).toBe(NONE);
+    expect(usage.entries).toEqual([]);
+  });
+
+  it("still answers when the log throws", async () => {
+    const throwing = {
+      ...deps(),
+      usage: {
+        append: (): void => {
+          throw new Error("x");
+        },
+      },
+    };
+    const [frame] = await talk(
+      [rpc(1, "tools/call", { name: "lessons_for_path", arguments: { path: repoA } })],
+      throwing,
+    );
+    expect(frame?.result?.["isError"]).toBe(false);
+    expect(text(frame as Frame)).toContain("Close rows");
   });
 });
 

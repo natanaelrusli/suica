@@ -13,6 +13,8 @@ import { lessonsForFile, rankLessons, renderLessons } from "./match.ts";
 import type { RankedLesson } from "./match.ts";
 import { projectOfMrKey } from "./scopes.ts";
 import type { ScopeMap } from "./scopes.ts";
+import { estimateTokens } from "./usage.ts";
+import type { UsageLog } from "./usage.ts";
 
 export interface LessonsServerDeps {
   /** Read on every call, so a config change is picked up without a restart. */
@@ -20,6 +22,8 @@ export interface LessonsServerDeps {
   /** Opened and closed per call, so a daemon migration between calls is picked up. */
   readonly openReader: () => LessonReader | undefined;
   readonly scan: () => ScopeMap;
+  /** Where each answer that carries Lessons is noted; a failing log never turns into FAILED. */
+  readonly usage: UsageLog;
   readonly now: () => number;
 }
 
@@ -172,17 +176,43 @@ function runTool(name: string, rawArgs: unknown, deps: LessonsServerDeps): Recor
   if (found === undefined) return text(NONE);
   const reader = deps.openReader();
   if (reader === undefined) return text(NONE);
+  // The one place an answer is logged: only a reply that carries at least one Lesson.
+  const deliver = (body: string, lessonIds: readonly number[]): Record<string, unknown> => {
+    try {
+      deps.usage.append({
+        at: deps.now(),
+        project: found.repo?.project ?? null,
+        scope: found.scope,
+        source: "mcp",
+        tool: name,
+        ...(found.repo !== undefined && isFile(path)
+          ? { file: relative(found.repo.dir, path) }
+          : {}),
+        lessonIds,
+        tokens: estimateTokens(body),
+      });
+    } catch {
+      // An unlogged answer is only a gap in the report.
+    }
+    return text(body);
+  };
+  const deliverRanked = (shown: readonly RankedLesson[]): Record<string, unknown> =>
+    shown.length === 0
+      ? text(NONE)
+      : deliver(
+          withIds(shown),
+          shown.map((r) => r.lesson.id),
+        );
   try {
     const ranked = (): RankedLesson[] => rankLessons(reader, found.scope, deps.now());
     if (name === "lessons_for_path") {
       if (!isFile(path)) {
-        const top = ranked().slice(0, config.perSession);
-        return text(top.length === 0 ? NONE : withIds(top));
+        return deliverRanked(ranked().slice(0, config.perSession));
       }
       // A file's globs are relative to its repository; a file outside every repo has none.
       if (found.repo === undefined) return text(NONE);
       const shown = lessonsForFile(ranked(), relative(found.repo.dir, path), config.perFile);
-      return text(shown.length === 0 ? NONE : withIds(shown));
+      return deliverRanked(shown);
     }
     if (name === "search_lessons") {
       const words = (args["query"] as string).toLowerCase().split(/\s+/).filter(Boolean);
@@ -194,7 +224,7 @@ function runTool(name: string, rawArgs: unknown, deps: LessonsServerDeps): Recor
           return topic === undefined || r.lesson.topics.some((t) => t.toLowerCase() === topic);
         })
         .slice(0, SEARCH_LIMIT);
-      return text(hits.length === 0 ? NONE : withIds(hits));
+      return deliverRanked(hits);
     }
     // get_lesson: only a live lesson of the path's own scope; anything else looks like no lesson.
     const lesson = reader.lesson(args["id"] as number);
@@ -212,7 +242,7 @@ function runTool(name: string, rawArgs: unknown, deps: LessonsServerDeps): Recor
       "Flagged in:",
       ...occurrences.map(renderOccurrence),
     ];
-    return text(lines.join("\n"));
+    return deliver(lines.join("\n"), [lesson.id]);
   } finally {
     reader.close();
   }

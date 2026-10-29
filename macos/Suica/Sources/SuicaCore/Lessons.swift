@@ -202,6 +202,76 @@ public struct LessonDetailDocument: Codable, Equatable, Sendable {
     }
 }
 
+// MARK: - Usage (contracts/lessons.v1.json, `usage`)
+
+/// `suica lessons usage --json`: the Lessons handed to Coding Agents over the last `days` days.
+public struct LessonUsageDocument: Codable, Equatable, Sendable {
+    public let version: Int
+    public let generatedAt: Int
+    public let days: Int
+    public let totals: LessonUsageTotals
+    /// Heaviest by tokens first.
+    public let projects: [LessonUsageProject]
+    /// Newest first.
+    public let recent: [LessonUsageEntry]
+}
+
+public struct LessonUsageTotals: Codable, Equatable, Sendable {
+    public let deliveries: Int
+    public let sessions: Int
+    /// Estimated, at four characters a token.
+    public let tokens: Int
+    public let lessons: Int
+}
+
+public struct LessonUsageSources: Codable, Equatable, Sendable {
+    public let session: Int
+    public let read: Int
+    public let edit: Int
+    public let mcp: Int
+}
+
+public struct LessonUsageLesson: Codable, Equatable, Sendable {
+    public let id: Int
+    /// Nil once the Lesson is gone.
+    public let title: String?
+    public let times: Int
+}
+
+/// One project's row, or one scope folder's when the session started outside any repo.
+public struct LessonUsageProject: Codable, Equatable, Identifiable, Sendable {
+    public let project: String?
+    public let scope: String
+    public let deliveries: Int
+    public let sessions: Int
+    public let tokens: Int
+    public let lessons: Int
+    public let bySource: LessonUsageSources
+    /// Epoch milliseconds.
+    public let lastAt: Int
+    public let topLessons: [LessonUsageLesson]
+
+    public var id: String { project ?? scope }
+
+    public var lastDate: Date { Date(timeIntervalSince1970: Double(lastAt) / 1000) }
+}
+
+public struct LessonUsageEntry: Codable, Equatable, Sendable {
+    /// Epoch milliseconds.
+    public let at: Int
+    public let project: String?
+    public let scope: String
+    /// `session`, `read`, `edit` or `mcp`.
+    public let source: String
+    public let tool: String?
+    public let sessionId: String?
+    public let file: String?
+    public let lessonIds: [Int]
+    public let tokens: Int
+
+    public var date: Date { Date(timeIntervalSince1970: Double(at) / 1000) }
+}
+
 // MARK: - Repeats (contracts/reviews.v1.json, contracts/fixes.v1.json)
 
 /// An Agent Review finding that repeats a Lesson learned before it.
@@ -633,6 +703,7 @@ public protocol LessonsClient: Sendable {
     /// Merges `gone` into `keep`.
     func mergeLessons(keep: Int, gone: Int) async throws(AgentError) -> LessonChangeOutcome
     func lessonsStatus() async throws(AgentError) -> LessonsSetupStatus
+    func lessonsUsage() async throws(AgentError) -> LessonUsageDocument
     /// Without `confirm` only the plan comes back; nothing changes.
     func installLessons(confirm: Bool) async throws(AgentError) -> LessonsInstallReply
     func uninstallLessons() async throws(AgentError) -> LessonsUninstallReply
@@ -691,6 +762,10 @@ public final class LessonsModel {
     public private(set) var busy = false
     public var filter = LessonFilter()
 
+    /// The last good usage document: a failed refresh does not clear it.
+    public private(set) var usage: LessonUsageDocument?
+    public private(set) var usageError: String?
+
     /// The hook and MCP servers; nil until read.
     public private(set) var setup: LessonsSetupStatus?
     public private(set) var install: LessonsInstallStep = .idle
@@ -715,6 +790,7 @@ public final class LessonsModel {
     @ObservationIgnored private let client: any LessonsClient
     @ObservationIgnored private var latestRefresh = 0
     @ObservationIgnored private var latestDetail = 0
+    @ObservationIgnored private var latestUsage = 0
 
     public init(client: any LessonsClient) {
         self.client = client
@@ -755,6 +831,25 @@ public final class LessonsModel {
             guard mine == latestRefresh else { return }
             errorText = MenuModel.message(for: error)
         }
+    }
+
+    public func refreshUsage() async {
+        latestUsage += 1
+        let mine = latestUsage
+        do {
+            let fresh = try await client.lessonsUsage()
+            guard mine == latestUsage else { return }
+            if usage != fresh { usage = fresh }
+            usageError = nil
+        } catch {
+            guard mine == latestUsage else { return }
+            usageError = MenuModel.message(for: error)
+        }
+    }
+
+    /// The recent deliveries of one row of the usage document.
+    public func recent(for project: LessonUsageProject) -> [LessonUsageEntry] {
+        (usage?.recent ?? []).filter { ($0.project ?? $0.scope) == project.id }
     }
 
     /// Shows one Lesson; nil clears the detail.

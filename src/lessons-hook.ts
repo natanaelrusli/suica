@@ -8,6 +8,7 @@ import { defaultConfigPath, defaultStatePath, loadConfig } from "./config.ts";
 import { openLessonsReadOnly } from "./lesson-store.ts";
 import { answerHook, fileSeenStore, readScopeCache, shouldReadStdin } from "./lessons/hook.ts";
 import { scanScopes } from "./lessons/scopes.ts";
+import { fileUsageLog } from "./lessons/usage.ts";
 
 /** Hook input is a small JSON object; anything bigger is not one we answer. */
 const STDIN_MAX_BYTES = 1_048_576;
@@ -49,6 +50,7 @@ async function main(): Promise<string> {
       hostname,
       reader,
       seen: fileSeenStore(join(stateDir, "lessons-seen"), now),
+      usage: fileUsageLog(join(stateDir, "lessons-usage"), now),
       now,
       // The daemon normally provides the cache after each scan; without it every call walks the folders.
       scan: () =>

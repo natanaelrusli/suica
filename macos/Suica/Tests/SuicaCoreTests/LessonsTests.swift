@@ -232,7 +232,27 @@ private let solo = LessonScope(
     #expect(list.mergeCandidates(for: unscoped).isEmpty)
 }
 
+@Test func theLessonUsageDecodesFromTheContract() throws {
+    let document = try decodeDocument(LessonUsageDocument.self, from: lessonsContract("usage"))
+    #expect(document.days == 30 && document.totals.deliveries == 4 && document.totals.tokens == 210)
+    let first = try #require(document.projects.first)
+    #expect(first.project == "acme/api" && first.id == "acme/api" && first.bySource.read == 1)
+    #expect(first.topLessons.first?.title == "HTTP clients need an explicit timeout")
+    let scopeOnly = try #require(document.projects.last)
+    #expect(scopeOnly.project == nil && scopeOnly.id == "/work/beta")
+    #expect(scopeOnly.topLessons.last?.title == nil)
+    #expect(document.recent.first?.lessonIds == [4, 999] && document.recent.first?.sessionId == "s2")
+}
+
 // MARK: - Client
+
+@Test func theUsageCommandRunsWithItsArguments() async throws {
+    let usage = String(decoding: try lessonsContract("usage"), as: UTF8.self)
+    let runner = FakeRunner([output(usage)])
+    let client = CLIAgentClient(config: config, runner: runner)
+    #expect(try await client.lessonsUsage().projects.count == 3)
+    #expect(await runner.invocations.map(\.arguments) == [["lessons", "usage", "--json"]])
+}
 
 @Test func theLessonCommandsRunWithTheirArguments() async throws {
     let list = String(decoding: try lessonsContract("list"), as: UTF8.self)
@@ -303,8 +323,15 @@ actor FakeLessonsClient: LessonsClient {
     var change: LessonChangeOutcome = .archived
     var installs: [LessonsInstallReply] = []
     var status = LessonsSetupStatus(hook: false, claude: false, codex: false)
+    var usage = LessonUsageDocument(
+        version: 1, generatedAt: 0, days: 30,
+        totals: LessonUsageTotals(deliveries: 0, sessions: 0, tokens: 0, lessons: 0), projects: [], recent: [])
+    var usageFails = false
 
     init(list: LessonListDocument) { self.list = list }
+
+    func setUsage(_ next: LessonUsageDocument) { usage = next }
+    func setUsageFails(_ next: Bool) { usageFails = next }
 
     func setChange(_ next: LessonChangeOutcome) { change = next }
     func setDetail(_ document: LessonDetailDocument) { details[document.lesson.id] = document }
@@ -330,6 +357,11 @@ actor FakeLessonsClient: LessonsClient {
     func lessonsStatus() async throws(AgentError) -> LessonsSetupStatus {
         calls.append("status")
         return status
+    }
+    func lessonsUsage() async throws(AgentError) -> LessonUsageDocument {
+        calls.append("usage")
+        if usageFails { throw AgentError.timedOut }
+        return usage
     }
     func installLessons(confirm: Bool) async throws(AgentError) -> LessonsInstallReply {
         calls.append(confirm ? "install --yes" : "install")
@@ -503,6 +535,25 @@ func installRunsOnceWhicheverWayTheDialogCloses(bindingFirst: Bool) async throws
     #expect(await client.calls == ["install", "install", "install"])
 }
 
+@MainActor @Test func theModelRefreshesUsageAndGroupsRecentByProject() async throws {
+    let fake = FakeLessonsClient(list: listDocument([]))
+    let golden = try decodeDocument(LessonUsageDocument.self, from: lessonsContract("usage"))
+    await fake.setUsage(golden)
+    let model = LessonsModel(client: fake)
+    #expect(model.usage == nil)
+    await model.refreshUsage()
+    #expect(model.usage == golden && model.usageError == nil)
+    #expect(await fake.calls == ["usage"])
+    let api = try #require(golden.projects.first)
+    #expect(model.recent(for: api).map(\.source) == ["read", "session"])
+    let scopeOnly = try #require(golden.projects.last)
+    #expect(model.recent(for: scopeOnly).map(\.sessionId) == ["s2"])
+    await fake.setUsageFails(true)
+    await model.refreshUsage()
+    #expect(model.usage == golden)
+    #expect(model.usageError == MenuModel.message(for: AgentError.timedOut))
+}
+
 actor FailingStatusClient: LessonsClient {
     var fail = true
     let detailGate = Gate()
@@ -516,6 +567,7 @@ actor FailingStatusClient: LessonsClient {
     }
     func archiveLesson(id: Int) async throws(AgentError) -> LessonChangeOutcome { throw AgentError.launchFailed }
     func mergeLessons(keep: Int, gone: Int) async throws(AgentError) -> LessonChangeOutcome { throw AgentError.launchFailed }
+    func lessonsUsage() async throws(AgentError) -> LessonUsageDocument { throw AgentError.launchFailed }
     func lessonsStatus() async throws(AgentError) -> LessonsSetupStatus {
         if fail { throw AgentError.timedOut }
         return LessonsSetupStatus(hook: true, claude: false, codex: false)
