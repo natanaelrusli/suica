@@ -27,7 +27,7 @@ import { serveLessons } from "./lessons/mcp-server.ts";
 import { archiveLesson, buildLessonList, buildLessonShow, mergeLessons } from "./lessons/owner.ts";
 import type { ChangeResult } from "./lessons/owner.ts";
 import { scanScopes } from "./lessons/scopes.ts";
-import { fileUsageLog } from "./lessons/usage.ts";
+import { USAGE_DAYS, buildLessonUsage, fileUsageLog, readUsage } from "./lessons/usage.ts";
 import { exportVault, renderVault } from "./lessons/vault.ts";
 import { zipFiles } from "./lessons/zip.ts";
 import { MODEL_CLI_CHOICES, detectModelClis, resolveModelCli } from "./model-cli.ts";
@@ -87,7 +87,7 @@ import { applyUpdate, checkForUpdate } from "./update.ts";
 import { VERSION } from "./version.ts";
 
 const USAGE =
-  "usage: suica <version|once|status|state|stats|usage|office --json|office chat <agent> <sessionId> --json|office send <agent> <sessionId> --json (message on stdin)|pause|resume|pending [--all]|send <id> [--json]|skip <id> [--json]|retry <id> [--json]|clear <id|yours|others|all> [--json]|selftest|message <key> --json (request on stdin)|reviews --json|mr <key> --json|mr approve <key> <sha> --json|mr comment <key> --json (body on stdin)|mr close <key> --json|mr merge <key> <sha> [--squash] [--remove-source-branch] [--when-pipeline-succeeds] --json (message on stdin)|review options [--cli <id>] --json|review queue <key> [--skill <name>] [--model <name>] [--auto] --json|review post <id> [--inline|--comment] --json|review discard <id> --json|review cancel <id> --json|fix list --json|fix queue <key> [--pipeline] --json|fix watch <key> --json|fix unwatch <key> --json|fix confirm <id> --json (edits on stdin)|fix retry <id> --json (note on stdin)|fix discard <id> --json|fix cancel <id> --json|fix replies <id> --json|config show --json|config set --json|templates show --json|templates set --json|gitlab check <host> --json|lessons mcp|lessons install [--yes] [--json]|lessons uninstall [--json]|lessons status --json|lessons export [--zip <file>] [--json]|lessons list --json|lessons show <id> --json|lessons archive <id> --json|lessons merge <keep> <gone> --json|update check --json|update apply --json|agent install [--json]|agent uninstall|agent restart --json>\n";
+  "usage: suica <version|once|status|state|stats|usage|office --json|office chat <agent> <sessionId> --json|office send <agent> <sessionId> --json (message on stdin)|pause|resume|pending [--all]|send <id> [--json]|skip <id> [--json]|retry <id> [--json]|clear <id|yours|others|all> [--json]|selftest|message <key> --json (request on stdin)|reviews --json|mr <key> --json|mr approve <key> <sha> --json|mr comment <key> --json (body on stdin)|mr close <key> --json|mr merge <key> <sha> [--squash] [--remove-source-branch] [--when-pipeline-succeeds] --json (message on stdin)|review options [--cli <id>] --json|review queue <key> [--skill <name>] [--model <name>] [--auto] --json|review post <id> [--inline|--comment] --json|review discard <id> --json|review cancel <id> --json|fix list --json|fix queue <key> [--pipeline] --json|fix watch <key> --json|fix unwatch <key> --json|fix confirm <id> --json (edits on stdin)|fix retry <id> --json (note on stdin)|fix discard <id> --json|fix cancel <id> --json|fix replies <id> --json|config show --json|config set --json|templates show --json|templates set --json|gitlab check <host> --json|lessons mcp|lessons install [--yes] [--json]|lessons uninstall [--json]|lessons status --json|lessons export [--zip <file>] [--json]|lessons list --json|lessons usage --json|lessons show <id> --json|lessons archive <id> --json|lessons merge <keep> <gone> --json|update check --json|update apply --json|agent install [--json]|agent uninstall|agent restart --json>\n";
 const TEAMS_DISABLED = "teams is disabled: set teams.enabled to true in the config\n";
 const SHOWN_WITH_ALL = 50;
 
@@ -822,6 +822,25 @@ function listLessonsCommand(): number {
   }
 }
 
+/** `suica lessons usage --json`: the Lessons handed to Coding Agents in the last 30 days. */
+function lessonsUsageCommand(): number {
+  const config = loadConfig(defaultConfigPath());
+  const statePath = config.statePath ?? defaultStatePath();
+  const now = Date.now();
+  const entries = readUsage(
+    join(dirname(statePath), "lessons-usage"),
+    now - USAGE_DAYS * 86_400_000,
+  );
+  const reader = openLessonsReadOnly(statePath);
+  try {
+    const document = buildLessonUsage(entries, (id) => reader?.lesson(id)?.title, now);
+    process.stdout.write(`${JSON.stringify(document)}\n`);
+    return 0;
+  } finally {
+    reader?.close();
+  }
+}
+
 /** `suica lessons show <id> --json`: one Lesson with its occurrences, read-only. */
 function showLessonCommand(id: number): number {
   const config = loadConfig(defaultConfigPath());
@@ -1156,6 +1175,7 @@ async function main(argv: readonly string[]): Promise<number> {
       }
     }
     if (argv[1] === "list" && json && flags.length === 1) return listLessonsCommand();
+    if (argv[1] === "usage" && json && flags.length === 1) return lessonsUsageCommand();
     const ids = flags.filter((flag) => flag !== "--json");
     const counts: Readonly<Record<string, number>> = { show: 1, archive: 1, merge: 2 };
     if (json && ids.length === counts[argv[1] ?? ""] && flags.length === ids.length + 1) {

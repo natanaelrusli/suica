@@ -131,3 +131,96 @@ export function readUsage(dir: string, since: number): UsageEntry[] {
   }
   return entries.sort((a, b) => a.at - b.at);
 }
+
+export interface UsageTotalsJson {
+  readonly deliveries: number;
+  readonly sessions: number;
+  readonly tokens: number;
+  readonly lessons: number;
+}
+
+export interface UsageLessonJson {
+  readonly id: number;
+  readonly title: string | null;
+  readonly times: number;
+}
+
+export interface UsageProjectJson extends UsageTotalsJson {
+  readonly project: string | null;
+  readonly scope: string;
+  readonly bySource: Readonly<Record<UsageSource, number>>;
+  readonly lastAt: number;
+  readonly topLessons: readonly UsageLessonJson[];
+}
+
+/** The document `suica lessons usage --json` prints (`usage` in contracts/lessons.v1.json). */
+export interface LessonUsageJson {
+  readonly version: 1;
+  readonly generatedAt: number;
+  readonly days: number;
+  readonly totals: UsageTotalsJson;
+  readonly projects: readonly UsageProjectJson[];
+  readonly recent: readonly UsageEntry[];
+}
+
+const TOP_LESSONS = 20;
+const RECENT = 100;
+
+function totalsOf(entries: readonly UsageEntry[]): UsageTotalsJson {
+  return {
+    deliveries: entries.length,
+    sessions: new Set(entries.flatMap((e) => (e.sessionId === undefined ? [] : [e.sessionId])))
+      .size,
+    tokens: entries.reduce((sum, e) => sum + e.tokens, 0),
+    lessons: new Set(entries.flatMap((e) => e.lessonIds)).size,
+  };
+}
+
+function projectRow(
+  entries: readonly UsageEntry[],
+  titleOf: (id: number) => string | undefined,
+): UsageProjectJson {
+  const latest = entries.reduce((a, b) => (b.at >= a.at ? b : a));
+  const bySource: Record<UsageSource, number> = { session: 0, read: 0, edit: 0, mcp: 0 };
+  const times = new Map<number, number>();
+  for (const entry of entries) {
+    bySource[entry.source] += 1;
+    for (const id of entry.lessonIds) times.set(id, (times.get(id) ?? 0) + 1);
+  }
+  return {
+    project: latest.project,
+    scope: latest.scope,
+    ...totalsOf(entries),
+    bySource,
+    lastAt: latest.at,
+    topLessons: [...times]
+      .sort((a, b) => b[1] - a[1] || a[0] - b[0])
+      .slice(0, TOP_LESSONS)
+      .map(([id, count]) => ({ id, title: titleOf(id) ?? null, times: count })),
+  };
+}
+
+/** One row per project, or per scope folder for a session outside any repo, heaviest first. */
+export function buildLessonUsage(
+  entries: readonly UsageEntry[],
+  titleOf: (id: number) => string | undefined,
+  now: number,
+): LessonUsageJson {
+  const rows = new Map<string, UsageEntry[]>();
+  for (const entry of entries) {
+    const key = entry.project ?? entry.scope;
+    rows.set(key, [...(rows.get(key) ?? []), entry]);
+  }
+  const projects = [...rows]
+    .map(([key, group]) => ({ key, row: projectRow(group, titleOf) }))
+    .sort((a, b) => b.row.tokens - a.row.tokens || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
+    .map(({ row }) => row);
+  return {
+    version: 1,
+    generatedAt: now,
+    days: USAGE_DAYS,
+    totals: totalsOf(entries),
+    projects,
+    recent: [...entries].sort((a, b) => b.at - a.at).slice(0, RECENT),
+  };
+}

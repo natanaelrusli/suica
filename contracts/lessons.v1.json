@@ -89,5 +89,134 @@
         }
       ]
     }
+  },
+  "usage": {
+    "version": 1,
+    "generatedAt": 1793016000000,
+    "days": 30,
+    "totals": {
+      "deliveries": 4,
+      "sessions": 2,
+      "tokens": 210,
+      "lessons": 4
+    },
+    "projects": [
+      {
+        "project": "acme/api",
+        "scope": "/work/acme",
+        "deliveries": 2,
+        "sessions": 1,
+        "tokens": 160,
+        "lessons": 2,
+        "bySource": {
+          "session": 1,
+          "read": 1,
+          "edit": 0,
+          "mcp": 0
+        },
+        "lastAt": 1792756860000,
+        "topLessons": [
+          {
+            "id": 1,
+            "title": "HTTP clients need an explicit timeout",
+            "times": 2
+          },
+          {
+            "id": 2,
+            "title": "Wrap errors with context",
+            "times": 1
+          }
+        ]
+      },
+      {
+        "project": "acme/web",
+        "scope": "/work/acme",
+        "deliveries": 1,
+        "sessions": 0,
+        "tokens": 30,
+        "lessons": 1,
+        "bySource": {
+          "session": 0,
+          "read": 0,
+          "edit": 0,
+          "mcp": 1
+        },
+        "lastAt": 1792843200000,
+        "topLessons": [
+          {
+            "id": 1,
+            "title": "HTTP clients need an explicit timeout",
+            "times": 1
+          }
+        ]
+      },
+      {
+        "project": null,
+        "scope": "/work/beta",
+        "deliveries": 1,
+        "sessions": 1,
+        "tokens": 20,
+        "lessons": 2,
+        "bySource": {
+          "session": 1,
+          "read": 0,
+          "edit": 0,
+          "mcp": 0
+        },
+        "lastAt": 1792929600000,
+        "topLessons": [
+          {
+            "id": 4,
+            "title": "Beta lesson",
+            "times": 1
+          },
+          {
+            "id": 999,
+            "title": null,
+            "times": 1
+          }
+        ]
+      }
+    ],
+    "recent": [
+      {
+        "at": 1792929600000,
+        "project": null,
+        "scope": "/work/beta",
+        "source": "session",
+        "sessionId": "s2",
+        "lessonIds": [4, 999],
+        "tokens": 20
+      },
+      {
+        "at": 1792843200000,
+        "project": "acme/web",
+        "scope": "/work/acme",
+        "source": "mcp",
+        "tool": "lessons_for_path",
+        "file": "web/fetch.go",
+        "lessonIds": [1],
+        "tokens": 30
+      },
+      {
+        "at": 1792756860000,
+        "project": "acme/api",
+        "scope": "/work/acme",
+        "source": "read",
+        "sessionId": "s1",
+        "file": "src/client.go",
+        "lessonIds": [1],
+        "tokens": 40
+      },
+      {
+        "at": 1792756800000,
+        "project": "acme/api",
+        "scope": "/work/acme",
+        "source": "session",
+        "sessionId": "s1",
+        "lessonIds": [1, 2],
+        "tokens": 120
+      }
+    ]
   }
 }
