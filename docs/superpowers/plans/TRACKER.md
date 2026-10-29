@@ -1,7 +1,7 @@
 # Suica plans: tracker
 
 - **As of:** 2026-10-28, read from `git` in this checkout (`main` at 51d1980; P11 from `feat/no-ticket-ota-updates`) and from the plan files in this folder.
-- **Scope:** the 11 plans in this folder. Suica is a personal project, so there are no planner keys and no MRs: every branch is `feat/no-ticket-*` and work lands by a local `git merge --no-ff` into `main`.
+- **Scope:** the 12 plans in this folder. Suica is a personal project, so there are no planner keys and no MRs: every branch is `feat/no-ticket-*` and work lands by a local `git merge --no-ff` into `main`.
 - **"Merged"** means the branch head is an ancestor of `main` (`git merge-base --is-ancestor`). Merged does not say the app was installed or tried on the real machine.
 - **The plan files' own checkboxes are all unticked** and are not the status; this file is.
 - Update this file in the same change that adds a plan or merges its branch.
@@ -21,6 +21,7 @@
 | P9 | [Virtual office](2026-10-21-virtual-office.md) | [design](../specs/2026-10-21-virtual-office-design.md) | `feat/no-ticket-virtual-office` | **Merged** | 2026-10-21 (3525407) | 31 |
 | P10 | [Review lessons](2026-10-26-review-lessons.md) | [design](../specs/2026-10-26-review-lessons-design.md) | `feat/no-ticket-review-lessons` | **Merged** | 2026-10-26 (a4f3020), folder picker 51d1980 | 69 |
 | P11 | [OTA updates](2026-10-28-ota-updates.md) | none (decisions in the plan) | `feat/no-ticket-ota-updates` | **Implemented on branch, not merged** | not merged | 37 |
+| P12 | [Lessons usage log](2026-10-29-lessons-usage-log.md) | [design](../specs/2026-10-29-lessons-usage-log-design.md) | `feat/no-ticket-lessons-usage` | **Implemented on branch, not merged** | not merged | 30 |
 
 ## 2. Branches and merge commits per plan
 
@@ -36,6 +37,7 @@
 | P9 | `feat/no-ticket-virtual-office` | 70a8229 | 3525407 | 2026-10-21 | Many office follow-ups, each with its own merge. |
 | P10 | `feat/no-ticket-review-lessons` | 06edbf3 | a4f3020 | 2026-10-26 | Folder picker merged in 51d1980. |
 | P11 | `feat/no-ticket-ota-updates` | see `git log` | not merged | – | Updater is inert until the real public key is committed; not exercised on a real release. |
+| P12 | `feat/no-ticket-lessons-usage` | see `git log` | not merged | – | Hook and `suica lessons usage --json` tried on the real state folder (one session entry, removed afterwards); the app Usage view rendered in a scratch harness only, not installed. |
 
 ## 3. Work in the checkout that no plan covers
 
