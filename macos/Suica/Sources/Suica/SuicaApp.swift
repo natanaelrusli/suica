@@ -90,6 +90,16 @@ extension UnconfiguredClient: LessonsClient {
     func uninstallLessons() async throws(AgentError) -> LessonsUninstallReply { throw AgentError.launchFailed }
     func exportLessons(zipTo: String?) async throws(AgentError) -> LessonsExportReply { throw AgentError.launchFailed }
 }
+extension UnconfiguredClient: IdeasClient {
+    func ideas(archived: Bool) async throws(AgentError) -> IdeaListDocument { throw AgentError.launchFailed }
+    func createIdea(text: String, projectPath: String?) async throws(AgentError) -> IdeaMutationDocument { throw AgentError.launchFailed }
+    func updateIdea(id: Int, revision: Int, text: String, projectPath: String?) async throws(AgentError) -> IdeaMutationDocument { throw AgentError.launchFailed }
+    func setIdeaArchived(id: Int, archived: Bool) async throws(AgentError) -> IdeaMutationDocument { throw AgentError.launchFailed }
+    func addIdeaNote(id: Int, text: String) async throws(AgentError) -> IdeaMutationDocument { throw AgentError.launchFailed }
+    func linkIdeaPlan(id: Int, path: String) async throws(AgentError) -> IdeaMutationDocument { throw AgentError.launchFailed }
+    func linkIdeaSession(id: Int, agent: String, sessionId: String) async throws(AgentError) -> IdeaMutationDocument { throw AgentError.launchFailed }
+    func ideaPrompt(ids: [Int], question: String?) async throws(AgentError) -> IdeaPromptDocument { throw AgentError.launchFailed }
+}
 
 extension UnconfiguredClient: TemplatesClient {
     func templates() async throws(AgentError) -> TemplatesDocument { throw AgentError.launchFailed }
@@ -157,6 +167,7 @@ struct SuicaApp: App {
     @State private var onboarding: OnboardingModel
     @State private var lessons: LessonsModel
     @State private var updates: UpdatesModel
+    @State private var ideas: IdeasModel
     @State private var plans = PlansModel(store: UserDefaults.standard)
     @State private var appearance = AppearanceSettings()
     @State private var navigator = Navigator()
@@ -174,6 +185,7 @@ struct SuicaApp: App {
         let officeClient: any OfficeClient
         let setupClient: any SetupClient
         let lessonsClient: any LessonsClient
+        let ideasClient: any IdeasClient
         let updatesClient: any UpdatesClient
         if let config = AgentConfig.fromBundle(.main) {
             let client = CLIAgentClient(config: config, runner: ProcessRunner())
@@ -185,6 +197,7 @@ struct SuicaApp: App {
             officeClient = client
             setupClient = client
             lessonsClient = client
+            ideasClient = client
             updatesClient = client
         } else {
             agent = UnconfiguredClient()
@@ -195,6 +208,7 @@ struct SuicaApp: App {
             officeClient = UnconfiguredClient()
             setupClient = UnconfiguredClient()
             lessonsClient = UnconfiguredClient()
+            ideasClient = UnconfiguredClient()
             updatesClient = UnconfiguredClient()
         }
         let model = MenuModel(client: agent)
@@ -208,6 +222,7 @@ struct SuicaApp: App {
         _templates = State(initialValue: TemplateEditorModel(client: templatesClient))
         _office = State(initialValue: OfficeModel(client: officeClient))
         _lessons = State(initialValue: LessonsModel(client: lessonsClient))
+        _ideas = State(initialValue: IdeasModel(client: ideasClient))
         let updatesModel = UpdatesModel(
             client: updatesClient, store: UserDefaults.standard, now: Date.init, relaunch: relaunchAfterUpdate)
         _updates = State(initialValue: updatesModel)
@@ -229,7 +244,7 @@ struct SuicaApp: App {
         MenuBarExtra {
             MenuView(
                 model: model, window: window, reviews: reviews, settings: appearance, navigator: navigator,
-                onboarding: onboarding, updates: updatesOffered)
+                onboarding: onboarding, updates: updatesOffered, ideas: ideas)
                 .modifier(Celebrations(model: model, reviews: reviews, settings: appearance, counter: celebrations))
                 .appearance(appearance)
         } label: {
@@ -242,7 +257,8 @@ struct SuicaApp: App {
         Window(Copy.appName, id: "main") {
             MainWindow(
                 window: window, editor: editor, reviews: reviews, fixes: fixes, templates: templates,
-                office: office, lessons: lessons, plans: plans, updates: updatesOffered, onboarding: onboarding, settings: appearance, navigator: navigator
+                office: office, lessons: lessons, ideas: ideas, plans: plans, updates: updatesOffered,
+                onboarding: onboarding, settings: appearance, navigator: navigator
             )
             .modifier(Celebrations(model: model, reviews: reviews, settings: appearance, counter: celebrations))
             .appearance(appearance)

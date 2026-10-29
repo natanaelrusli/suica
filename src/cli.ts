@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { existsSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, dirname, isAbsolute, join } from "node:path";
+import { openStore } from "./store.ts";
 import { installAgent, plistPath, uninstallAgent } from "./agent-install.ts";
 import { buildStatus, loadStatusInput, readServiceStatus, restartService } from "./agent-status.ts";
 import { actionJson, buildAgentState } from "./agent-state.ts";
@@ -72,12 +73,14 @@ import { createLogger } from "./log.ts";
 import { createRuntime } from "./runtime.ts";
 import type { Runtime } from "./runtime.ts";
 import { RANKING_WINDOW, buildStats, localDayKey } from "./stats.ts";
-import { openStore } from "./store.ts";
+import { IdeaStoreError, parseIdeaId, validIdeaIdList } from "./idea-store.ts";
+import type { Idea } from "./idea-store.ts";
 import { formatOutbox } from "./teams/format-outbox.ts";
 import { OUTBOX_KINDS, OUTBOX_STATUSES, YOUR_MR_KINDS } from "./teams/types.ts";
 import type { OutboxKind } from "./teams/types.ts";
 import { fetchMessageContext, parseMessageRequest } from "./teams/manual.ts";
 import { readChat } from "./office/chat.ts";
+import { buildBrainstormPrompt } from "./ideas/brainstorm.ts";
 import { geminiResumeId, sendToSession } from "./office/send.ts";
 import { adaptersFor, collectOffice } from "./office/collect.ts";
 import { realProbe } from "./office/probe.ts";
@@ -87,7 +90,7 @@ import { applyUpdate, checkForUpdate } from "./update.ts";
 import { VERSION } from "./version.ts";
 
 const USAGE =
-  "usage: suica <version|once|status|state|stats|usage|office --json|office chat <agent> <sessionId> --json|office send <agent> <sessionId> --json (message on stdin)|pause|resume|pending [--all]|send <id> [--json]|skip <id> [--json]|retry <id> [--json]|clear <id|yours|others|all> [--json]|selftest|message <key> --json (request on stdin)|reviews --json|mr <key> --json|mr approve <key> <sha> --json|mr comment <key> --json (body on stdin)|mr close <key> --json|mr merge <key> <sha> [--squash] [--remove-source-branch] [--when-pipeline-succeeds] --json (message on stdin)|review options [--cli <id>] --json|review queue <key> [--skill <name>] [--model <name>] [--auto] --json|review post <id> [--inline|--comment] --json|review discard <id> --json|review cancel <id> --json|fix list --json|fix queue <key> [--pipeline] --json|fix watch <key> --json|fix unwatch <key> --json|fix confirm <id> --json (edits on stdin)|fix retry <id> --json (note on stdin)|fix discard <id> --json|fix cancel <id> --json|fix replies <id> --json|config show --json|config set --json|templates show --json|templates set --json|gitlab check <host> --json|lessons mcp|lessons install [--yes] [--json]|lessons uninstall [--json]|lessons status --json|lessons export [--zip <file>] [--json]|lessons list --json|lessons usage --json|lessons show <id> --json|lessons archive <id> --json|lessons merge <keep> <gone> --json|update check --json|update apply --json|agent install [--json]|agent uninstall|agent restart --json>\n";
+  "usage: suica <version|once|status|state|stats|usage|office --json|office chat <agent> <sessionId> --json|office send <agent> <sessionId> --json (message on stdin)|ideas list|show|create|update|archive|restore|note|link-plan|link-session|prompt --json|pause|resume|pending [--all]|send <id> [--json]|skip <id> [--json]|retry <id> [--json]|clear <id|yours|others|all> [--json]|selftest|message <key> --json (request on stdin)|reviews --json|mr <key> --json|mr approve <key> <sha> --json|mr comment <key> --json (body on stdin)|mr close <key> --json|mr merge <key> <sha> [--squash] [--remove-source-branch] [--when-pipeline-succeeds] --json (message on stdin)|review options [--cli <id>] --json|review queue <key> [--skill <name>] [--model <name>] [--auto] --json|review post <id> [--inline|--comment] --json|review discard <id> --json|review cancel <id> --json|fix list --json|fix queue <key> [--pipeline] --json|fix watch <key> --json|fix unwatch <key> --json|fix confirm <id> --json (edits on stdin)|fix retry <id> --json (note on stdin)|fix discard <id> --json|fix cancel <id> --json|fix replies <id> --json|config show --json|config set --json|templates show --json|templates set --json|gitlab check <host> --json|lessons mcp|lessons install [--yes] [--json]|lessons uninstall [--json]|lessons status --json|lessons export [--zip <file>] [--json]|lessons list --json|lessons usage --json|lessons show <id> --json|lessons archive <id> --json|lessons merge <keep> <gone> --json|update check --json|update apply --json|agent install [--json]|agent uninstall|agent restart --json>\n";
 const TEAMS_DISABLED = "teams is disabled: set teams.enabled to true in the config\n";
 const SHOWN_WITH_ALL = 50;
 
@@ -1063,8 +1066,208 @@ async function updateCommand(apply: boolean): Promise<number> {
   return 0;
 }
 
+async function ideasCommand(argv: readonly string[]): Promise<number> {
+  const action = argv[1];
+  const json = argv.includes("--json");
+  const emit = (value: unknown, code = 0): number => {
+    process.stdout.write(`${JSON.stringify(value)}\n`);
+    return code;
+  };
+  const bad = (message: string): number => emit({ status: "bad-request", message }, 1);
+  if (!json) {
+    process.stderr.write(USAGE);
+    return 2;
+  }
+
+  const requestObject = async (): Promise<Record<string, unknown> | undefined> => {
+    const raw = await readLimitedStdin(MAX_REQUEST_BYTES);
+    if (raw === undefined || raw.trim().length === 0) return undefined;
+    try {
+      const value: unknown = JSON.parse(raw);
+      return typeof value === "object" && value !== null && !Array.isArray(value)
+        ? (value as Record<string, unknown>)
+        : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+  if (action === "prompt") {
+    if (argv.length !== 3 || argv[2] !== "--json")
+      return bad("prompt accepts only --json; request data must be on stdin");
+    const body = await requestObject();
+    if (body === undefined) return bad("expected JSON containing idea ids");
+    const ids = validIdeaIdList(body.ids);
+    if (ids === undefined)
+      return bad("ids must be a nonempty array of at most 100 positive integers");
+    if (
+      body.question !== undefined &&
+      (typeof body.question !== "string" || body.question.length > 4_000)
+    ) {
+      return bad("question must be a string no longer than 4000 characters");
+    }
+    const store = openStore(loadConfig(defaultConfigPath()).statePath ?? defaultStatePath());
+    try {
+      const ideas: Idea[] = [];
+      for (const id of ids) {
+        const idea = store.ideas.show(id);
+        if (idea === undefined) {
+          return emit({ status: "not-found", message: "one or more ideas were not found" }, 1);
+        }
+        ideas.push(idea);
+      }
+      const prompt = buildBrainstormPrompt({
+        ideas,
+        ...(typeof body.question === "string" ? { question: body.question } : {}),
+      });
+      return emit({ status: "ok", ...prompt });
+    } finally {
+      store.close();
+    }
+  }
+
+  const allowedActions = [
+    "list",
+    "show",
+    "create",
+    "update",
+    "archive",
+    "restore",
+    "note",
+    "link-plan",
+    "link-session",
+  ];
+  if (!allowedActions.includes(action ?? "")) {
+    process.stderr.write(USAGE);
+    return 2;
+  }
+  let search: string | undefined;
+  if (action === "list") {
+    for (let i = 2; i < argv.length; i += 1) {
+      if (argv[i] === "--json" || argv[i] === "--archived") continue;
+      if (argv[i] === "--search") {
+        const value = argv[i + 1];
+        if (value === undefined || value.startsWith("--")) return bad("--search needs text");
+        search = value;
+        i += 1;
+        continue;
+      }
+      return bad("unsupported ideas list argument");
+    }
+  } else if (action === "create") {
+    if (argv.length !== 3 || argv[2] !== "--json")
+      return bad("create requires --json and a JSON body on stdin");
+  } else if (argv.length !== 4 || argv[3] !== "--json") {
+    return bad(`${action} requires an idea id and --json`);
+  }
+  const store = openStore(loadConfig(defaultConfigPath()).statePath ?? defaultStatePath());
+  try {
+    if (action === "list") {
+      return emit({
+        status: "ok",
+        ideas: store.ideas.list({
+          archived: argv.includes("--archived"),
+          ...(search === undefined ? {} : { search }),
+        }),
+      });
+    }
+    if (
+      action === "create" ||
+      action === "update" ||
+      action === "note" ||
+      action === "link-plan" ||
+      action === "link-session"
+    ) {
+      const body = await requestObject();
+      if (body === undefined) return bad("expected a nonempty JSON object on stdin");
+      if (action === "create") {
+        const projectPath = body.projectPath;
+        if (
+          typeof body.text !== "string" ||
+          (projectPath !== undefined && projectPath !== null && typeof projectPath !== "string")
+        ) {
+          return bad("create requires text and optional projectPath");
+        }
+        return emit({
+          status: "ok",
+          idea: store.ideas.create({
+            text: body.text,
+            ...(projectPath === undefined ? {} : { projectPath }),
+          }),
+        });
+      }
+      const id = parseIdeaId(argv[2]);
+      if (id === undefined || argv.length !== 4)
+        return bad(`${action} requires an idea id and --json`);
+      if (action === "update") {
+        if (
+          typeof body.revision !== "number" ||
+          typeof body.text !== "string" ||
+          (body.projectPath !== undefined &&
+            body.projectPath !== null &&
+            typeof body.projectPath !== "string")
+        ) {
+          return bad("update requires revision, text, and optional projectPath");
+        }
+        const existing = store.ideas.show(id);
+        if (existing === undefined)
+          return emit({ status: "not-found", message: "idea not found" }, 1);
+        const result = store.ideas.update(id, {
+          revision: body.revision,
+          text: body.text,
+          projectPath: body.projectPath === undefined ? existing.projectPath : body.projectPath,
+        });
+        return emit(result);
+      }
+      if (action === "note") {
+        if (typeof body.text !== "string") return bad("note requires text");
+        const idea = store.ideas.addNote(id, body.text);
+        return idea === undefined
+          ? emit({ status: "not-found", message: "idea not found" }, 1)
+          : emit({ status: "ok", idea });
+      }
+      if (action === "link-plan") {
+        if (typeof body.path !== "string") return bad("link-plan requires path");
+        const idea = store.ideas.linkPlan(id, body.path);
+        return idea === undefined
+          ? emit({ status: "not-found", message: "idea not found" }, 1)
+          : emit({ status: "ok", idea });
+      }
+      if (typeof body.agent !== "string" || typeof body.sessionId !== "string")
+        return bad("link-session requires agent and sessionId");
+      const idea = store.ideas.linkSession(id, body.agent, body.sessionId);
+      return idea === undefined
+        ? emit({ status: "not-found", message: "idea not found" }, 1)
+        : emit({ status: "ok", idea });
+    }
+    if (action === "show" || action === "archive" || action === "restore") {
+      const id = parseIdeaId(argv[2]);
+      if (id === undefined || argv.length !== 4)
+        return bad(`${action} requires a positive integer idea id`);
+      if (action === "show") {
+        const idea = store.ideas.show(id);
+        return idea === undefined
+          ? emit({ status: "not-found", message: "idea not found" }, 1)
+          : emit({ status: "ok", idea });
+      }
+      const idea = action === "archive" ? store.ideas.archive(id) : store.ideas.restore(id);
+      return idea === undefined
+        ? emit({ status: "not-found", message: "idea not found" }, 1)
+        : emit({ status: "ok", idea });
+    }
+    process.stderr.write(USAGE);
+    return 2;
+  } catch (error) {
+    if (error instanceof IdeaStoreError)
+      return emit({ status: error.code, message: error.message }, 1);
+    return emit({ status: "error", message: "idea operation failed" }, 1);
+  } finally {
+    store.close();
+  }
+}
+
 async function main(argv: readonly string[]): Promise<number> {
   const command = argv[0];
+  if (command === "ideas") return ideasCommand(argv);
   if (command === "version" || command === "--version") {
     process.stdout.write(`${VERSION}\n`);
     return 0;

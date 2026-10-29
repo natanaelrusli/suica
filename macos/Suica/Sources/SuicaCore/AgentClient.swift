@@ -683,6 +683,105 @@ extension CLIAgentClient: LessonsClient {
         return try await lessonsReply(LessonsExportReply.self, arguments, timeout: Self.gitlabTimeout)
     }
 }
+// MARK: - Ideas client
+
+private struct IdeaPayload: Encodable, Sendable {
+    let text: String?
+    let projectPath: String?
+    let revision: Int?
+    let path: String?
+    let agent: String?
+    let sessionId: String?
+    let ids: [Int]?
+    let question: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case text, projectPath, revision, path, agent, sessionId, ids, question
+    }
+    init(text: String? = nil, projectPath: String? = nil, revision: Int? = nil, path: String? = nil,
+         agent: String? = nil, sessionId: String? = nil, ids: [Int]? = nil, question: String? = nil) {
+        self.text = text
+        self.projectPath = projectPath
+        self.revision = revision
+        self.path = path
+        self.agent = agent
+        self.sessionId = sessionId
+        self.ids = ids
+        self.question = question
+    }
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(text, forKey: .text)
+        // Nil means clear an idea's optional project path on update, so encode explicit JSON null.
+        try container.encode(projectPath, forKey: .projectPath)
+        try container.encodeIfPresent(revision, forKey: .revision)
+        try container.encodeIfPresent(path, forKey: .path)
+        try container.encodeIfPresent(agent, forKey: .agent)
+        try container.encodeIfPresent(sessionId, forKey: .sessionId)
+        try container.encodeIfPresent(ids, forKey: .ids)
+        try container.encodeIfPresent(question, forKey: .question)
+    }
+}
+
+extension CLIAgentClient: IdeasClient {
+    private func ideasReply<T: Decodable>(_ type: T.Type, _ arguments: [String], payload: IdeaPayload? = nil)
+        async throws(AgentError) -> T
+    {
+        let input: Data?
+        if let payload {
+            do { input = try JSONEncoder().encode(payload) }
+            catch { throw AgentError.badOutput }
+        } else { input = nil }
+        let result = try await runner.run(invocation(arguments, timeout: Self.shortTimeout, stdin: input))
+        if let line = lastLine(of: result.stdout), let parsed = try? JSONDecoder().decode(T.self, from: line) {
+            return parsed
+        }
+        guard result.exitCode == 0 else { throw AgentError.failed(exitCode: result.exitCode) }
+        throw AgentError.badOutput
+    }
+
+    public func ideas(archived: Bool) async throws(AgentError) -> IdeaListDocument {
+        try await ideasReply(IdeaListDocument.self, ["ideas", "list"] + (archived ? ["--archived"] : []) + ["--json"])
+    }
+
+    public func createIdea(text: String, projectPath: String?) async throws(AgentError) -> IdeaMutationDocument {
+        try await ideasReply(IdeaMutationDocument.self, ["ideas", "create", "--json"],
+                             payload: IdeaPayload(text: text, projectPath: projectPath))
+    }
+    public func updateIdea(id: Int, revision: Int, text: String, projectPath: String?) async throws(AgentError)
+        -> IdeaMutationDocument
+    {
+        try await ideasReply(IdeaMutationDocument.self, ["ideas", "update", String(id), "--json"],
+                             payload: IdeaPayload(text: text, projectPath: projectPath, revision: revision))
+    }
+
+    public func setIdeaArchived(id: Int, archived: Bool) async throws(AgentError) -> IdeaMutationDocument {
+        try await ideasReply(IdeaMutationDocument.self,
+                             ["ideas", archived ? "archive" : "restore", String(id), "--json"])
+    }
+
+    public func addIdeaNote(id: Int, text: String) async throws(AgentError) -> IdeaMutationDocument {
+        try await ideasReply(IdeaMutationDocument.self, ["ideas", "note", String(id), "--json"],
+                             payload: IdeaPayload(text: text))
+    }
+
+    public func linkIdeaPlan(id: Int, path: String) async throws(AgentError) -> IdeaMutationDocument {
+        try await ideasReply(IdeaMutationDocument.self, ["ideas", "link-plan", String(id), "--json"],
+                             payload: IdeaPayload(path: path))
+    }
+
+    public func linkIdeaSession(id: Int, agent: String, sessionId: String) async throws(AgentError)
+        -> IdeaMutationDocument
+    {
+        try await ideasReply(IdeaMutationDocument.self, ["ideas", "link-session", String(id), "--json"],
+                             payload: IdeaPayload(agent: agent, sessionId: sessionId))
+    }
+
+    public func ideaPrompt(ids: [Int], question: String?) async throws(AgentError) -> IdeaPromptDocument {
+        try await ideasReply(IdeaPromptDocument.self, ["ideas", "prompt", "--json"],
+                             payload: IdeaPayload(ids: ids, question: question))
+    }
+}
 
 // MARK: - Updates client
 

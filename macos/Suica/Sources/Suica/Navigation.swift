@@ -4,7 +4,7 @@ import SwiftUI
 
 enum WindowSection: String, CaseIterable, Identifiable {
     case overview, reviews, messages, statistics, usage, logs, configuration, appearance
-    /// Last, so it takes ⌘9 and the other pages keep their shortcuts; the sidebar lists it under Work.
+    /// Last, so existing numeric shortcuts remain unchanged; the sidebar lists it under Work.
     case office
     /// After the Office, so it takes ⌘0; the sidebar lists it under Insights.
     case system
@@ -15,6 +15,8 @@ enum WindowSection: String, CaseIterable, Identifiable {
     case lessons
     /// The plans written with the writing-plans skill and where each stands; ⇧⌘P, under Insights after Lessons.
     case plans
+    /// Ideas captured for later, under Work.
+    case ideas
     /// Check for updates and install one; ⇧⌘U, under Settings after Configuration. Hidden when the app has no CLI to update.
     case updates
 
@@ -35,6 +37,7 @@ enum WindowSection: String, CaseIterable, Identifiable {
         case .system: Copy.systemPage
         case .lessons: Copy.lessons
         case .plans: Copy.plans
+        case .ideas: "Idea Box"
         case .updates: Copy.updatesHeading
         }
     }
@@ -55,6 +58,7 @@ enum WindowSection: String, CaseIterable, Identifiable {
         // As Configuration's Lessons category.
         case .lessons: "book"
         case .plans: "list.bullet.clipboard"
+        case .ideas: "lightbulb"
         case .updates: "arrow.down.circle"
         }
     }
@@ -75,6 +79,7 @@ enum WindowSection: String, CaseIterable, Identifiable {
         case .system: .mint
         case .lessons: .brown
         case .plans: .teal
+        case .ideas: .orange
         case .updates: .green
         }
     }
@@ -84,6 +89,7 @@ enum WindowSection: String, CaseIterable, Identifiable {
         if self == .myMergeRequests { return KeyboardShortcut("2", modifiers: [.command, .shift]) }
         if self == .lessons { return KeyboardShortcut("l", modifiers: [.command, .shift]) }
         if self == .plans { return KeyboardShortcut("p", modifiers: [.command, .shift]) }
+        if self == .ideas { return KeyboardShortcut("i", modifiers: [.command, .shift]) }
         if self == .updates { return KeyboardShortcut("u", modifiers: [.command, .shift]) }
         let index = Self.allCases.firstIndex(of: self) ?? 0
         return KeyboardShortcut(KeyEquivalent(Character(String((index + 1) % 10))))
@@ -242,7 +248,7 @@ struct SidebarNode: Identifiable {
             Copy.workGroup,
             [
                 SidebarNode(.overview), SidebarNode(.reviews), SidebarNode(.myMergeRequests), SidebarNode(.messages),
-                SidebarNode(.office),
+                SidebarNode(.office), SidebarNode(.ideas),
             ]
         ),
         (

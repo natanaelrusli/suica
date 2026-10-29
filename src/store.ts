@@ -4,10 +4,12 @@ import { DatabaseSync } from "node:sqlite";
 import { approvalVerdictSchema } from "./approval-judge.ts";
 import type { ApprovalVerdict } from "./approval-judge.ts";
 import type { Person, Snapshot } from "./domain.ts";
+import { createIdeaStore } from "./idea-store.ts";
+import type { IdeaStore } from "./idea-store.ts";
 import { createFixStore } from "./fix-store.ts";
+import type { FixStore } from "./fix-store.ts";
 import { createLessonStore } from "./lesson-store.ts";
 import type { LessonStore } from "./lesson-store.ts";
-import type { FixStore } from "./fix-store.ts";
 import { integer, nullableText, parseActivity, text } from "./sql-row.ts";
 import type { ActivityLine, Row } from "./sql-row.ts";
 import { myReviewState, reviewerKey } from "./events.ts";
@@ -185,21 +187,23 @@ function isHistoryKind(value: string): value is HistoryKind {
 export type { ActivityLine } from "./sql-row.ts";
 
 export interface Store {
+  /** Captured ideas, their notes, and durable local references. */
+  readonly ideas: IdeaStore;
   /** Agent Fix runs and the threads they handled. */
   readonly fixes: FixStore;
-  /** Review lessons and the occurrences they were distilled from. */
+  /** Review lessons distilled from findings and threads. */
   readonly lessons: LessonStore;
   load(): PreviousState;
   /**
-   * Replaces the stored state with `snapshot` in one transaction and marks the baseline as done.
-   * The `history` rows are inserted in the same transaction.
+   * Replaces stored poll state transactionally and marks the baseline as done.
+   * The history and approval rows are committed with the snapshot.
    */
   commit(
     snapshot: Snapshot,
     history?: readonly HistoryEvent[],
     approvals?: readonly FirstApproval[],
   ): void;
-  /** Inserts the poll, then forgets poll-log, history and approval rows older than 90 days before it. */
+  /** Inserts a poll and prunes the poll log, history and approval rows older than 90 days. */
   recordPoll(entry: PollLogEntry): void;
   /** The poll log and the history events at or after `since`, oldest first. */
   loadHistory(since: number): HistoryRows;
@@ -310,7 +314,39 @@ export interface Store {
   close(): void;
 }
 
-const SCHEMA_VERSION = 20;
+const SCHEMA_VERSION = 21;
+/** Captured ideas and their independent notes and local/session references. */
+const SCHEMA_V21 = `
+CREATE TABLE IF NOT EXISTS idea (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  text TEXT NOT NULL,
+  project_path TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  archived_at INTEGER,
+  revision INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idea_archive_updated ON idea (archived_at, updated_at DESC, id DESC);
+CREATE TABLE IF NOT EXISTS idea_note (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  idea_id INTEGER NOT NULL REFERENCES idea(id) ON DELETE CASCADE,
+  text TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idea_note_idea ON idea_note (idea_id, created_at, id);
+CREATE TABLE IF NOT EXISTS idea_plan (
+  idea_id INTEGER NOT NULL REFERENCES idea(id) ON DELETE CASCADE,
+  path TEXT NOT NULL,
+  PRIMARY KEY (idea_id, path)
+);
+CREATE TABLE IF NOT EXISTS idea_session (
+  idea_id INTEGER NOT NULL REFERENCES idea(id) ON DELETE CASCADE,
+  agent TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  linked_at INTEGER NOT NULL,
+  PRIMARY KEY (idea_id, agent, session_id)
+);
+`;
 /** Lessons distilled from review findings and threads, the occurrences behind them, and links. */
 const SCHEMA_V20 = `
 CREATE TABLE IF NOT EXISTS lesson (
@@ -741,6 +777,7 @@ function initSchema(db: DatabaseSync): void {
   }
   if (version < 19 && !hasColumn(db, "outbox", "cleared_at")) db.exec(SCHEMA_V19);
   if (version < 20) db.exec(SCHEMA_V20);
+  if (version < 21) db.exec(SCHEMA_V21);
   if (version !== SCHEMA_VERSION) db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 }
 
@@ -780,6 +817,7 @@ export function openStore(path: string): Store {
 
   return {
     fixes: createFixStore(db),
+    ideas: createIdeaStore(db),
     lessons: createLessonStore(db),
     load() {
       return {
