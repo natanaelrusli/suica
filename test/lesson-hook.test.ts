@@ -477,6 +477,7 @@ describe("answerHook", () => {
       hostname: "gitlab.example.com",
       reader: undefined,
       seen: { get: untouched, add: untouched, reset: untouched },
+      usage: { append: untouched },
       now: NOW,
       scan: untouched,
     });
