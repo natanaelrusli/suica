@@ -70,7 +70,7 @@ describe("schema v2", () => {
     store.close();
 
     const raw = new DatabaseSync(path);
-    expect(raw.prepare("PRAGMA user_version").get()?.["user_version"]).toBe(20);
+    expect(raw.prepare("PRAGMA user_version").get()?.["user_version"]).toBe(21);
     raw.close();
   });
 });
@@ -235,7 +235,7 @@ describe("Re-review ledger (schema 8)", () => {
     expect(store.loadTeams().rereviewMrs.size).toBe(1);
     store.close();
     const check = new DatabaseSync(path);
-    expect(check.prepare("PRAGMA user_version").get()?.["user_version"]).toBe(20);
+    expect(check.prepare("PRAGMA user_version").get()?.["user_version"]).toBe(21);
     check.close();
   });
 

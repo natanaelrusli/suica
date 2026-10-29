@@ -10,6 +10,8 @@ struct MenuView: View {
     let navigator: Navigator
     let onboarding: OnboardingModel
     var updates: UpdatesModel?
+    let ideas: IdeasModel
+    @State private var showingCapture = false
     @State private var tab: PanelTab = .recent
     /// Set once the Owner picks a tab, so the opening refresh does not switch it back.
     @State private var tabPicked = false
@@ -43,6 +45,7 @@ struct MenuView: View {
         .frame(width: 460, height: 640, alignment: .top)
         // Grows out of the menu bar icon when it opens and shrinks back into it when it closes.
         .background(MenuPanelMotion(level: motion))
+        .sheet(isPresented: $showingCapture) { QuickIdeaCapture(model: ideas) }
         .motion(value: onboarding.needsSetup)
         .motion(value: settings.showsPopoverCounters)
         .motion(value: model.errorText)
@@ -280,6 +283,12 @@ struct MenuView: View {
                         systemImage: model.isPaused ? "play.fill" : "pause.fill")
                 }
             }
+            Button {
+                showingCapture = true
+            } label: {
+                Label("Capture idea…", systemImage: "lightbulb")
+            }
+            .disabled(onboarding.needsSetup)
             Spacer()
             Button {
                 open(nil)

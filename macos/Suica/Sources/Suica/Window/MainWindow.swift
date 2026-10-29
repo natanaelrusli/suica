@@ -195,6 +195,7 @@ struct MainWindow: View {
     let templates: TemplateEditorModel
     let office: OfficeModel
     let lessons: LessonsModel
+    let ideas: IdeasModel
     let plans: PlansModel
     /// Nil when the app has no agent to update through.
     let updates: UpdatesModel?
@@ -438,6 +439,7 @@ struct MainWindow: View {
         case .system: SystemView()
         case .lessons: LessonsView(model: lessons, navigator: navigator)
         case .plans: PlansView(model: plans)
+        case .ideas: IdeasView(model: ideas, office: office, plans: plans, navigator: navigator)
         case .updates:
             if let updates { UpdatesView(model: updates) } else { ContentUnavailableView(Copy.updatesHeading, systemImage: WindowSection.updates.symbol) }
         }

@@ -1,0 +1,103 @@
+{
+  "version": 1,
+  "idea": {
+    "id": "positive SQLite integer",
+    "text": "non-empty string; preserved verbatim; maximum 100000 JavaScript Unicode code units",
+    "projectPath": "string or null; maximum 4096 code units",
+    "createdAt": "Unix epoch milliseconds",
+    "updatedAt": "Unix epoch milliseconds",
+    "archivedAt": "Unix epoch milliseconds or null",
+    "revision": "positive integer, incremented after successful content edit",
+    "notes": [
+      {
+        "id": "positive SQLite integer",
+        "text": "non-empty string; maximum 100000 JavaScript Unicode code units",
+        "createdAt": "Unix epoch milliseconds"
+      }
+    ],
+    "planPaths": ["local path string"],
+    "sessions": [
+      {
+        "agent": "agent identifier",
+        "sessionId": "agent session identifier",
+        "linkedAt": "Unix epoch milliseconds"
+      }
+    ]
+  },
+  "commands": {
+    "list": {
+      "syntax": "suica ideas list [--archived] [--search <text>] --json",
+      "response": { "status": "ok", "ideas": ["idea"] },
+      "ordering": "updatedAt descending, then id descending",
+      "search": "case-insensitive substring in original text or note text; SQL wildcard characters are literal",
+      "default": "only non-archived ideas; --archived selects archived ideas"
+    },
+    "show": {
+      "syntax": "suica ideas show <id> --json",
+      "success": { "status": "ok", "idea": "idea" },
+      "missing": { "status": "not-found", "message": "idea not found" }
+    },
+    "create": {
+      "syntax": "suica ideas create --json",
+      "stdin": { "text": "string", "projectPath": "optional string or null" },
+      "success": { "status": "ok", "idea": "idea" }
+    },
+    "update": {
+      "syntax": "suica ideas update <id> --json",
+      "stdin": {
+        "revision": "positive integer",
+        "text": "string",
+        "projectPath": "optional string or null"
+      },
+      "success": { "status": "ok", "idea": "idea" },
+      "conflict": { "status": "conflict", "idea": "current persisted version" },
+      "missing": { "status": "not-found", "message": "idea not found" },
+      "omittedProjectPath": "preserves the current projectPath"
+    },
+    "archive": "suica ideas archive <id> --json -> {status:'ok',idea} or not-found",
+    "restore": "suica ideas restore <id> --json -> {status:'ok',idea} or not-found",
+    "note": {
+      "syntax": "suica ideas note <id> --json",
+      "stdin": { "text": "non-empty note string" },
+      "success": "{status:'ok',idea}"
+    },
+    "linkPlan": {
+      "syntax": "suica ideas link-plan <id> --json",
+      "stdin": { "path": "non-empty local path string" },
+      "success": "{status:'ok',idea}; duplicate path is idempotent"
+    },
+    "linkSession": {
+      "syntax": "suica ideas link-session <id> --json",
+      "stdin": { "agent": "non-empty string", "sessionId": "non-empty string" },
+      "success": "{status:'ok',idea}; duplicate link is idempotent"
+    },
+    "prompt": {
+      "syntax": "suica ideas prompt --json",
+      "stdin": {
+        "ids": "nonempty array of up to 100 positive integer ids",
+        "question": "optional string, up to 4000 code units"
+      },
+      "success": {
+        "status": "ok",
+        "prompt": "full untruncated deterministic prompt",
+        "length": "prompt.length in JavaScript Unicode code units",
+        "maxLength": 8000,
+        "withinLimit": "boolean"
+      },
+      "missing": "{status:'not-found',message:'one or more ideas were not found'}",
+      "oversize": "returns the complete prompt with withinLimit:false; never truncates"
+    }
+  },
+  "errors": {
+    "badRequest": "{status:'bad-request',message:string}; empty/malformed JSON, empty text, invalid ids, and over-limit values are rejected",
+    "notFound": "{status:'not-found',message:'idea not found'}",
+    "conflict": "{status:'conflict',idea:current idea}; caller keeps its unsaved draft and may retry against the returned revision",
+    "emptyStdin": "create/update/note/link operations reject empty or whitespace-only input; prompt rejects empty ids",
+    "privacy": "idea text and rendered prompts are stored locally and are never included in diagnostics; the prompt command only renders text and makes no model/network request"
+  },
+  "brainstorm": {
+    "referenceData": "saved idea text, project path, and notes are serialized as JSON reference data and explicitly treated as untrusted, not executable instructions",
+    "request": "clarify the problem, ask material questions, explore alternatives and tradeoffs, challenge assumptions, propose the smallest useful experiment; discussion only, no code edits, commands, file changes, or external actions requested",
+    "permissions": "discussion-only wording is guidance, not a sandbox. A resumed agent retains its existing permissions and conversation context; provider disclosure/consent is the caller's responsibility"
+  }
+}

@@ -183,7 +183,7 @@ describe("schema 10", () => {
     expect(store.getAgentReview(next)?.previousSha).toBe("aaa1111");
     store.close();
     const check = new DatabaseSync(path);
-    expect(check.prepare("PRAGMA user_version").get()?.["user_version"]).toBe(20);
+    expect(check.prepare("PRAGMA user_version").get()?.["user_version"]).toBe(21);
     check.close();
   });
 
@@ -211,7 +211,7 @@ describe("schema 10", () => {
     expect(store.getAgentReview(next)).toMatchObject({ descriptionSha: "d1", approved: true });
     store.close();
     const check = new DatabaseSync(path);
-    expect(check.prepare("PRAGMA user_version").get()?.["user_version"]).toBe(20);
+    expect(check.prepare("PRAGMA user_version").get()?.["user_version"]).toBe(21);
     check.close();
   });
 
@@ -323,7 +323,7 @@ describe("schema 10", () => {
     upgraded.close();
   });
 
-  it("a schema 19 database upgrades to 20 with the lesson tables", () => {
+  it("a schema 19 database upgrades to 21 with the lesson and idea tables", () => {
     const path = tempDb();
     openStore(path).close();
     const raw = new DatabaseSync(path);
@@ -340,7 +340,7 @@ describe("schema 10", () => {
     expect(upgraded.lessons.lesson(id)).toMatchObject({ scope: "g/p", topics: ["a"] });
     upgraded.close();
     const check = new DatabaseSync(path);
-    expect(check.prepare("PRAGMA user_version").get()?.["user_version"]).toBe(20);
+    expect(check.prepare("PRAGMA user_version").get()?.["user_version"]).toBe(21);
     check.close();
   });
 

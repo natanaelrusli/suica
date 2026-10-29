@@ -92,6 +92,18 @@ _Avoid_: root, workspace
 A kind of code or concern a Lesson is about (`http-client`, `db-pool`, `auth`, `sql`, `logging`, a language). The graph's link between Lessons.
 _Avoid_: tag, category
 
+**Idea**:
+An unfinished thought captured in the Idea Box, with its original text kept separate from brainstorm notes.
+_Avoid_: task, note
+
+**Idea Box**:
+Suica's local list of Ideas, where the Owner can capture, find, brainstorm and archive them.
+_Avoid_: backlog
+
+**Brainstorm**:
+A discussion of one or more Ideas with a Coding Agent, started by the Owner. Saving an Idea never starts one.
+_Avoid_: autonomous ideation
+
 **Plan Mark**:
 The status and note the Owner sets on a plan on the Plans page. Kept in the app, never in the plan file.
 _Avoid_: tracker entry
