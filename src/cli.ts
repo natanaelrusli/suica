@@ -27,6 +27,7 @@ import { serveLessons } from "./lessons/mcp-server.ts";
 import { archiveLesson, buildLessonList, buildLessonShow, mergeLessons } from "./lessons/owner.ts";
 import type { ChangeResult } from "./lessons/owner.ts";
 import { scanScopes } from "./lessons/scopes.ts";
+import { fileUsageLog } from "./lessons/usage.ts";
 import { exportVault, renderVault } from "./lessons/vault.ts";
 import { zipFiles } from "./lessons/zip.ts";
 import { MODEL_CLI_CHOICES, detectModelClis, resolveModelCli } from "./model-cli.ts";
@@ -869,10 +870,13 @@ function changeLessonsCommand(
 /** `suica lessons mcp`: the lessons MCP server on stdio until stdin closes; stdout is JSON-RPC only. */
 async function lessonsMcp(): Promise<number> {
   const path = defaultConfigPath();
+  const logStatePath = loadConfig(path).statePath ?? defaultStatePath();
   await serveLessons(process.stdin, process.stdout, {
     config: () => loadConfig(path).lessons,
     openReader: () => openLessonsReadOnly(loadConfig(path).statePath ?? defaultStatePath()),
     scan: () => lessonScopeMap(loadConfig(path)),
+    // shortcut: the log folder follows the state path as of server start, restart to follow a change.
+    usage: fileUsageLog(join(dirname(logStatePath), "lessons-usage"), Date.now()),
     now: () => Date.now(),
   });
   return 0;
