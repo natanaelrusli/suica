@@ -15,15 +15,16 @@ struct LessonsUsageView: View {
             if let text = model.usageError {
                 NoticeBox(text: text, tint: .red).padding([.horizontal, .top], 12)
             }
-            if model.usage == nil && model.usageError == nil {
-                ProgressView(Copy.loading).frame(maxWidth: .infinity, maxHeight: .infinity)
+            if model.usage == nil {
+                if model.usageError == nil { ProgressView(Copy.loading) }
+                Spacer()
             } else if projects.isEmpty {
                 Text(Copy.lessonsUsageEmpty)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 HStack(spacing: 0) {
-                    List(selection: $chosen) {
+                    List(selection: Binding(get: { selected?.id }, set: { chosen = $0 })) {
                         ForEach(projects) { project in ProjectRow(project: project).tag(project.id) }
                     }
                     .frame(width: 340)
@@ -44,7 +45,7 @@ struct LessonsUsageView: View {
 }
 
 private func name(_ project: LessonUsageProject) -> String {
-    project.project.map(DisplayText.shortKey) ?? (project.scope as NSString).lastPathComponent
+    project.project ?? (project.scope as NSString).lastPathComponent
 }
 
 private struct ProjectRow: View {
@@ -92,7 +93,7 @@ private struct ProjectDetail: View {
                 }
             }
             Section(Copy.lessonsUsageRecent) {
-                ForEach(recent, id: \.at) { entry in
+                ForEach(Array(recent.enumerated()), id: \.offset.description) { _, entry in
                     VStack(alignment: .leading, spacing: 2) {
                         HStack {
                             Text(entry.date.formatted(date: .abbreviated, time: .shortened))
