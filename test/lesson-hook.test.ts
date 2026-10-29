@@ -18,6 +18,8 @@ import { answerHook, fileSeenStore, readScopeCache, shouldReadStdin } from "../s
 import type { HookDeps, SeenStore } from "../src/lessons/hook.ts";
 import { scanScopes } from "../src/lessons/scopes.ts";
 import type { ScopeMap } from "../src/lessons/scopes.ts";
+import { estimateTokens, fileUsageLog } from "../src/lessons/usage.ts";
+import type { UsageEntry, UsageLog } from "../src/lessons/usage.ts";
 import { openStore } from "../src/store.ts";
 
 const NOW = Date.UTC(2026, 9, 26, 9);
@@ -87,6 +89,16 @@ function memorySeen(): SeenStore & { readonly data: Map<string, Set<number>> } {
   };
 }
 
+function memoryUsage(): UsageLog & { readonly entries: UsageEntry[] } {
+  const entries: UsageEntry[] = [];
+  return {
+    entries,
+    append: (entry) => {
+      entries.push(entry);
+    },
+  };
+}
+
 /** Adds one Major lesson in `lessonScope` matching every file. */
 function addLesson(lessonScope: string, title: string): number {
   const store = openStore(statePath);
@@ -112,6 +124,7 @@ function deps(extra: Partial<HookDeps> = {}): HookDeps {
     hostname: "gitlab.example.com",
     reader,
     seen: memorySeen(),
+    usage: memoryUsage(),
     now: NOW,
     scan: () => map,
     ...extra,
@@ -161,6 +174,100 @@ afterEach(() => {
 });
 
 describe("answerHook", () => {
+  it("logs a session start with its project, lessons and tokens", () => {
+    const { go, ts, fresh } = seed(statePath, scope);
+    const usage = memoryUsage();
+    const out = answerHook(start(repo), deps({ usage }));
+    expect(usage.entries).toEqual([
+      {
+        at: NOW,
+        project: "g/app",
+        scope,
+        source: "session",
+        sessionId: "s1",
+        lessonIds: [go, ts, fresh],
+        tokens: estimateTokens(context(out)),
+      },
+    ]);
+  });
+
+  it("logs a read and an edit with the repo-relative file", () => {
+    const { go } = seed(statePath, scope);
+    const usage = memoryUsage();
+    const readOut = answerHook(read(join(repo, "src/a.go")), deps({ usage }));
+    answerHook(
+      {
+        hook_event_name: "PreToolUse",
+        session_id: "s2",
+        cwd: repo,
+        tool_name: "Edit",
+        tool_input: { file_path: join(repo, "src/b.ts") },
+      },
+      deps({ usage }),
+    );
+    expect(usage.entries).toHaveLength(2);
+    expect(usage.entries[0]).toEqual({
+      at: NOW,
+      project: "g/app",
+      scope,
+      source: "read",
+      sessionId: "s1",
+      file: "src/a.go",
+      lessonIds: [go],
+      tokens: estimateTokens(context(readOut)),
+    });
+    expect(usage.entries[1]).toMatchObject({ source: "edit", file: "src/b.ts", sessionId: "s2" });
+  });
+
+  it("logs nothing when nothing is shown", () => {
+    seed(statePath, scope);
+    const usage = memoryUsage();
+    const shared = deps({ usage });
+    answerHook(read(join(repo, "src/a.go")), shared);
+    answerHook(read(join(repo, "src/a.go")), shared);
+    expect(usage.entries).toHaveLength(1);
+    answerHook(read(join(dir, "elsewhere/a.go")), shared);
+    expect(usage.entries).toHaveLength(1);
+  });
+
+  it("a session outside any repo logs project null", () => {
+    seed(statePath, scope);
+    mkdirSync(join(scope, "notes"), { recursive: true });
+    const usage = memoryUsage();
+    answerHook(start(join(scope, "notes")), deps({ usage }));
+    expect(usage.entries).toHaveLength(1);
+    expect(usage.entries[0]).toMatchObject({ project: null, scope, source: "session" });
+  });
+
+  it("a session id that is not a file name is logged without it", () => {
+    seed(statePath, scope);
+    const usage = memoryUsage();
+    answerHook(start(repo, { session_id: "../x" }), deps({ usage }));
+    expect(usage.entries).toHaveLength(1);
+    expect(usage.entries[0]).not.toHaveProperty("sessionId");
+  });
+
+  it("still answers when the log cannot be written", () => {
+    seed(statePath, scope);
+    writeFileSync(join(dir, "lessons-usage"), "");
+    const blocked = answerHook(
+      start(repo),
+      deps({ usage: fileUsageLog(join(dir, "lessons-usage"), NOW) }),
+    );
+    expect(context(blocked)).toContain(INTRO);
+    const throwing = answerHook(
+      start(repo),
+      deps({
+        usage: {
+          append: () => {
+            throw new Error("x");
+          },
+        },
+      }),
+    );
+    expect(context(throwing)).toContain(INTRO);
+  });
+
   it("SessionStart in a scope gives the heaviest lessons with the intro line", () => {
     seed(statePath, scope);
     const answer = answerHook(
