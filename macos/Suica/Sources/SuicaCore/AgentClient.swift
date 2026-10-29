@@ -646,6 +646,10 @@ extension CLIAgentClient: LessonsClient {
         return try decodeDocument(LessonDetailDocument.self, from: line)
     }
 
+    public func lessonsUsage() async throws(AgentError) -> LessonUsageDocument {
+        try await document(LessonUsageDocument.self, ["lessons", "usage", "--json"])
+    }
+
     public func archiveLesson(id: Int) async throws(AgentError) -> LessonChangeOutcome {
         let line = try await lessonsReply(
             LessonStatusLine.self, ["lessons", "archive", String(id), "--json"], timeout: Self.shortTimeout)
