@@ -1060,6 +1060,51 @@ describe("merged messages", () => {
       expect(h.store.getOutbox(lead ?? 0)).toMatchObject({ status: "sent" });
     });
 
+    it("is rebuilt without a sibling that is no longer needed", async () => {
+      const { h, ids } = await held();
+      const [lead, sibling] = ids;
+      const approved = ownMrs(first, { ...second, state: "APPROVED" });
+      h.store.commit(approved);
+      await dispatchQueued(h.deps, approved);
+      expect(h.store.getOutbox(sibling ?? 0)).toMatchObject({ status: "skipped" });
+      expect(h.store.getOutbox(lead ?? 0)).toMatchObject({ status: "queued" });
+      await dispatchQueued(h.deps, approved);
+      expect(h.store.getOutbox(lead ?? 0)).toMatchObject({ status: "pending" });
+      expect(await sendPending(h.deps, lead ?? 0)).toEqual({ status: "sent" });
+      expect(h.sent).toHaveLength(1);
+      expect(h.sent[0]?.text).toContain(`[ABC-1 first](${url(5)})`);
+      expect(h.sent[0]?.text).not.toContain("ABC-1 second");
+    });
+
+    it("is rebuilt without a row the Owner skipped", async () => {
+      const { h, ids } = await held();
+      const [lead, sibling] = ids;
+      expect(skipOutbox(h.store, sibling ?? 0, NOW)).toBe(true);
+      expect(h.store.getOutbox(lead ?? 0)).toMatchObject({ status: "queued" });
+      await dispatchQueued(h.deps, ownMrs(first, second));
+      expect(h.store.getOutbox(lead ?? 0)?.text).not.toContain("ABC-1 second");
+    });
+
+    it("releases the rest of the group when the row sent turns out to be obsolete", async () => {
+      const { h, ids } = await held();
+      const [lead, sibling] = ids;
+      h.store.commit(ownMrs({ ...first, state: "APPROVED" }, second));
+      expect(await sendPending(h.deps, lead ?? 0)).toEqual({ status: "obsolete" });
+      expect(h.store.getOutbox(sibling ?? 0)).toMatchObject({ status: "queued" });
+      expect(h.sent).toEqual([]);
+    });
+
+    it("always sends under the lowest id, whichever row the Owner picks", async () => {
+      const { h, ids } = await held();
+      const [lead, sibling] = ids;
+      await sendPending(h.deps, sibling ?? 0);
+      expect(h.store.getOutbox(lead ?? 0)).toMatchObject({ status: "sent", detail: "" });
+      expect(h.store.getOutbox(sibling ?? 0)).toMatchObject({
+        status: "sent",
+        detail: `merged into #${String(lead)}`,
+      });
+    });
+
     it("leaves a pending row with another text alone", async () => {
       const { h, ids } = await held({ iid: 7, title: "ABC-9 other" });
       await sendPending(h.deps, ids[0] ?? 0);

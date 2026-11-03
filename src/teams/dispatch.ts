@@ -141,6 +141,36 @@ function isManual(row: OutboxRow): boolean {
   return row.dedupeKey.startsWith(MANUAL_PREFIX);
 }
 
+/**
+ * The other rows held with the same text: the rest of a merged group. The text lists every MR of
+ * the group, so a row that leaves it makes that text stale for the others.
+ */
+function heldMates(store: Pick<Store, "listOutbox">, row: OutboxRow): OutboxRow[] {
+  if (row.text === null) return [];
+  return store
+    .listOutbox(["pending"])
+    .filter(
+      (other) =>
+        other.id !== row.id &&
+        !isManual(other) &&
+        other.recipient === row.recipient &&
+        other.kind === row.kind &&
+        other.variant === row.variant &&
+        other.text === row.text,
+    );
+}
+
+/** Puts the rest of a held group back in the queue, so the next pass writes it without `row`. */
+function releaseMates(
+  store: Pick<Store, "listOutbox" | "transitionOutbox">,
+  row: OutboxRow,
+  now: number,
+): void {
+  for (const mate of heldMates(store, row)) {
+    store.transitionOutbox(mate.id, "pending", "queued", { detail: "" }, now);
+  }
+}
+
 /** Is the message still worth sending now? Re-checked at send time, not only when it was queued. */
 function stillNeeded(store: TeamsStore, row: OutboxRow, snapshot: Snapshot): boolean {
   if (isManual(row)) return true;
@@ -339,6 +369,7 @@ export async function dispatchQueued(
         deps.store.transitionOutbox(row.id, row.status, "skipped", { detail: "obsolete" }, nowMs)
       ) {
         deps.log.info("teams message skipped", { ...rowAttributes(row), reason: "obsolete" });
+        releaseMates(deps.store, row, nowMs);
       }
       continue;
     }
@@ -403,22 +434,14 @@ export async function sendPending(deps: DispatchDeps, id: number): Promise<SendP
   const text = row.text;
   if (!stillNeededInState(deps.store, row, deps.store.load())) {
     deps.store.transitionOutbox(row.id, "pending", "skipped", { detail: "obsolete" }, deps.now());
+    releaseMates(deps.store, row, deps.now());
     return { status: "obsolete" };
   }
-  // The rows held with the same text are the rest of its merged group: one send covers them all.
-  const mates = deps.store
-    .listOutbox(["pending"])
-    .filter(
-      (other) =>
-        other.id !== row.id &&
-        !isManual(other) &&
-        other.recipient === row.recipient &&
-        other.kind === row.kind &&
-        other.variant === row.variant &&
-        other.text === text,
-    );
+  // One send covers the whole merged group, always under its lowest id: two `suica send` on
+  // different rows of it then compete for the same row first, and one of them finds it busy.
+  const [lead = row, ...mates] = [row, ...heldMates(deps.store, row)].sort((a, b) => a.id - b.id);
   try {
-    return await deps.gateway.session((api) => deliver(deps, api, row, text, mates));
+    return await deps.gateway.session((api) => deliver(deps, api, lead, text, mates));
   } catch (error) {
     return { status: "retry-later", failure: failureKind(error) };
   }
@@ -426,13 +449,17 @@ export async function sendPending(deps: DispatchDeps, id: number): Promise<SendP
 
 /** `suica skip <id>`: true when a pending, unresolved or queued row was skipped. */
 export function skipOutbox(
-  store: Pick<Store, "transitionOutbox">,
+  store: Pick<Store, "transitionOutbox" | "getOutbox" | "listOutbox">,
   id: number,
   now: number,
 ): boolean {
-  return (["pending", "unresolved", "queued"] as const).some((from) =>
+  const row = store.getOutbox(id);
+  const skipped = (["pending", "unresolved", "queued"] as const).some((from) =>
     store.transitionOutbox(id, from, "skipped", { detail: "skipped by owner" }, now),
   );
+  // A held group's text lists this MR: the rest of it is written again without it.
+  if (skipped && row?.status === "pending") releaseMates(store, row, now);
+  return skipped;
 }
 
 /** `suica retry <id>`: puts an unresolved row back in the queue after the Owner fixed `teams.people`. */
