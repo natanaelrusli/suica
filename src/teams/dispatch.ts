@@ -405,8 +405,20 @@ export async function sendPending(deps: DispatchDeps, id: number): Promise<SendP
     deps.store.transitionOutbox(row.id, "pending", "skipped", { detail: "obsolete" }, deps.now());
     return { status: "obsolete" };
   }
+  // The rows held with the same text are the rest of its merged group: one send covers them all.
+  const mates = deps.store
+    .listOutbox(["pending"])
+    .filter(
+      (other) =>
+        other.id !== row.id &&
+        !isManual(other) &&
+        other.recipient === row.recipient &&
+        other.kind === row.kind &&
+        other.variant === row.variant &&
+        other.text === text,
+    );
   try {
-    return await deps.gateway.session((api) => deliver(deps, api, row, text));
+    return await deps.gateway.session((api) => deliver(deps, api, row, text, mates));
   } catch (error) {
     return { status: "retry-later", failure: failureKind(error) };
   }

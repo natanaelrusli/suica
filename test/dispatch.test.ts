@@ -1028,4 +1028,42 @@ describe("merged messages", () => {
     await dispatchQueued(h.deps, ownMrs(first, second));
     expect(h.sent).toHaveLength(2);
   });
+
+  describe("a held group", () => {
+    async function held(...extra: Spec[]) {
+      const h = setup({ mode: "approval" });
+      const specs = [first, second, ...extra];
+      const ids = enqueueMrs(h.store, ...specs);
+      h.store.commit(ownMrs(...specs));
+      await dispatchQueued(h.deps, ownMrs(...specs));
+      return { h, ids };
+    }
+
+    it("is sent whole when one row is sent", async () => {
+      const { h, ids } = await held();
+      const [lead, sibling] = ids;
+      expect(await sendPending(h.deps, lead ?? 0)).toEqual({ status: "sent" });
+      expect(h.sent).toHaveLength(1);
+      expect(h.store.getOutbox(lead ?? 0)).toMatchObject({ status: "sent", approved: true });
+      expect(h.store.getOutbox(sibling ?? 0)).toMatchObject({
+        status: "sent",
+        approved: true,
+        detail: `merged into #${String(lead)}`,
+      });
+    });
+
+    it("is sent whole when the Owner picks the sibling", async () => {
+      const { h, ids } = await held();
+      const [lead, sibling] = ids;
+      expect(await sendPending(h.deps, sibling ?? 0)).toEqual({ status: "sent" });
+      expect(h.sent).toHaveLength(1);
+      expect(h.store.getOutbox(lead ?? 0)).toMatchObject({ status: "sent" });
+    });
+
+    it("leaves a pending row with another text alone", async () => {
+      const { h, ids } = await held({ iid: 7, title: "ABC-9 other" });
+      await sendPending(h.deps, ids[0] ?? 0);
+      expect(h.store.getOutbox(ids[2] ?? 0)).toMatchObject({ status: "pending" });
+    });
+  });
 });
