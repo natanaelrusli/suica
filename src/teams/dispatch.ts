@@ -12,6 +12,7 @@ import type { TeamsGateway } from "./gateway.ts";
 import { isWithinWorkingHours } from "./hours.ts";
 import { resolveEmail } from "./identity.ts";
 import type { Resolution } from "./identity.ts";
+import { groupForMerge } from "./merge.ts";
 import {
   escapeMarkdown,
   firstName,
@@ -21,7 +22,7 @@ import {
   renderTemplate,
 } from "./templates.ts";
 import type { Placeholder, Templates } from "./templates.ts";
-import type { HeldMessage, Intent, OutboxRow } from "./types.ts";
+import type { HeldMessage, Intent, OutboxRow, OutboxStatus } from "./types.ts";
 
 type TeamsStore = Pick<
   Store,
@@ -174,17 +175,31 @@ function stillNeededInState(store: TeamsStore, row: OutboxRow, state: PreviousSt
   return state.trackedAuthored.has(row.mrKey) && state.reviewerStates.get(key) === UNREVIEWED;
 }
 
+type LinkedMr = Pick<OutboxRow, "mrTitle" | "mrUrl">;
+
+function linkTo(mr: LinkedMr): string {
+  return markdownLink(clean(mr.mrTitle, TITLE_MAX), mr.mrUrl);
+}
+
+/**
+ * `mates` are the rows of a merged message: `mr.link` becomes one bullet per MR, `row` first, and
+ * every other placeholder comes from `row`.
+ */
 function valuesFor(
   row: Pick<OutboxRow, "recipientName" | "mrTitle" | "mrUrl" | "mrIid" | "mrProject" | "findings">,
   ownerName: string,
   agentName: string,
   nowMs: number,
+  mates: readonly LinkedMr[] = [],
 ): Record<Placeholder, string> {
   const recipient = clean(row.recipientName, NAME_MAX);
   return {
     "mr.title": escapeMarkdown(clean(row.mrTitle, TITLE_MAX)),
     "mr.url": row.mrUrl,
-    "mr.link": markdownLink(clean(row.mrTitle, TITLE_MAX), row.mrUrl),
+    "mr.link":
+      mates.length === 0
+        ? linkTo(row)
+        : [row, ...mates].map((each) => `- ${linkTo(each)}`).join("\n"),
     "mr.iid": String(row.mrIid),
     "mr.project": escapeMarkdown(row.mrProject),
     "person.name": escapeMarkdown(recipient),
@@ -197,16 +212,28 @@ function valuesFor(
   };
 }
 
+function moveMates(
+  deps: DispatchDeps,
+  mates: readonly OutboxRow[],
+  from: OutboxStatus,
+  to: OutboxStatus,
+  fields: Parameters<Store["transitionOutbox"]>[3],
+): void {
+  for (const mate of mates) deps.store.transitionOutbox(mate.id, from, to, fields, deps.now());
+}
+
 /**
  * Sends one row, which must currently be `queued` or `pending`. The row moves to `sending`
  * (compare-and-set) before anything that can deliver a message, and from there it can only end
- * as `sent` or `failed`: no code path sends a row twice.
+ * as `sent` or `failed`: no code path sends a row twice. `mates` are rows in the same status
+ * whose MRs the text lists too: they follow the row through every move.
  */
 export async function deliver(
   deps: DispatchDeps,
   api: TeamsApi,
   row: OutboxRow,
   text: string,
+  mates: readonly OutboxRow[] = [],
 ): Promise<DeliverOutcome> {
   const from = row.status;
   let resolution: Resolution;
@@ -227,6 +254,7 @@ export async function deliver(
       { detail: "lookup-error", text },
       deps.now(),
     );
+    moveMates(deps, mates, from, "unresolved", { detail: "lookup-error", text });
     return { status: "lookup-error", failure };
   }
   if (resolution.kind === "unresolved") {
@@ -237,6 +265,7 @@ export async function deliver(
       { detail: resolution.reason, text },
       deps.now(),
     );
+    moveMates(deps, mates, from, "unresolved", { detail: resolution.reason, text });
     return { status: "unresolved", reason: resolution.reason };
   }
   // Leaving `pending` is only possible through `suica send`, so it is the Owner's approval.
@@ -244,29 +273,36 @@ export async function deliver(
   if (!deps.store.transitionOutbox(row.id, from, "sending", { text, ...approval }, deps.now())) {
     return { status: "busy" };
   }
+  moveMates(deps, mates, from, "sending", { text, ...approval });
   try {
     const chatId = await api.openChat(resolution.email);
     await api.sendMessage(chatId, text);
   } catch (error) {
     const kind = failureKind(error);
     deps.store.transitionOutbox(row.id, "sending", "failed", { detail: kind }, deps.now());
+    moveMates(deps, mates, "sending", "failed", { detail: kind });
     return { status: "failed", failure: kind };
   }
   deps.store.transitionOutbox(row.id, "sending", "sent", {}, deps.now());
+  moveMates(deps, mates, "sending", "sent", { detail: `merged into #${String(row.id)}` });
   return { status: "sent" };
 }
 
 async function sendBatch(
   deps: DispatchDeps,
-  batch: readonly { readonly row: OutboxRow; readonly text: string }[],
+  batch: readonly {
+    readonly row: OutboxRow;
+    readonly mates: readonly OutboxRow[];
+    readonly text: string;
+  }[],
 ): Promise<Omit<DispatchResult, "held">> {
   let sent = 0;
   let failure: TeamsFailureKind | undefined;
   let lookupErrors = 0;
   try {
     await deps.gateway.session(async (api) => {
-      for (const { row, text } of batch) {
-        const outcome = await deliver(deps, api, row, text);
+      for (const { row, mates, text } of batch) {
+        const outcome = await deliver(deps, api, row, text, mates);
         logOutcome(deps.log, row, outcome);
         if (outcome.status === "sent") sent += 1;
         lookupErrors = outcome.status === "lookup-error" ? lookupErrors + 1 : 0;
@@ -293,8 +329,9 @@ export async function dispatchQueued(
   const rows = deps.store.listOutbox(["queued", "pending"]);
   const nowMs = deps.now();
   const inHours = isWithinWorkingHours(new Date(nowMs), deps.config.workingHours);
-  const automatic: { row: OutboxRow; text: string }[] = [];
+  const automatic: { row: OutboxRow; mates: OutboxRow[]; text: string }[] = [];
   const held: HeldMessage[] = [];
+  const due: OutboxRow[] = [];
 
   for (const row of rows) {
     if (!stillNeeded(deps.store, row, snapshot)) {
@@ -307,6 +344,17 @@ export async function dispatchQueued(
     }
     // A pending row only waits for the Owner; the checks above are all it needs here.
     if (row.status === "pending" || !inHours) continue;
+    due.push(row);
+  }
+
+  // Rows the Owner wrote by hand keep their own message; the rest merge by recipient and ticket.
+  const groups = [
+    ...groupForMerge(due.filter((row) => !isManual(row))),
+    ...due.filter(isManual).map((row) => [row]),
+  ];
+  for (const [row, ...mates] of groups) {
+    if (row === undefined) continue;
+    const members = [row, ...mates];
     let text: string;
     try {
       // The variant follows the row's dedupe key, so a retry writes the same text. A message the
@@ -316,24 +364,31 @@ export async function dispatchQueued(
           ? row.text
           : renderTemplate(
               pickVariant(deps.templates[row.variant], row.dedupeKey),
-              valuesFor(row, snapshot.me.name, deps.config.agentName, nowMs),
+              valuesFor(row, snapshot.me.name, deps.config.agentName, nowMs, mates),
             );
     } catch {
-      deps.store.transitionOutbox(row.id, "queued", "failed", { detail: "template" }, nowMs);
-      deps.log.warn("teams message failed", { ...rowAttributes(row), reason: "template" });
+      for (const member of members) {
+        deps.store.transitionOutbox(member.id, "queued", "failed", { detail: "template" }, nowMs);
+        deps.log.warn("teams message failed", { ...rowAttributes(member), reason: "template" });
+      }
       continue;
     }
     const mode = modeFor(row, deps.config);
     if (mode === "dry-run") {
-      deps.store.transitionOutbox(row.id, "queued", "dry-run", { text }, nowMs);
-      deps.log.info("dry-run message recorded", rowAttributes(row));
+      for (const member of members) {
+        deps.store.transitionOutbox(member.id, "queued", "dry-run", { text }, nowMs);
+        deps.log.info("dry-run message recorded", rowAttributes(member));
+      }
     } else if (mode === "approval") {
-      if (deps.store.transitionOutbox(row.id, "queued", "pending", { text }, nowMs)) {
-        held.push(row);
-        deps.log.info("teams message waiting for approval", rowAttributes(row));
+      // One notification for the group: its lead stands for all of them.
+      for (const member of members) {
+        if (deps.store.transitionOutbox(member.id, "queued", "pending", { text }, nowMs)) {
+          if (member === row) held.push(member);
+          deps.log.info("teams message waiting for approval", rowAttributes(member));
+        }
       }
     } else {
-      automatic.push({ row, text });
+      automatic.push({ row, mates, text });
     }
   }
   if (automatic.length === 0) return { sent: 0, failure: undefined, held };

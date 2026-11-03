@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { reviewerKey } from "../src/events.ts";
 import { createLogger } from "../src/log.ts";
 import { openStore } from "../src/store.ts";
 import type { Store } from "../src/store.ts";
@@ -847,5 +848,184 @@ describe("messages sent by hand", () => {
     const found = setup();
     await dispatchQueued({ ...found.deps, store: h.store }, own());
     expect(found.sent).toEqual([{ chatId: "chat-bob@x.id", text: "Teks saya" }]);
+  });
+});
+
+describe("merged messages", () => {
+  interface Spec {
+    iid: number;
+    title: string;
+    recipient?: string;
+    state?: string;
+  }
+  const url = (iid: number) => `https://gitlab.example/g/p/-/merge_requests/${iid}`;
+  const nameOf = (username: string) => `${username.slice(0, 1).toUpperCase()}${username.slice(1)}`;
+
+  function enqueueMrs(store: Store, ...specs: Spec[]): number[] {
+    store.applyTeamsPlan(
+      teamsPlan({
+        intents: specs.map(({ iid, title, recipient = "bob" }) =>
+          intent(1, {
+            dedupeKey: `nudge:g/p!${iid}|${recipient}:1`,
+            mr: { key: `g/p!${iid}`, iid, projectPath: "g/p", title, url: url(iid) },
+            recipient: person(recipient, nameOf(recipient)),
+          }),
+        ),
+        nudgeUpdates: specs.map(({ iid, recipient = "bob" }) => ({
+          key: reviewerKey(`g/p!${iid}`, recipient),
+          record: { sentCount: 1, lastSentAt: NOW },
+        })),
+      }),
+      NOW,
+    );
+    return store.listOutbox(["queued"]).map((row) => row.id);
+  }
+
+  const ownMrs = (...specs: Spec[]) =>
+    snapshot({
+      authored: specs.map(({ iid, title, recipient = "bob", state = "UNREVIEWED" }) =>
+        mr(iid, {
+          author: ME,
+          title,
+          reviewers: [reviewer(recipient, state, nameOf(recipient))],
+        }),
+      ),
+    });
+
+  const first: Spec = { iid: 5, title: "ABC-1 first" };
+  const second: Spec = { iid: 6, title: "ABC-1 second" };
+
+  it("sends one message for two MRs of one ticket", async () => {
+    const h = setup();
+    const [lead, sibling] = enqueueMrs(h.store, first, second);
+    const result = await dispatchQueued(h.deps, ownMrs(first, second));
+    expect(result).toEqual({ sent: 1, failure: undefined, held: [] });
+    expect(h.sent).toHaveLength(1);
+    expect(h.sent[0]?.text).toBe(
+      `Halo Bob, saya Bahlil, agen review-nya Nata. Boleh minta tolong review MR ini?\n- [ABC-1 first](${url(5)})\n- [ABC-1 second](${url(6)})\nTerima kasih!`,
+    );
+    expect(h.store.getOutbox(lead ?? 0)).toMatchObject({ status: "sent", detail: "" });
+    expect(h.store.getOutbox(sibling ?? 0)).toMatchObject({
+      status: "sent",
+      detail: `merged into #${String(lead)}`,
+    });
+    expect(h.store.loadTeams().undelivered.size).toBe(0);
+  });
+
+  it("escapes Markdown in every bullet", async () => {
+    const h = setup();
+    const a = { iid: 5, title: "[ABC-1] Fix *x*" };
+    const b = { iid: 6, title: "ABC-1 b_c" };
+    enqueueMrs(h.store, a, b);
+    await dispatchQueued(h.deps, ownMrs(a, b));
+    expect(h.sent[0]?.text).toContain("- [\\[ABC-1\\] Fix \\*x\\*](");
+    expect(h.sent[0]?.text).toContain("- [ABC-1 b\\_c](");
+  });
+
+  it("sends separate messages for different tickets or no ticket", async () => {
+    const h = setup();
+    const specs = [
+      { iid: 5, title: "ABC-1 a" },
+      { iid: 6, title: "ABC-2 b" },
+      { iid: 7, title: "no key" },
+      { iid: 8, title: "no key either" },
+    ];
+    enqueueMrs(h.store, ...specs);
+    await dispatchQueued(h.deps, ownMrs(...specs));
+    expect(h.sent).toHaveLength(4);
+  });
+
+  it("sends separate messages to different recipients", async () => {
+    const h = setup();
+    const a = { ...first, recipient: "bob" };
+    const b = { ...second, recipient: "carol" };
+    enqueueMrs(h.store, a, b);
+    await dispatchQueued(h.deps, ownMrs(a, b));
+    expect(h.sent.map((each) => each.chatId).sort()).toEqual(["chat-bob@x.id", "chat-carol@x.id"]);
+  });
+
+  it("leaves out a sibling that is no longer needed, and the message reads like a single one", async () => {
+    const h = setup();
+    const [, sibling] = enqueueMrs(h.store, first, second);
+    await dispatchQueued(h.deps, ownMrs(first, { ...second, state: "APPROVED" }));
+    expect(h.store.getOutbox(sibling ?? 0)).toMatchObject({
+      status: "skipped",
+      detail: "obsolete",
+    });
+    expect(h.sent).toHaveLength(1);
+    expect(h.sent[0]?.text).toContain(`[ABC-1 first](${url(5)})`);
+    expect(h.sent[0]?.text).not.toContain("\n- ");
+  });
+
+  it("sends twelve MRs of one ticket as 10 and 2", async () => {
+    const h = setup();
+    const specs = Array.from({ length: 12 }, (_, index) => ({
+      iid: index + 1,
+      title: `ABC-1 n${String(index + 1)}`,
+    }));
+    enqueueMrs(h.store, ...specs);
+    await dispatchQueued(h.deps, ownMrs(...specs));
+    const bullets = h.sent.map((each) => each.text.split("\n").filter((l) => l.startsWith("- ")));
+    expect(bullets.map((lines) => lines.length)).toEqual([10, 2]);
+  });
+
+  it("records a dry run for every row of the group", async () => {
+    const h = setup({ mode: "dry-run" });
+    const ids = enqueueMrs(h.store, first, second);
+    await dispatchQueued(h.deps, ownMrs(first, second));
+    const rows = ids.map((id) => h.store.getOutbox(id));
+    expect(rows.map((row) => row?.status)).toEqual(["dry-run", "dry-run"]);
+    expect(rows[0]?.text).toBe(rows[1]?.text);
+    expect(rows[0]?.text).toContain("- [ABC-1 second]");
+    expect(h.sent).toEqual([]);
+  });
+
+  it("holds the group for approval and notifies once", async () => {
+    const h = setup({ mode: "approval" });
+    const ids = enqueueMrs(h.store, first, second);
+    const result = await dispatchQueued(h.deps, ownMrs(first, second));
+    const rows = ids.map((id) => h.store.getOutbox(id));
+    expect(rows.map((row) => row?.status)).toEqual(["pending", "pending"]);
+    expect(rows[0]?.text).toBe(rows[1]?.text);
+    expect(result.held.map((held) => held.id)).toEqual([ids[0]]);
+  });
+
+  it("keeps the whole group queued while Teams is unreachable", async () => {
+    const h = setup({
+      api: { searchUsers: () => Promise.reject(new TeamsFailure("unavailable", "down")) },
+    });
+    const ids = enqueueMrs(h.store, first, second);
+    await dispatchQueued(h.deps, ownMrs(first, second));
+    expect(ids.map((id) => h.store.getOutbox(id)?.status)).toEqual(["queued", "queued"]);
+  });
+
+  it("marks the whole group failed when sending fails", async () => {
+    const h = setup({
+      api: { sendMessage: () => Promise.reject(new TeamsFailure("error", "403")) },
+    });
+    const ids = enqueueMrs(h.store, first, second);
+    const result = await dispatchQueued(h.deps, ownMrs(first, second));
+    expect(result).toEqual({ sent: 0, failure: "error", held: [] });
+    for (const id of ids) {
+      expect(h.store.getOutbox(id)).toMatchObject({ status: "failed", detail: "error" });
+    }
+  });
+
+  it("marks the whole group unresolved when the person is not found", async () => {
+    const h = setup({ api: { searchUsers: () => Promise.resolve([]) } });
+    const ids = enqueueMrs(h.store, first, second);
+    await dispatchQueued(h.deps, ownMrs(first, second));
+    for (const id of ids) {
+      expect(h.store.getOutbox(id)).toMatchObject({ status: "unresolved", detail: "no-match" });
+    }
+  });
+
+  it("does not wait for a sibling that arrives later", async () => {
+    const h = setup();
+    enqueueMrs(h.store, first);
+    await dispatchQueued(h.deps, ownMrs(first, second));
+    enqueueMrs(h.store, second);
+    await dispatchQueued(h.deps, ownMrs(first, second));
+    expect(h.sent).toHaveLength(2);
   });
 });
