@@ -44,7 +44,8 @@ There are 2.4 GB of Claude logs, and about 4,200 files changed in the last 30 da
 - Keep a per-file cache keyed by path, size and mtime that holds each file's per-day, per-model totals. Only new or changed files are parsed again. The cache goes in a JSON file next to the state database, `agent-usage-cache.json` (my call). A corrupt or missing cache is thrown away and rebuilt, never fatal.
 - Stream each file line by line. Skip any line that is not valid JSON, because the agent may be partway through writing it.
 - The first full read took about 27 seconds on this Mac. The app stops CLI calls after 20 seconds (`shortTimeout` in `AgentClient.swift`), so this command gets its own longer timeout, 120 seconds (my call). The cache is also written every few hundred files, so a run that gets stopped still makes progress for the next one. The page shows its usual loading state.
-- Duplicate Claude requests across files are rare (14 of about 46,000), but the dedupe key applies across all files anyway, since doing so costs nothing.
+- Claude dedupe applies within a file. Duplicates across files are rare (14 of about 46,000), so the cache keeps per-file totals rather than every request key (shortcut: upgrade if cross-file duplicates grow).
+- Cache totals are bucketed by hour (the start of the UTC hour, in epoch milliseconds), so "last 24 hours" is accurate to within an hour. Days are worked out from the hours when the document is built.
 
 ## Prices
 
