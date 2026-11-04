@@ -177,4 +177,41 @@ describe("scanAgentUsage", () => {
     expect(await scan()).toEqual([]);
     expect(await savedFiles()).toEqual({});
   });
+
+  it("still returns the buckets when the cache cannot be written", async () => {
+    await put(".claude/projects/a.jsonl", claudeLine(hourAgo, "m1", 5));
+    const blocker = await put("blocker", "a file, not a directory");
+    expect(total(await scan({ cachePath: join(blocker, "cache.json") }))).toBe(5);
+  });
+
+  it("parses again a cache entry that has no buckets array", async () => {
+    const p = await put(".claude/projects/a.jsonl", claudeLine(hourAgo, "m1", 5));
+    const s = await stat(p);
+    await mkdir(dirname(cachePath), { recursive: true });
+    const bad = {
+      version: 1,
+      pricesAsOf: PRICES_AS_OF,
+      files: { [p]: { size: s.size, mtimeMs: s.mtimeMs } },
+    };
+    await writeFile(cachePath, JSON.stringify(bad));
+    expect(total(await scan())).toBe(5);
+  });
+
+  it("drops a cached entry once its file ages past 30 days", async () => {
+    const p = await put(".claude/projects/a.jsonl", claudeLine(hourAgo, "m1", 5));
+    await scan();
+    expect(Object.keys(await savedFiles())).toEqual([p]);
+    expect(await scan({ now: now + 31 * DAY })).toEqual([]);
+    expect(await savedFiles()).toEqual({});
+  });
+
+  it("keeps codex dedupe when one of the same-session files is a cache hit", async () => {
+    await put(".codex/sessions/small.jsonl", codexFile("same", hourAgo, 7));
+    await scan();
+    await put(
+      ".codex/archived_sessions/big.jsonl",
+      codexFile("same", hourAgo, 40, "x".repeat(500)),
+    );
+    expect(total(await scan())).toBe(40);
+  });
 });

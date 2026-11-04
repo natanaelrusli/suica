@@ -1,4 +1,4 @@
-import { mkdir, readdir, readFile, rename, stat, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { zstdDecompressSync } from "node:zlib";
 import { addTo, type Bucket } from "./bucket.ts";
@@ -49,11 +49,16 @@ async function loadCache(path: string): Promise<Cache> {
   return { version: 1, pricesAsOf: PRICES_AS_OF, files: {} };
 }
 
+/** Best effort: an unwritable cache must not lose the result, so a failure is swallowed. */
 async function saveCache(path: string, cache: Cache): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
   const tmp = `${path}.${process.pid}.tmp`;
-  await writeFile(tmp, JSON.stringify(cache));
-  await rename(tmp, path);
+  try {
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(tmp, JSON.stringify(cache));
+    await rename(tmp, path);
+  } catch {
+    await rm(tmp, { force: true }).catch(() => undefined);
+  }
 }
 
 /** Paths under `root` ending in one of `exts`; a missing root is empty. */
@@ -100,7 +105,8 @@ export async function scanAgentUsage(deps: ScanDeps): Promise<Bucket[]> {
     }
     if (st.mtimeMs < now - WINDOW_MS) continue;
     const hit = cache.files[p];
-    if (hit && hit.size === st.size && hit.mtimeMs === st.mtimeMs) {
+    // a malformed entry (no buckets array) counts as a miss and is parsed again
+    if (hit && hit.size === st.size && hit.mtimeMs === st.mtimeMs && Array.isArray(hit.buckets)) {
       files[p] = hit;
       continue;
     }
