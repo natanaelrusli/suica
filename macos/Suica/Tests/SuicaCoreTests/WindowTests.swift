@@ -8,15 +8,18 @@ actor FakeDashboardClient: DashboardClient {
     private var statsResults: [Result<StatsDocument, AgentError>]
     private var configs: [Result<ConfigDocument, AgentError>]
     private var usageResults: [Result<UsageDocument, AgentError>]
+    private var agentUsageResults: [Result<AgentUsageDocument, AgentError>] = [.success(makeAgentUsage())]
     private var saveResult: Result<SaveResult, AgentError> = .success(
         SaveResult(status: "saved", issues: [], sha256: "new"))
     private var restartResult: Result<ActionResult, AgentError> = .success(ActionResult(code: "restarted"))
     private var restartGate: Gate?
     private var saveGate: Gate?
     private var firstStatusGate: Gate?
+    private var agentUsageGate: Gate?
     private(set) var statusCalls = 0
     private(set) var statsCalls = 0
     private(set) var usageCalls = 0
+    private(set) var agentUsageCalls = 0
     private(set) var configCalls = 0
     private(set) var restartCalls = 0
     private(set) var saveCalls: [(base: String?, edits: [ConfigEditRequest])] = []
@@ -36,6 +39,7 @@ actor FakeDashboardClient: DashboardClient {
     func setStatuses(_ next: [Result<StatusDocument, AgentError>]) { statuses = next }
     func setStats(_ next: [Result<StatsDocument, AgentError>]) { statsResults = next }
     func setUsage(_ next: [Result<UsageDocument, AgentError>]) { usageResults = next }
+    func setAgentUsage(_ next: [Result<AgentUsageDocument, AgentError>]) { agentUsageResults = next }
     func setConfigs(_ next: [Result<ConfigDocument, AgentError>]) { configs = next }
     func setSave(_ result: Result<SaveResult, AgentError>, gate: Gate? = nil) {
         saveResult = result
@@ -46,6 +50,7 @@ actor FakeDashboardClient: DashboardClient {
         restartGate = gate
     }
     /// Holds the first `status()` call until the gate opens.
+    func holdAgentUsage(_ gate: Gate) { agentUsageGate = gate }
     func holdFirstStatus(_ gate: Gate) { firstStatusGate = gate }
 
     func status() async throws(AgentError) -> StatusDocument {
@@ -66,6 +71,15 @@ actor FakeDashboardClient: DashboardClient {
         usageCalls += 1
         let result =
             usageResults.count > 1 ? usageResults.removeFirst() : (usageResults.first ?? .failure(.launchFailed))
+        return try result.get()
+    }
+
+    func agentUsage() async throws(AgentError) -> AgentUsageDocument {
+        agentUsageCalls += 1
+        if let gate = agentUsageGate { await gate.wait() }
+        let result =
+            agentUsageResults.count > 1
+            ? agentUsageResults.removeFirst() : (agentUsageResults.first ?? .failure(.launchFailed))
         return try result.get()
     }
 
@@ -108,6 +122,46 @@ func makeUsage(input: Int = 0) -> UsageDocument {
     let totals = TokenTotals(runs: 0, inputTokens: input, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0)
     return UsageDocument(
         version: 1, generatedAt: 0, last24h: totals, last7d: totals, last30d: totals, byPurpose: [], days: [])
+}
+
+func makeAgentUsage(tokens: Double = 0) -> AgentUsageDocument {
+    let totals = AgentUsageDocument.CostTotals(tokens: tokens, costUsd: 0)
+    return AgentUsageDocument(
+        version: 1, generatedAt: 0, pricesAsOf: "2026-11-04", last24h: totals, last7d: totals, last30d: totals,
+        avgPerDay7d: totals, avgPerDay30d: totals, days: [], byModel: [], unpriced: .init(tokens: 0, models: []),
+        rate: nil)
+}
+
+@MainActor @Test func loadAgentUsageKeepsTheLastGoodOneAndHasItsOwnError() async {
+    let client = FakeDashboardClient()
+    await client.setAgentUsage([.success(makeAgentUsage(tokens: 7))])
+    let model = WindowModel(client: client, menu: MenuModel(client: FakeClient(states: [.success(makeState())])))
+    await model.loadAgentUsage()
+    #expect(model.agentUsage?.last24h.tokens == 7 && model.agentUsageError == nil && !model.agentUsageLoading)
+    await client.setAgentUsage([.failure(.timedOut)])
+    await model.loadAgentUsage()
+    #expect(model.agentUsage?.last24h.tokens == 7)
+    #expect(model.agentUsageError == MenuModel.message(for: .timedOut))
+    #expect(model.errorText == nil)
+    await client.setAgentUsage([.success(makeAgentUsage(tokens: 9))])
+    await model.loadAgentUsage()
+    #expect(model.agentUsage?.last24h.tokens == 9 && model.agentUsageError == nil)
+    // Not part of the refresh loop's reads.
+    await model.refresh()
+    #expect(await client.agentUsageCalls == 3)
+}
+
+@MainActor @Test func aSecondLoadAgentUsageWhileOneIsInFlightDoesNotStartAnother() async {
+    let client = FakeDashboardClient()
+    let gate = Gate()
+    await client.holdAgentUsage(gate)
+    let model = WindowModel(client: client, menu: MenuModel(client: FakeClient(states: [.success(makeState())])))
+    let first = Task { await model.loadAgentUsage() }
+    while !model.agentUsageLoading { await Task.yield() }
+    await model.loadAgentUsage()
+    await gate.open()
+    await first.value
+    #expect(await client.agentUsageCalls == 1 && !model.agentUsageLoading)
 }
 
 @MainActor @Test func refreshKeepsTheLastGoodStatusOnFailure() async {

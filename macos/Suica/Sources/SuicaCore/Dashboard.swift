@@ -262,6 +262,62 @@ public struct UsageDocument: Codable, Equatable, Sendable {
     public let days: [DayUsage]
 }
 
+/// `suica usage agents --json`: Claude Code and Codex token use and its API-list-price cost.
+public struct AgentUsageDocument: Codable, Equatable, Sendable {
+    public struct CostTotals: Codable, Equatable, Sendable {
+        /// A double because the per-day averages are fractions.
+        public let tokens: Double
+        public let costUsd: Double
+    }
+
+    public struct AgentDayUsage: Codable, Equatable, Sendable {
+        /// Local calendar day, `YYYY-MM-DD`.
+        public let day: String
+        public let tokens: Double
+        public let costUsd: Double
+    }
+
+    public struct ModelUsage: Codable, Equatable, Sendable {
+        /// `claude` or `codex`; a string so a new agent does not break decoding.
+        public let agent: String
+        public let model: String
+        public let tokens: Double
+        /// `nil` when the model has no public price.
+        public let costUsd: Double?
+    }
+
+    public struct Unpriced: Codable, Equatable, Sendable {
+        public let tokens: Double
+        public let models: [String]
+    }
+
+    /// USD to IDR.
+    public struct ExchangeRate: Codable, Equatable, Sendable {
+        public let currency: String
+        public let perUsd: Double
+        public let date: String
+        /// The last fetch failed, so this is the saved rate.
+        public let stale: Bool
+    }
+
+    public let version: Int
+    public let generatedAt: Int
+    /// Day the price table was read from the official pages, `YYYY-MM-DD`.
+    public let pricesAsOf: String
+    public let last24h: CostTotals
+    public let last7d: CostTotals
+    public let last30d: CostTotals
+    public let avgPerDay7d: CostTotals
+    public let avgPerDay30d: CostTotals
+    /// The last 30 local days, oldest first.
+    public let days: [AgentDayUsage]
+    /// Over the last 30 days: priced models by cost, then unpriced ones.
+    public let byModel: [ModelUsage]
+    public let unpriced: Unpriced
+    /// `nil` when no rate was ever fetched.
+    public let rate: ExchangeRate?
+}
+
 // MARK: - Config
 
 public enum FieldType: String, Codable, Equatable, Sendable {
@@ -405,6 +461,8 @@ public protocol DashboardClient: Sendable {
     func status() async throws(AgentError) -> StatusDocument
     func stats() async throws(AgentError) -> StatsDocument
     func usage() async throws(AgentError) -> UsageDocument
+    /// Scans the agents' logs, so it can take a while; not part of the refresh.
+    func agentUsage() async throws(AgentError) -> AgentUsageDocument
     func config() async throws(AgentError) -> ConfigDocument
     func saveConfig(base: String?, edits: [ConfigEditRequest]) async throws(AgentError) -> SaveResult
     func restartAgent() async throws(AgentError) -> ActionResult

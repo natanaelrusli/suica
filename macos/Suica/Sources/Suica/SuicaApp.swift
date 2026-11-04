@@ -17,6 +17,7 @@ extension UnconfiguredClient: DashboardClient {
     func status() async throws(AgentError) -> StatusDocument { throw AgentError.launchFailed }
     func stats() async throws(AgentError) -> StatsDocument { throw AgentError.launchFailed }
     func usage() async throws(AgentError) -> UsageDocument { throw AgentError.launchFailed }
+    func agentUsage() async throws(AgentError) -> AgentUsageDocument { throw AgentError.launchFailed }
     func config() async throws(AgentError) -> ConfigDocument { throw AgentError.launchFailed }
     func saveConfig(base: String?, edits: [ConfigEditRequest]) async throws(AgentError) -> SaveResult {
         throw AgentError.launchFailed

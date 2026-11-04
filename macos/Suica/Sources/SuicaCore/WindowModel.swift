@@ -13,6 +13,10 @@ public final class WindowModel {
     public private(set) var status: StatusDocument?
     public private(set) var stats: StatsDocument?
     public private(set) var usage: UsageDocument?
+    /// The Agent Usage page's own scan: it has its own error so a slow or failed scan never puts a banner on other pages.
+    public private(set) var agentUsage: AgentUsageDocument?
+    public private(set) var agentUsageError: String?
+    public private(set) var agentUsageLoading = false
     public private(set) var errorText: String?
     public private(set) var banner: String?
     public private(set) var restarting = false
@@ -76,6 +80,19 @@ public final class WindowModel {
         }
         guard mine == latestRefresh else { return }
         errorText = failure
+    }
+
+    /// Scans the agents' logs on demand (it is not in the refresh loop); a failure keeps the last good document.
+    public func loadAgentUsage() async {
+        guard !agentUsageLoading else { return }
+        agentUsageLoading = true
+        defer { agentUsageLoading = false }
+        do {
+            agentUsage = try await client.agentUsage()
+            agentUsageError = nil
+        } catch {
+            agentUsageError = MenuModel.message(for: error)
+        }
     }
 
     /// Reads the status alone, for the menu bar panel's last poll; a failure keeps the last good one.
