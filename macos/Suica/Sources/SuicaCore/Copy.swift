@@ -983,6 +983,25 @@ public enum Copy {
         default: DisplayText.clean(raw, max: 40)
         }
     }
+    public static let usageOverall = "Overall"
+    public static let usageReviews = "MR reviews"
+    public static let usageCurrency = "Currency"
+    public static let agentUsageLoading = "Reading coding agent logs… The first run can take up to a minute."
+    public static let avgPerDay7d = "Average per day, 7 days"
+    public static let avgPerDay30d = "Average per day, 30 days"
+    public static let costChartTitle = "Daily cost, last 30 days"
+    public static let chartCost = "Cost"
+    public static let byModel = "By model, last 30 days"
+    public static let noModelUsage = "No coding agent usage in the last 30 days."
+    public static let unpricedModel = "Unpriced"
+    public static func rateStale(_ date: String) -> String { "Rate from \(date) (could not refresh)" }
+    public static let noRate = "IDR unavailable: no exchange rate fetched yet"
+    public static func unpricedTokens(_ tokens: Double, models: [String]) -> String {
+        "\(Copy.tokens(Int(tokens.rounded()))) tokens from unpriced models: \(models.map { DisplayText.clean($0, max: 60) }.joined(separator: ", "))"
+    }
+    public static func pricesFootnote(_ date: String) -> String {
+        "API list prices as of \(date). Cost is what this usage would cost on the API, not what you pay."
+    }
     /// 1234 → "1,234"; 12_345 → "12.3K"; 1_234_567 → "1.2M".
     public static func tokens(_ count: Int) -> String {
         count < 10_000

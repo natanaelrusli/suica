@@ -250,6 +250,8 @@ private func lastLine(of data: Data) -> Data? {
 
 public struct CLIAgentClient: AgentClient {
     private static let shortTimeout: TimeInterval = 20
+    /// The first scan of a large `~/.claude` or `~/.codex` is slow.
+    private static let agentUsageTimeout: TimeInterval = 120
     private static let restartTimeout: TimeInterval = 30
     // GitLab reads wait for glab, which the CLI stops after gitlab.timeoutSeconds (60 s by default).
     private static let gitlabTimeout: TimeInterval = 90
@@ -368,6 +370,10 @@ extension CLIAgentClient: DashboardClient {
 
     public func usage() async throws(AgentError) -> UsageDocument {
         try await document(UsageDocument.self, ["usage"])
+    }
+
+    public func agentUsage() async throws(AgentError) -> AgentUsageDocument {
+        try await document(AgentUsageDocument.self, ["usage", "agents", "--json"], timeout: Self.agentUsageTimeout)
     }
 
     public func config() async throws(AgentError) -> ConfigDocument {

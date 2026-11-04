@@ -117,6 +117,26 @@ private func data(_ text: String) -> Data { Data(text.utf8) }
     #expect(usage.days.first?.cacheCreationTokens == 300 && usage.days.last?.runs == 2)
 }
 
+@Test func agentUsageMatchesTheGoldenFile() throws {
+    let raw = try contract("agent-usage.v1.json")
+    let usage = try decodeDocument(AgentUsageDocument.self, from: raw)
+    #expect(usage.version == 1 && usage.generatedAt == 1_792_152_000_000 && usage.pricesAsOf == "2026-11-04")
+    #expect(usage.last24h == .init(tokens: 4_015_000, costUsd: 8.725))
+    #expect(usage.avgPerDay7d.tokens > 619_285 && usage.avgPerDay7d.tokens < 619_286)
+    #expect(usage.days.count == 30 && usage.days.first?.day == "2026-09-17")
+    #expect(usage.days.first { $0.day == "2026-10-06" }?.costUsd == 5)
+    #expect(usage.byModel.first == .init(agent: "claude", model: "claude-opus-4-8", tokens: 4_420_000, costUsd: 15.4))
+    #expect(usage.byModel.last == .init(agent: "codex", model: "codex-auto-review", tokens: 505_000, costUsd: nil))
+    #expect(usage.unpriced == .init(tokens: 505_000, models: ["codex-auto-review"]))
+    #expect(usage.rate == .init(currency: "IDR", perUsd: 16000, date: "2026-10-15", stale: false))
+
+    // No rate was ever fetched.
+    var object = try #require(try JSONSerialization.jsonObject(with: raw) as? [String: Any])
+    object["rate"] = NSNull()
+    let noRate = try decodeDocument(AgentUsageDocument.self, from: JSONSerialization.data(withJSONObject: object))
+    #expect(noRate.rate == nil && noRate.byModel == usage.byModel)
+}
+
 @Test func configMatchesTheGoldenFile() throws {
     let config = try decodeDocument(ConfigDocument.self, from: contract("config.v1.json"))
     #expect(config.path == "/tmp/config.yaml" && config.exists && config.sha256 == "0")

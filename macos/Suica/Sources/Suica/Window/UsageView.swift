@@ -15,10 +15,13 @@ private struct TokenPoint: Identifiable {
     var id: String { "\(day)|\(kind)" }
 }
 
+enum UsageTab: String { case overall, reviews }
+
 /// Language model tokens the agent used, by period, purpose and day.
 struct UsageView: View {
     let window: WindowModel
     @State private var wide = false
+    @AppStorage("usage.tab") private var tab = UsageTab.overall
 
     private let kinds = [
         TokenKind(name: Copy.inputTokens, color: .blue) { $0.inputTokens },
@@ -28,6 +31,24 @@ struct UsageView: View {
     ]
 
     var body: some View {
+        VStack(spacing: 0) {
+            Picker(Copy.tokenUsage, selection: $tab) {
+                Text(Copy.usageOverall).tag(UsageTab.overall)
+                Text(Copy.usageReviews).tag(UsageTab.reviews)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
+            .padding([.horizontal, .top], 20)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            switch tab {
+            case .overall: AgentUsageView(window: window)
+            case .reviews: reviews
+            }
+        }
+    }
+
+    private var reviews: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 if let text = window.errorText { NoticeBox(text: text, tint: .red) }
@@ -165,7 +186,7 @@ struct UsageView: View {
     }()
 
     /// `YYYY-MM-DD` as a short local label ("Oct 16"); anything else is shown cleaned.
-    private static func shortLabel(_ day: String) -> String {
+    static func shortLabel(_ day: String) -> String {
         guard let date = dayParser.date(from: day) else { return DisplayText.clean(day, max: 12) }
         return date.formatted(.dateTime.month(.abbreviated).day())
     }
