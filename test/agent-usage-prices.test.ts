@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { costUsd, PRICES, priceOf, type ModelPrice, type TokenCounts } from "../src/agent-usage/prices.ts";
+import {
+  costUsd,
+  PRICES,
+  priceOf,
+  type ModelPrice,
+  type TokenCounts,
+} from "../src/agent-usage/prices.ts";
 
 const none: TokenCounts = { input: 0, output: 0, cacheRead: 0, cacheWrite5m: 0, cacheWrite1h: 0 };
 const M = 1e6;
@@ -13,7 +19,10 @@ const base: ModelPrice = {
 };
 const withLong: ModelPrice = {
   ...base,
-  long: { above: 100, price: { input: 10, output: 20, cacheRead: 30, cacheWrite5m: 40, cacheWrite1h: 50 } },
+  long: {
+    above: 100,
+    price: { input: 10, output: 20, cacheRead: 30, cacheWrite5m: 40, cacheWrite1h: 50 },
+  },
 };
 
 describe("priceOf", () => {
@@ -42,7 +51,9 @@ describe("costUsd", () => {
     expect(costUsd(base, { ...none, cacheWrite1h: M }, false)).toBe(5);
   });
   it("sums all counts", () => {
-    expect(costUsd(base, { input: M, output: M, cacheRead: M, cacheWrite5m: M, cacheWrite1h: M }, false)).toBe(15);
+    expect(
+      costUsd(base, { input: M, output: M, cacheRead: M, cacheWrite5m: M, cacheWrite1h: M }, false),
+    ).toBe(15);
   });
   it("uses the long rates when long and the price has them", () => {
     expect(costUsd(withLong, { ...none, input: M }, true)).toBe(10);

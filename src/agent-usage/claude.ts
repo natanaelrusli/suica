@@ -39,7 +39,9 @@ export function readClaudeLines(lines: Iterable<string>): Bucket[] {
     const input = u.input_tokens ?? 0;
     const cacheRead = u.cache_read_input_tokens ?? 0;
     const split = u.cache_creation;
-    const cacheWrite5m = split ? (split.ephemeral_5m_input_tokens ?? 0) : (u.cache_creation_input_tokens ?? 0);
+    const cacheWrite5m = split
+      ? (split.ephemeral_5m_input_tokens ?? 0)
+      : (u.cache_creation_input_tokens ?? 0);
     const cacheWrite1h = split?.ephemeral_1h_input_tokens ?? 0;
     const context = input + cacheRead + cacheWrite5m + cacheWrite1h;
     addTo(buckets, {

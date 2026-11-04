@@ -2,7 +2,10 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { readClaudeLines } from "../src/agent-usage/claude.ts";
 
-const lines = readFileSync(new URL("./fixtures/agent-usage/claude.jsonl", import.meta.url), "utf8").split("\n");
+const lines = readFileSync(
+  new URL("./fixtures/agent-usage/claude.jsonl", import.meta.url),
+  "utf8",
+).split("\n");
 const hour = (iso: string) => Math.floor(Date.parse(iso) / 3_600_000) * 3_600_000;
 const find = (model: string) => readClaudeLines(lines).filter((b) => b.model === model);
 
@@ -11,7 +14,13 @@ describe("readClaudeLines", () => {
     const sonnet = find("claude-sonnet-5-5");
     const h3 = sonnet.find((b) => b.hour === hour("2026-11-04T03:00:00Z"));
     // reply A (3 lines) + reply B, merged in the same hour
-    expect(h3).toMatchObject({ agent: "claude", input: 12, output: 277, cacheRead: 25743, long: false });
+    expect(h3).toMatchObject({
+      agent: "claude",
+      input: 12,
+      output: 277,
+      cacheRead: 25743,
+      long: false,
+    });
   });
 
   it("splits cache writes by ttl, or puts an unsplit total in 5m", () => {
