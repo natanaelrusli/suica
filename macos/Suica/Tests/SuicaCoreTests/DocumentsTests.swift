@@ -57,3 +57,49 @@ import Testing
         #expect(MarkdownFiles.find(in: ["~/a", "/nonexistent-suica"], home: root.path).files.count == 1)
     }
 }
+
+@Suite struct FrontMatterTests {
+    private func entry(_ key: String, _ value: String) -> FrontMatterEntry { FrontMatterEntry(key: key, value: value) }
+
+    @Test func splitReadsKeysListsAndQuotes() {
+        let text = "---\nname: Plan\ntags: [a, b]\nowner: \"Nata\"\nurl: http://x\nlist:\n  - x\n  - y\n---\n# Title\n"
+        let result = FrontMatter.split(text)
+        #expect(
+            result.entries == [
+                entry("name", "Plan"), entry("tags", "a, b"), entry("owner", "Nata"),
+                entry("url", "http://x"), entry("list", "x, y"),
+            ])
+        #expect(result.body == "# Title\n")
+    }
+
+    @Test func splitHandlesCRLFBOMAndAnEmptyBody() {
+        let crlf = FrontMatter.split("\u{FEFF}---\r\na: b\r\n---\r\ntext")
+        #expect(crlf.entries == [entry("a", "b")])
+        #expect(crlf.body == "text")
+        let empty = FrontMatter.split("---\na: b\n---")
+        #expect(empty.entries == [entry("a", "b")])
+        #expect(empty.body == "")
+    }
+
+    @Test func anUnterminatedBlockIsNotFrontMatter() {
+        let text = "---\na: b\n\ntext"
+        let result = FrontMatter.split(text)
+        #expect(result.entries.isEmpty)
+        #expect(result.body == text)
+    }
+
+    @Test func aRuleAtTheTopWithProseBetweenIsNotFrontMatter() {
+        let text = "---\n\nSome prose here.\n\n---\nmore"
+        let result = FrontMatter.split(text)
+        #expect(result.entries.isEmpty)
+        #expect(result.body == text)
+    }
+
+    @Test func noBlockMeansNoEntries() {
+        for text in ["# Title\n---\nx", ""] {
+            let result = FrontMatter.split(text)
+            #expect(result.entries.isEmpty)
+            #expect(result.body == text)
+        }
+    }
+}

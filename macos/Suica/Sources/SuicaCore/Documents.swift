@@ -62,3 +62,66 @@ public enum MarkdownFiles {
         return (files, false)
     }
 }
+
+public struct FrontMatterEntry: Equatable, Sendable {
+    public let key: String
+    public let value: String
+}
+
+public enum FrontMatter {
+    /// Entries of a leading `---` block and the text after it; the whole text when there is none.
+    public static func split(_ text: String) -> (entries: [FrontMatterEntry], body: String) {
+        var cursor = text.first == "\u{FEFF}" ? text.index(after: text.startIndex) : text.startIndex
+        var lines: [Substring] = []
+        var body: Substring?
+        while cursor < text.endIndex {
+            let end = text[cursor...].firstIndex(where: \.isNewline) ?? text.endIndex
+            let line = text[cursor..<end]
+            cursor = end == text.endIndex ? end : text.index(after: end)
+            if lines.isEmpty && line != "---" { break }
+            if !lines.isEmpty && (line == "---" || line == "...") {
+                body = text[cursor...]
+                break
+            }
+            lines.append(line)
+        }
+        guard let body, lines.dropFirst().allSatisfy(isFrontMatterLine) else { return ([], text) }
+
+        var entries: [FrontMatterEntry] = []
+        var open = false  // the last key had no value, so `- item` lines belong to it
+        for line in lines.dropFirst() {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if open, trimmed.hasPrefix("- "), let last = entries.popLast() {
+                let item = clean(String(trimmed.dropFirst(2)))
+                entries.append(FrontMatterEntry(key: last.key, value: last.value.isEmpty ? item : last.value + ", " + item))
+            } else if line.first?.isWhitespace == false, let colon = line.firstIndex(of: ":"), isKey(line) {
+                let value = clean(String(line[line.index(after: colon)...]))
+                entries.append(FrontMatterEntry(key: String(line[..<colon]), value: value))
+                open = value.isEmpty
+            }
+        }
+        return (entries, String(body))
+    }
+
+    private static func isKey(_ line: Substring) -> Bool {
+        line.range(of: "^[A-Za-z0-9_-]+:", options: .regularExpression) != nil
+    }
+
+    private static func isFrontMatterLine(_ line: Substring) -> Bool {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        return trimmed.isEmpty || trimmed.hasPrefix("#") || line.first?.isWhitespace == true
+            || trimmed.hasPrefix("- ") || isKey(line)
+    }
+
+    /// Drops `[ ]` around a flow list and matching quotes around a value.
+    private static func clean(_ raw: String) -> String {
+        var value = raw.trimmingCharacters(in: .whitespaces)
+        if value.hasPrefix("["), value.hasSuffix("]") {
+            value = String(value.dropFirst().dropLast()).trimmingCharacters(in: .whitespaces)
+        }
+        if value.count >= 2, let first = value.first, "\"'".contains(first), value.last == first {
+            value = String(value.dropFirst().dropLast())
+        }
+        return value
+    }
+}
