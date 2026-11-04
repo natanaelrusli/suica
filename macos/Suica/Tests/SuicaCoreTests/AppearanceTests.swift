@@ -3,15 +3,6 @@ import Testing
 
 @testable import SuicaCore
 
-/// Preferences in memory, so tests never touch the app's real settings or leave files behind.
-private final class MemoryStore: PreferenceStore {
-    var values: [String: Any] = [:]
-    func string(forKey key: String) -> String? { values[key] as? String }
-    func object(forKey key: String) -> Any? { values[key] }
-    func set(_ value: Any?, forKey key: String) { values[key] = value }
-    func removeObject(forKey key: String) { values[key] = nil }
-}
-
 @MainActor private func withFreshStore(_ body: (MemoryStore) -> Void) { body(MemoryStore()) }
 
 @MainActor @Test func appearanceStartsFromTheDefaults() {

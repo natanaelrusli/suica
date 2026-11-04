@@ -94,7 +94,7 @@ private let lessonsPlan = """
 private let marker = "# T\n> **For agentic workers:** x\n"
 
 /// A temp folder tree: `files` maps a relative path to its text.
-private func tree(_ files: [String: String]) throws -> URL {
+func tree(_ files: [String: String]) throws -> URL {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).standardizedFileURL
     for (name, text) in files {
         let url = root.appendingPathComponent(name)
@@ -149,7 +149,7 @@ private func tree(_ files: [String: String]) throws -> URL {
     }
 }
 
-private final class MemoryStore: PreferenceStore {
+final class MemoryStore: PreferenceStore {
     var values: [String: Any] = [:]
     func string(forKey key: String) -> String? { values[key] as? String }
     func object(forKey key: String) -> Any? { values[key] }
