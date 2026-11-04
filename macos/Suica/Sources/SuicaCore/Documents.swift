@@ -241,3 +241,39 @@ public enum DocumentLinks {
         }
     }
 }
+
+public struct DocumentNode: Identifiable, Equatable, Sendable {
+    /// A file's path; a folder's `folder + "/" + relative dir` (a root's is its folder path).
+    public let id: String
+    public let name: String
+    public let file: DocumentFile?
+    /// nil for a file, which is what `List(_:children:)` needs.
+    public let children: [DocumentNode]?
+}
+
+public enum DocumentTree {
+    /// One root per Plan folder (first-seen order), then folders and files by `relativePath`; siblings are folders first, each in natural name order.
+    public static func build(_ files: [DocumentFile]) -> [DocumentNode] {
+        var folders: [String] = []
+        for file in files where !folders.contains(file.folder) { folders.append(file.folder) }
+        return folders.map { folder in
+            let below = files.filter { $0.folder == folder }.map { ($0, $0.relativePath.split(separator: "/").map(String.init)) }
+            return DocumentNode(
+                id: folder, name: URL(fileURLWithPath: folder).lastPathComponent, file: nil,
+                children: nodes(below, in: folder))
+        }
+    }
+
+    private static func nodes(_ items: [(file: DocumentFile, parts: [String])], in dir: String) -> [DocumentNode] {
+        let leaves = items.filter { $0.parts.count == 1 }.map {
+            DocumentNode(id: $0.file.path, name: $0.file.name, file: $0.file, children: nil)
+        }
+        let dirs = Dictionary(grouping: items.filter { $0.parts.count > 1 }, by: { $0.parts[0] }).map { name, group in
+            DocumentNode(
+                id: dir + "/" + name, name: name, file: nil,
+                children: nodes(group.map { ($0.file, Array($0.parts.dropFirst())) }, in: dir + "/" + name))
+        }
+        let byName = { (a: DocumentNode, b: DocumentNode) in a.name.localizedStandardCompare(b.name) == .orderedAscending }
+        return dirs.sorted(by: byName) + leaves.sorted(by: byName)
+    }
+}

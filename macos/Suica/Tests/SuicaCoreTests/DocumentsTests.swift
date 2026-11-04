@@ -217,3 +217,33 @@ import Testing
         }
     }
 }
+
+@Suite struct DocumentTreeTests {
+    private func doc(_ path: String, folder: String = "/r") -> DocumentFile {
+        DocumentFile(path: path, folder: folder, relativePath: String(path.dropFirst(folder.count + 1)))
+    }
+
+    @Test func buildNestsByFolderWithFoldersFirstAndNaturalOrder() throws {
+        let tree = DocumentTree.build([doc("/r/b.md"), doc("/r/a/10.md"), doc("/r/a/2.md"), doc("/r/a/z/q.md")])
+        let root = try #require(tree.first)
+        #expect(tree.count == 1)
+        #expect(root.name == "r" && root.id == "/r" && root.file == nil)
+        #expect(root.children?.map(\.name) == ["a", "b"])
+        let a = try #require(root.children?.first)
+        #expect(a.id == "/r/a")
+        #expect(a.children?.map(\.name) == ["z", "2", "10"])
+        #expect(a.children?.last?.id == "/r/a/10.md")
+        #expect(a.children?.last?.children == nil)
+        #expect(a.children?.first?.id == "/r/a/z")
+    }
+
+    @Test func buildMakesOneRootPerPlanFolderEvenWhenNamesCollide() {
+        let tree = DocumentTree.build([doc("/x/docs/a.md", folder: "/x/docs"), doc("/y/docs/b.md", folder: "/y/docs")])
+        #expect(tree.map(\.name) == ["docs", "docs"])
+        #expect(Set(tree.map(\.id)).count == 2)
+    }
+
+    @Test func buildOfNothingIsEmpty() {
+        #expect(DocumentTree.build([]).isEmpty)
+    }
+}
