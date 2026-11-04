@@ -986,7 +986,7 @@ public enum Copy {
     public static let usageOverall = "Overall"
     public static let usageReviews = "MR reviews"
     public static let usageCurrency = "Currency"
-    public static let agentUsageLoading = "Reading coding agent logs… The first run can take a few seconds."
+    public static let agentUsageLoading = "Reading coding agent logs… The first run can take up to a minute."
     public static let avgPerDay7d = "Average per day, 7 days"
     public static let avgPerDay30d = "Average per day, 30 days"
     public static let costChartTitle = "Daily cost, last 30 days"

@@ -22,7 +22,7 @@ export interface ModelPrice {
   };
 }
 
-/** Day the prices below were read from the official pages. */
+/** Day the prices below were read from the official pages. The agent-usage cache is rebuilt only when this changes, so bump it whenever any price or `long.above` changes. */
 export const PRICES_AS_OF = "2026-11-04";
 
 /** Default long-context threshold; a price's own `long.above` is the one that applies. */
