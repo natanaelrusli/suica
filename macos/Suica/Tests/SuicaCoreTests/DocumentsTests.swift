@@ -102,4 +102,25 @@ import Testing
             #expect(result.body == text)
         }
     }
+
+    @Test func quotedListItemsAreUnquotedOneByOne() {
+        let result = FrontMatter.split("---\ntags: [\"a\", 'b']\n---\n")
+        #expect(result.entries == [entry("tags", "a, b")])
+    }
+
+    @Test func aValueWithQuotesInsideKeepsThemAsWritten() {
+        let result = FrontMatter.split("---\ntitle: 'x' and 'y'\n---\n")
+        #expect(result.entries == [entry("title", "'x' and 'y'")])
+    }
+
+    @Test func threeDotsCloseTheBlock() {
+        let result = FrontMatter.split("---\na: b\n...\ntext")
+        #expect(result.entries == [entry("a", "b")])
+        #expect(result.body == "text")
+    }
+
+    @Test func aKeyWithoutValueOrItemsHasAnEmptyValue() {
+        let result = FrontMatter.split("---\nempty:\nnext: 1\n---\n")
+        #expect(result.entries == [entry("empty", ""), entry("next", "1")])
+    }
 }

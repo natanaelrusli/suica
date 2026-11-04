@@ -113,15 +113,19 @@ public enum FrontMatter {
             || trimmed.hasPrefix("- ") || isKey(line)
     }
 
-    /// Drops `[ ]` around a flow list and matching quotes around a value.
+    /// Drops `[ ]` around a flow list (unquoting each item) and quotes around a scalar.
     private static func clean(_ raw: String) -> String {
-        var value = raw.trimmingCharacters(in: .whitespaces)
-        if value.hasPrefix("["), value.hasSuffix("]") {
-            value = String(value.dropFirst().dropLast()).trimmingCharacters(in: .whitespaces)
-        }
-        if value.count >= 2, let first = value.first, "\"'".contains(first), value.last == first {
-            value = String(value.dropFirst().dropLast())
-        }
-        return value
+        let value = raw.trimmingCharacters(in: .whitespaces)
+        guard value.hasPrefix("["), value.hasSuffix("]") else { return unquote(value) }
+        return value.dropFirst().dropLast().split(separator: ",").map { unquote(String($0)) }.joined(separator: ", ")
+    }
+
+    /// Drops one pair of matching quotes, unless the same quote appears inside (`'x' and 'y'`).
+    private static func unquote(_ raw: String) -> String {
+        let value = raw.trimmingCharacters(in: .whitespaces)
+        guard value.count >= 2, let quote = value.first, "\"'".contains(quote), value.last == quote,
+            !value.dropFirst().dropLast().contains(quote)
+        else { return value }
+        return String(value.dropFirst().dropLast())
     }
 }
