@@ -138,25 +138,68 @@ public enum DocumentLinks {
     /// `[[T]]`, `[[T|alias]]`, `[[T#H]]` → `[alias or T as written](suica-doc:<T#H percent-encoded>)`.
     /// Code spans and fenced blocks are left as written, and so are `![[embeds]]`.
     public static func rewriteWikilinks(_ markdown: String) -> String {
-        var fenced = false
-        return markdown.split(separator: "\n", omittingEmptySubsequences: false).map { line in
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") {
-                fenced.toggle()
-                return String(line)
+        var fence: (character: Character, length: Int)?
+        return markdown.split(separator: "\n", omittingEmptySubsequences: false).map { raw in
+            let line = String(raw)
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let open = fence {
+                // A closing fence is the same character, at least as long, with nothing after it.
+                if trimmed.count >= open.length, trimmed.allSatisfy({ $0 == open.character }) { fence = nil }
+                return line
             }
-            guard !fenced else { return String(line) }
-            return line.split(separator: "`", omittingEmptySubsequences: false).enumerated().map { index, part in
-                guard index % 2 == 0 else { return String(part) }
-                return String(
-                    part.replacing(wikilinkPattern) { match in
-                        if match.1 != nil { return String(match.0) }
-                        let target = String(match.2)
-                        let encoded = target.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? target
-                        return "[\(match.3.map(String.init) ?? target)](\(scheme):\(encoded))"
-                    })
-            }.joined(separator: "`")
+            if let first = trimmed.first, first == "`" || first == "~" {
+                let length = trimmed.prefix { $0 == first }.count
+                // A backtick fence's info string cannot hold a backtick (that makes it a code span).
+                if length >= 3, first == "~" || !trimmed.dropFirst(length).contains("`") {
+                    fence = (first, length)
+                    return line
+                }
+            }
+            return rewriteOutsideCodeSpans(line)
         }.joined(separator: "\n")
+    }
+
+    /// A run of N backticks opens a span that ends at the next run of exactly N; without one it is plain text.
+    private static func rewriteOutsideCodeSpans(_ line: String) -> String {
+        var result = ""
+        var text = ""
+        var index = line.startIndex
+        while index < line.endIndex {
+            guard line[index] == "`" else {
+                text.append(line[index])
+                index = line.index(after: index)
+                continue
+            }
+            let runEnd = line[index...].firstIndex { $0 != "`" } ?? line.endIndex
+            if let spanEnd = endOfSpan(openedBy: line.distance(from: index, to: runEnd), in: line, after: runEnd) {
+                result += rewrite(text) + line[index..<spanEnd]
+                text = ""
+                index = spanEnd
+            } else {
+                text += line[index..<runEnd]
+                index = runEnd
+            }
+        }
+        return result + rewrite(text)
+    }
+
+    private static func endOfSpan(openedBy length: Int, in line: String, after start: String.Index) -> String.Index? {
+        var from = start
+        while let tick = line[from...].firstIndex(of: "`") {
+            let end = line[tick...].firstIndex { $0 != "`" } ?? line.endIndex
+            if line.distance(from: tick, to: end) == length { return end }
+            from = end
+        }
+        return nil
+    }
+
+    private static func rewrite(_ text: String) -> String {
+        text.replacing(wikilinkPattern) { match in
+            if match.1 != nil { return String(match.0) }
+            let target = String(match.2)
+            let encoded = target.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? target
+            return "[\(match.3.map(String.init) ?? target)](\(scheme):\(encoded))"
+        }
     }
 
     /// The decoded target of a `suica-doc:` URL (read from `absoluteString`: the URL is opaque and its `path` is empty); nil for other URLs.

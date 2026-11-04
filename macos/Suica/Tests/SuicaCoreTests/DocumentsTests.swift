@@ -144,6 +144,37 @@ import Testing
         #expect(DocumentLinks.rewriteWikilinks("[[]]") == "[[]]")
     }
 
+    @Test func aTildeFenceInsideABacktickBlockDoesNotCloseIt() {
+        #expect(
+            DocumentLinks.rewriteWikilinks("```\n~~~\n[[x]]\n```\n[[y]]") == "```\n~~~\n[[x]]\n```\n[y](suica-doc:y)")
+    }
+
+    @Test func aLongerFenceIsNotClosedByAShorterOne() {
+        #expect(
+            DocumentLinks.rewriteWikilinks("````\n```\n[[x]]\n```\n````\n[[y]]")
+                == "````\n```\n[[x]]\n```\n````\n[y](suica-doc:y)")
+    }
+
+    @Test func aFenceLineWithTextAfterTheBackticksIsNotAFence() {
+        #expect(DocumentLinks.rewriteWikilinks("```code``` [[x]]") == "```code``` [x](suica-doc:x)")
+    }
+
+    @Test func aDoubleBacktickSpanIsLeftAsWritten() {
+        #expect(DocumentLinks.rewriteWikilinks("``[[x]]`` and [[y]]") == "``[[x]]`` and [y](suica-doc:y)")
+        #expect(DocumentLinks.rewriteWikilinks("`` a ` [[x]] `` [[y]]") == "`` a ` [[x]] `` [y](suica-doc:y)")
+    }
+
+    @Test func anUnmatchedBacktickDoesNotStopLaterRewriting() {
+        #expect(DocumentLinks.rewriteWikilinks("it`s [[x]]") == "it`s [x](suica-doc:x)")
+        #expect(DocumentLinks.rewriteWikilinks("``a` [[x]]") == "``a` [x](suica-doc:x)")
+    }
+
+    @Test func onlyAnEmbedIsLeftAloneNextToOtherLinks() {
+        #expect(DocumentLinks.rewriteWikilinks("a![[x]]") == "a![[x]]")
+        #expect(DocumentLinks.rewriteWikilinks("[[a]]![[b]]") == "[a](suica-doc:a)![[b]]")
+        #expect(DocumentLinks.rewriteWikilinks("![[x]] [[y]]") == "![[x]] [y](suica-doc:y)")
+    }
+
     @Test func aTargetSurvivesFoundationsParser() throws {
         let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
         let rewritten = try AttributedString(markdown: DocumentLinks.rewriteWikilinks("[[Some Note (v2)]]"), options: options)
