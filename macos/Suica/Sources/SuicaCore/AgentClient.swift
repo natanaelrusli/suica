@@ -441,6 +441,11 @@ extension CLIAgentClient: DashboardClient {
     public func restartAgent() async throws(AgentError) -> ActionResult {
         try await action(["agent", "restart", "--json"], timeout: Self.restartTimeout)
     }
+
+    public func cleanUp() async throws(AgentError) -> CleanupResult {
+        // Compacting waits for the agent's writes, so it gets the restart's room.
+        try await document(CleanupResult.self, ["cleanup", "--json"], timeout: Self.restartTimeout)
+    }
 }
 
 // MARK: - Setup client

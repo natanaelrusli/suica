@@ -466,4 +466,19 @@ public protocol DashboardClient: Sendable {
     func config() async throws(AgentError) -> ConfigDocument
     func saveConfig(base: String?, edits: [ConfigEditRequest]) async throws(AgentError) -> SaveResult
     func restartAgent() async throws(AgentError) -> ActionResult
+    /// Deletes caches and leftovers and compacts the database (`suica cleanup --json`).
+    func cleanUp() async throws(AgentError) -> CleanupResult
+}
+
+/// What `suica cleanup --json` prints; see contracts/cleanup.v1.json.
+public struct CleanupResult: Codable, Equatable, Sendable {
+    public let version: Int
+    public let status: String
+    public let freedBytes: Int64
+
+    public init(version: Int = 1, status: String = "cleaned", freedBytes: Int64) {
+        self.version = version
+        self.status = status
+        self.freedBytes = freedBytes
+    }
 }

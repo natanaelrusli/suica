@@ -16,6 +16,7 @@ struct ConfigurationView: View {
     /// Bumped by Discard so fields that hold text the model never saw start over too.
     @State private var generation = 0
     @State private var query = ""
+    @State private var confirmingCleanup = false
     /// Overview cards per row, from the page's width.
     @State private var columns = 4
     /// The drawer's section while it is open.
@@ -122,6 +123,7 @@ struct ConfigurationView: View {
                 .onGeometryChange(for: Int.self) { proxy in
                     max(1, Int((proxy.size.width + gap) / (240 + gap)))
                 } action: { columns = min($0, 4) }
+                storage
             }
             .padding(metrics.gap + 4)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -130,6 +132,26 @@ struct ConfigurationView: View {
             .motion(value: window.banner)
             .motion(value: window.restarting)
         }
+    }
+
+    /// The cleanup row under the cards.
+    private var storage: some View {
+        HStack(alignment: .firstTextBaseline, spacing: metrics.gap) {
+            VStack(alignment: .leading, spacing: 4) {
+                Label(Copy.cleanupTitle, systemImage: "externaldrive").font(.headline)
+                Text(Copy.cleanupDetail).foregroundStyle(.secondary)
+            }
+            Spacer()
+            if window.cleaningUp { ProgressView().controlSize(.small) }
+            Button(Copy.cleanupButton) { confirmingCleanup = true }
+                .disabled(window.cleaningUp)
+                .confirmationDialog(Copy.cleanupConfirm, isPresented: $confirmingCleanup) {
+                    Button(Copy.cleanupAction, role: .destructive) { Task { await window.cleanUp() } }
+                } message: {
+                    Text(Copy.cleanupConfirmMessage)
+                }
+        }
+        .padding(.top, metrics.gap)
     }
 
     /// A card per category in the agent's order, then the pages Configuration also holds.

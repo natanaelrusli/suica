@@ -95,6 +95,12 @@ actor FakeDashboardClient: DashboardClient {
         return try saveResult.get()
     }
 
+    var cleanupResult: Result<CleanupResult, AgentError> = .success(CleanupResult(freedBytes: 2_000_000))
+
+    func cleanUp() async throws(AgentError) -> CleanupResult {
+        try cleanupResult.get()
+    }
+
     func restartAgent() async throws(AgentError) -> ActionResult {
         restartCalls += 1
         if let gate = restartGate { await gate.wait() }
