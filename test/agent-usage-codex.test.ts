@@ -32,6 +32,12 @@ describe("readCodexLines", () => {
     expect(read().sessionId).toBe("11111111-aaaa-7bbb-8ccc-000000000001");
   });
 
+  it("keeps the first session_meta id when a fork repeats its parent's", () => {
+    const meta = (id: string) =>
+      JSON.stringify({ timestamp: "2026-11-04T00:00:00Z", type: "session_meta", payload: { id } });
+    expect(readCodexLines([meta("child"), meta("parent")]).sessionId).toBe("child");
+  });
+
   it("counts the change in total usage; a repeat and a lower total add nothing", () => {
     const h1 = read().buckets.find((b) => b.hour === hour("2026-11-04T01:00:00Z"));
     // input 900 - cached 400; output 40 (reasoning is inside it, not added)

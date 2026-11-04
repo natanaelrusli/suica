@@ -50,7 +50,8 @@ export function readCodexLines(lines: Iterable<string>): {
     const p = d?.payload;
     if (!d || !p) continue;
     if (d.type === "session_meta") {
-      if (typeof p.id === "string") sessionId = p.id;
+      // a forked session repeats its parent's session_meta after its own; the first one is this file's
+      if (typeof p.id === "string") sessionId ??= p.id;
     } else if (d.type === "turn_context" || p.type === "thread_settings_applied") {
       // many rollouts have no turn_context, only thread_settings_applied
       const m = p.model ?? p.thread_settings?.model;
