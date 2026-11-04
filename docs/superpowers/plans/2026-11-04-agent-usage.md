@@ -16,7 +16,7 @@
 - Read only token counts, model and timestamp from logs. Never store or print message content.
 - Window: 30 days. Files with an mtime older than 30 days are skipped.
 - Cache files go next to the state database (`dirname(config.statePath ?? defaultStatePath())`): `agent-usage-cache.json` and `exchange-rate.json`. A corrupt or missing file is rebuilt, never fatal.
-- Rate URL constant: `https://api.frankfurter.app/latest?from=USD&to=IDR`. 5 s timeout (`AbortSignal.timeout`), no retry, refetch only when the saved rate is older than 24 h.
+- Rate URL constant: `https://api.frankfurter.dev/v1/latest?from=USD&to=IDR`. 5 s timeout (`AbortSignal.timeout`), no retry, refetch only when the saved rate is older than 24 h.
 - The CLI call from the app uses a 120 s timeout. The cache is saved every 300 parsed files.
 - Prices are copied from the official Anthropic and OpenAI pricing pages, never from memory. They are recorded with `PRICES_AS_OF`. A model with no public price is unpriced.
 - `suica usage` and `contracts/usage.v1.json` must not change.

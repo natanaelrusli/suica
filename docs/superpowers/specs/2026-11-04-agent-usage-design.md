@@ -53,7 +53,7 @@ A built-in table in `src/agent-usage/prices.ts` (my call) holds the USD price pe
 
 ## Exchange rate
 
-- The source is Frankfurter (`https://api.frankfurter.app/latest?from=USD&to=IDR`), which publishes ECB reference rates, needs no key and covers IDR (my call).
+- The source is Frankfurter (`https://api.frankfurter.dev/v1/latest?from=USD&to=IDR`), which publishes ECB reference rates, needs no key and covers IDR (my call).
 - Fetched by the CLI command at most once every 24 hours, with a 5-second timeout and no retry (the next page open tries again). The result `{ rate, date, fetchedAt }` is saved in `exchange-rate.json` next to the state database.
 - If the fetch fails, use the saved rate and mark it stale. With no saved rate, return no rate.
 - The URL is a constant; nothing from input goes into it.
