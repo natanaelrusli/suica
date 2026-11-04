@@ -129,3 +129,72 @@ public enum FrontMatter {
         return String(value.dropFirst().dropLast())
     }
 }
+
+private nonisolated(unsafe) let wikilinkPattern = /(!)?\[\[([^\[\]|]+?)(?:\|([^\[\]]+?))?\]\]/ // regex lookbehind is unsupported, so a leading `!` is captured
+
+public enum DocumentLinks {
+    public static let scheme = "suica-doc"
+
+    /// `[[T]]`, `[[T|alias]]`, `[[T#H]]` → `[alias or T as written](suica-doc:<T#H percent-encoded>)`.
+    /// Code spans and fenced blocks are left as written, and so are `![[embeds]]`.
+    public static func rewriteWikilinks(_ markdown: String) -> String {
+        var fenced = false
+        return markdown.split(separator: "\n", omittingEmptySubsequences: false).map { line in
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") {
+                fenced.toggle()
+                return String(line)
+            }
+            guard !fenced else { return String(line) }
+            return line.split(separator: "`", omittingEmptySubsequences: false).enumerated().map { index, part in
+                guard index % 2 == 0 else { return String(part) }
+                return String(
+                    part.replacing(wikilinkPattern) { match in
+                        if match.1 != nil { return String(match.0) }
+                        let target = String(match.2)
+                        let encoded = target.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? target
+                        return "[\(match.3.map(String.init) ?? target)](\(scheme):\(encoded))"
+                    })
+            }.joined(separator: "`")
+        }.joined(separator: "\n")
+    }
+
+    /// The decoded target of a `suica-doc:` URL (read from `absoluteString`: the URL is opaque and its `path` is empty); nil for other URLs.
+    public static func wikilinkTarget(_ url: URL) -> String? {
+        guard url.scheme == scheme else { return nil }
+        return String(url.absoluteString.dropFirst(scheme.count + 1)).removingPercentEncoding
+    }
+
+    /// An Obsidian-style target: name or path suffix, any case, with or without `.md` or `#heading`.
+    /// Ties go to the file's own folder, then the shortest relative path, then path order.
+    public static func resolveWikilink(_ target: String, from path: String, among files: [DocumentFile]) -> DocumentFile? {
+        var key = (target.split(separator: "#", omittingEmptySubsequences: false).first ?? "")
+            .trimmingCharacters(in: .whitespaces).lowercased()
+        if key.hasSuffix(".md") { key.removeLast(3) }
+        guard !key.isEmpty else { return nil }
+        let own = URL(fileURLWithPath: path).deletingLastPathComponent().path
+        func sortKey(_ file: DocumentFile) -> (Int, Int, String) {
+            (URL(fileURLWithPath: file.path).deletingLastPathComponent().path == own ? 0 : 1, file.relativePath.count, file.path)
+        }
+        return files.filter { file in
+            guard key.contains("/") else { return file.name.lowercased() == key }
+            let relative = file.relativePath.dropLast(3).lowercased()
+            return relative == key || relative.hasSuffix("/" + key)
+        }.min { sortKey($0) < sortKey($1) }
+    }
+
+    /// `target` is the decoded path of a scheme-less link (`url.path`, fragment already dropped).
+    /// Tried from the file's folder and then each parent up to its Plan folder.
+    public static func resolveRelative(_ target: String, from path: String, among files: [DocumentFile]) -> DocumentFile? {
+        guard target.hasSuffix(".md"),
+            let root = files.map(\.folder).filter({ path.hasPrefix($0 + "/") }).max(by: { $0.count < $1.count })
+        else { return nil }
+        var dir = URL(fileURLWithPath: path).deletingLastPathComponent().path
+        while true {
+            let found = URL(fileURLWithPath: dir + "/" + target).standardizedFileURL.path
+            if found.hasPrefix(root + "/"), let file = files.first(where: { $0.path == found }) { return file }
+            if dir == root || dir == "/" { return nil }
+            dir = URL(fileURLWithPath: dir).deletingLastPathComponent().path
+        }
+    }
+}

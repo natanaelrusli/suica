@@ -124,3 +124,65 @@ import Testing
         #expect(result.entries == [entry("empty", ""), entry("next", "1")])
     }
 }
+
+@Suite struct DocumentLinksTests {
+    private func doc(_ path: String, folder: String = "/r") -> DocumentFile {
+        DocumentFile(path: path, folder: folder, relativePath: String(path.dropFirst(folder.count + 1)))
+    }
+
+    @Test func rewriteTurnsWikilinksIntoLinks() {
+        #expect(
+            DocumentLinks.rewriteWikilinks("see [[Plan A]] and [[Plan A|the plan]] and [[Plan A#Goal]]")
+                == "see [Plan A](suica-doc:Plan%20A) and [the plan](suica-doc:Plan%20A) and [Plan A#Goal](suica-doc:Plan%20A%23Goal)")
+    }
+
+    @Test func rewriteLeavesCodeEmbedsAndEmptyLinksAlone() {
+        #expect(DocumentLinks.rewriteWikilinks("`[[x]]` and [[y]]") == "`[[x]]` and [y](suica-doc:y)")
+        #expect(DocumentLinks.rewriteWikilinks("```\n[[x]]\n```\n[[y]]") == "```\n[[x]]\n```\n[y](suica-doc:y)")
+        #expect(DocumentLinks.rewriteWikilinks("~~~\n[[x]]\n~~~") == "~~~\n[[x]]\n~~~")
+        #expect(DocumentLinks.rewriteWikilinks("![[x]]") == "![[x]]")
+        #expect(DocumentLinks.rewriteWikilinks("[[]]") == "[[]]")
+    }
+
+    @Test func aTargetSurvivesFoundationsParser() throws {
+        let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        let rewritten = try AttributedString(markdown: DocumentLinks.rewriteWikilinks("[[Some Note (v2)]]"), options: options)
+        let link = try #require(rewritten.runs.compactMap(\.link).first)
+        #expect(DocumentLinks.wikilinkTarget(link) == "Some Note (v2)")
+        #expect(DocumentLinks.wikilinkTarget(URL(string: "https://x")!) == nil)
+
+        let plain = try AttributedString(markdown: "[t](docs/x.md)", options: options)
+        let relative = try #require(plain.runs.compactMap(\.link).first)
+        #expect(relative.scheme == nil)
+        #expect(relative.path == "docs/x.md")
+    }
+
+    @Test func wikilinkResolvesByNameCaseHeadingExtensionAndPathSuffix() {
+        let files = [doc("/r/a/Plan.md"), doc("/r/b/Plan.md"), doc("/r/b/deep/Idea.md")]
+        for target in ["plan", "Plan#Goal", "Plan.md"] {
+            #expect(DocumentLinks.resolveWikilink(target, from: "/r/b/x.md", among: files)?.path == "/r/b/Plan.md")
+            #expect(DocumentLinks.resolveWikilink(target, from: "/r/c/x.md", among: files)?.path == "/r/a/Plan.md")
+        }
+        for target in ["deep/Idea", "b/deep/idea"] {
+            #expect(DocumentLinks.resolveWikilink(target, from: "/r/c/x.md", among: files)?.path == "/r/b/deep/Idea.md")
+        }
+        for target in ["Missing", "", "#H"] {
+            #expect(DocumentLinks.resolveWikilink(target, from: "/r/c/x.md", among: files) == nil)
+        }
+    }
+
+    @Test func relativeLinksTryTheFileFolderThenItsParentsInsideThePlanFolder() {
+        let files = [doc("/r/docs/specs/s.md"), doc("/r/README.md"), doc("/outside/o.md", folder: "/outside")]
+        for from in ["/r/docs/plans/p.md", "/r/docs/plans/not-listed.md"] {
+            for (target, expected) in [
+                ("../specs/s.md", "/r/docs/specs/s.md"), ("docs/specs/s.md", "/r/docs/specs/s.md"),
+                ("README.md", "/r/README.md"),
+            ] {
+                #expect(DocumentLinks.resolveRelative(target, from: from, among: files)?.path == expected)
+            }
+            for target in ["../../../outside/o.md", "missing.md", "notes.txt", ""] {
+                #expect(DocumentLinks.resolveRelative(target, from: from, among: files) == nil)
+            }
+        }
+    }
+}
