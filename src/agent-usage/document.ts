@@ -22,7 +22,7 @@ export interface AgentUsageJson {
   /** Window total over 7 or 30 calendar days, so idle days count as zero. */
   readonly avgPerDay7d: CostTotalsJson;
   readonly avgPerDay30d: CostTotalsJson;
-  /** Local calendar days, oldest first, every day present. */
+  /** The 30 local calendar days, oldest first, every day present. A partial day at the window's start counts in `last30d` but not here. */
   readonly days: readonly (CostTotalsJson & { readonly day: string })[];
   /** Over the last 30 days: priced models by cost, then unpriced ones (`costUsd` null) by tokens. */
   readonly byModel: readonly {
@@ -43,7 +43,8 @@ export interface AgentUsageInput {
   readonly rate: RateJson | null;
 }
 
-const DAY = 24 * 3_600_000;
+const HOUR = 3_600_000;
+const DAY = 24 * HOUR;
 const DAYS = 30;
 
 const tokensOf = (c: TokenCounts): number =>
@@ -76,11 +77,13 @@ export function buildAgentUsage(input: AgentUsageInput): AgentUsageJson {
   const last7d = sum(since(7 * DAY));
   const last30d = sum(month);
 
-  const days = new Map<string, Bucket[]>();
-  for (let i = DAYS - 1; i >= 0; i--) {
-    const day = input.dayKey(now - i * DAY);
-    if (!days.has(day)) days.set(day, []);
+  // Step back an hour at a time until 30 distinct days: stepping whole 24 h skips or repeats a day around DST.
+  const keys: string[] = [];
+  for (let t = now; keys.length < DAYS; t -= HOUR) {
+    const day = input.dayKey(t);
+    if (!keys.includes(day)) keys.push(day);
   }
+  const days = new Map<string, Bucket[]>(keys.reverse().map((day) => [day, []]));
   for (const b of month) days.get(input.dayKey(b.hour))?.push(b);
 
   // A model with no tokens (e.g. `<synthetic>`) is not worth a row.

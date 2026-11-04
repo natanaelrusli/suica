@@ -70,6 +70,24 @@ describe("buildAgentUsage", () => {
     expect(usage.avgPerDay7d.tokens).toBe(usage.last7d.tokens / 7);
   });
 
+  // A whole-24 h step repeats a day after the fall-back and skips one at the spring-forward.
+  it.each([
+    ["fall-back", Date.UTC(2026, 10, 2, 4, 30)],
+    ["spring-forward", Date.UTC(2026, 2, 9, 4, 10)],
+  ])("has 30 distinct consecutive local days across a New York %s", (_name, now) => {
+    const fmt = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" });
+    const { days } = buildAgentUsage({
+      buckets: [],
+      now,
+      dayKey: (ms) => fmt.format(ms),
+      rate: null,
+    });
+    const noon = days.map((d) => Date.parse(`${d.day}T12:00:00Z`));
+    expect(days).toHaveLength(30);
+    expect(noon.slice(1).map((ms, i) => ms - (noon[i] ?? 0))).toEqual(Array<number>(29).fill(D));
+    expect(days[29]?.day).toBe(fmt.format(now));
+  });
+
   it("counts the unpriced model's tokens but not its cost, and lists it last", () => {
     const usage = build(BUCKETS);
     expect(usage.unpriced).toEqual({ tokens: 505_000, models: ["codex-auto-review"] });
