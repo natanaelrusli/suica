@@ -79,6 +79,18 @@ describe("cleanUp", () => {
     );
   });
 
+  it("compacts while another process holds the database, as the agent does", () => {
+    const agent = openStore(join(state, "state.db"));
+    try {
+      agent.setPaused(true);
+      expect(() => cleanUp(store, paths())).not.toThrow();
+      agent.setPaused(false);
+      expect(agent.isPaused()).toBe(false);
+    } finally {
+      agent.close();
+    }
+  });
+
   it("works when nothing is there", () => {
     expect(cleanUp(store, paths()).status).toBe("cleaned");
   });
