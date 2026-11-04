@@ -3,7 +3,8 @@ import { existsSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, dirname, isAbsolute, join } from "node:path";
 import { openStore } from "./store.ts";
-import { installAgent, plistPath, uninstallAgent } from "./agent-install.ts";
+import { installAgent, logsPath, plistPath, uninstallAgent } from "./agent-install.ts";
+import { cleanUp } from "./cleanup.ts";
 import { buildStatus, loadStatusInput, readServiceStatus, restartService } from "./agent-status.ts";
 import { actionJson, buildAgentState } from "./agent-state.ts";
 import { MODEL_NAME, defaultConfigPath, defaultStatePath, loadConfig } from "./config.ts";
@@ -93,7 +94,7 @@ import { applyUpdate, checkForUpdate } from "./update.ts";
 import { VERSION } from "./version.ts";
 
 const USAGE =
-  "usage: suica <version|once|status|state|stats|usage|usage agents --json|office --json|office chat <agent> <sessionId> --json|office send <agent> <sessionId> --json (message on stdin)|ideas list|show|create|update|archive|restore|note|link-plan|link-session|prompt --json|pause|resume|pending [--all]|send <id> [--json]|skip <id> [--json]|retry <id> [--json]|clear <id|yours|others|all> [--json]|selftest|message <key> --json (request on stdin)|reviews --json|mr <key> --json|mr approve <key> <sha> --json|mr comment <key> --json (body on stdin)|mr close <key> --json|mr merge <key> <sha> [--squash] [--remove-source-branch] [--when-pipeline-succeeds] --json (message on stdin)|review options [--cli <id>] --json|review queue <key> [--skill <name>] [--model <name>] [--auto] --json|review post <id> [--inline|--comment] --json|review discard <id> --json|review cancel <id> --json|fix list --json|fix queue <key> [--pipeline] --json|fix watch <key> --json|fix unwatch <key> --json|fix confirm <id> --json (edits on stdin)|fix retry <id> --json (note on stdin)|fix discard <id> --json|fix cancel <id> --json|fix replies <id> --json|config show --json|config set --json|templates show --json|templates set --json|gitlab check <host> --json|lessons mcp|lessons install [--yes] [--json]|lessons uninstall [--json]|lessons status --json|lessons export [--zip <file>] [--json]|lessons list --json|lessons usage --json|lessons show <id> --json|lessons archive <id> --json|lessons merge <keep> <gone> --json|update check --json|update apply --json|agent install [--json]|agent uninstall|agent restart --json>\n";
+  "usage: suica <version|once|status|state|stats|usage|usage agents --json|office --json|office chat <agent> <sessionId> --json|office send <agent> <sessionId> --json (message on stdin)|ideas list|show|create|update|archive|restore|note|link-plan|link-session|prompt --json|pause|resume|pending [--all]|send <id> [--json]|skip <id> [--json]|retry <id> [--json]|clear <id|yours|others|all> [--json]|selftest|message <key> --json (request on stdin)|reviews --json|mr <key> --json|mr approve <key> <sha> --json|mr comment <key> --json (body on stdin)|mr close <key> --json|mr merge <key> <sha> [--squash] [--remove-source-branch] [--when-pipeline-succeeds] --json (message on stdin)|review options [--cli <id>] --json|review queue <key> [--skill <name>] [--model <name>] [--auto] --json|review post <id> [--inline|--comment] --json|review discard <id> --json|review cancel <id> --json|fix list --json|fix queue <key> [--pipeline] --json|fix watch <key> --json|fix unwatch <key> --json|fix confirm <id> --json (edits on stdin)|fix retry <id> --json (note on stdin)|fix discard <id> --json|fix cancel <id> --json|fix replies <id> --json|config show --json|config set --json|templates show --json|templates set --json|gitlab check <host> --json|lessons mcp|lessons install [--yes] [--json]|lessons uninstall [--json]|lessons status --json|lessons export [--zip <file>] [--json]|lessons list --json|lessons usage --json|lessons show <id> --json|lessons archive <id> --json|lessons merge <keep> <gone> --json|update check --json|update apply --json|agent install [--json]|agent uninstall|agent restart --json|cleanup --json>\n";
 const TEAMS_DISABLED = "teams is disabled: set teams.enabled to true in the config\n";
 const SHOWN_WITH_ALL = 50;
 
@@ -263,6 +264,23 @@ function statsJson(): number {
       dayKey: localDayKey,
     });
     process.stdout.write(`${JSON.stringify(document)}\n`);
+    return 0;
+  } finally {
+    store.close();
+  }
+}
+
+/** `suica cleanup --json`: deletes caches and leftovers and compacts the database; no runtime. */
+function cleanupCommand(): number {
+  const statePath = loadConfig(defaultConfigPath()).statePath ?? defaultStatePath();
+  const store = openStore(statePath);
+  try {
+    const result = cleanUp(store, {
+      statePath,
+      logsDir: logsPath(homedir()),
+      updateDir: join(homedir(), "Library", "Application Support", "Suica", "update"),
+    });
+    process.stdout.write(`${JSON.stringify(result)}\n`);
     return 0;
   } finally {
     store.close();
@@ -1430,6 +1448,7 @@ async function main(argv: readonly string[]): Promise<number> {
   if (command === "update" && argv.length === 3 && argv[2] === "--json") {
     if (argv[1] === "check" || argv[1] === "apply") return updateCommand(argv[1] === "apply");
   }
+  if (command === "cleanup" && argv.length === 2 && argv[1] === "--json") return cleanupCommand();
   if (command === "agent") {
     if (argv[1] === "restart" && argv.includes("--json")) return restartAgent();
     if (argv[1] === "install") return installAgentCommand(argv.includes("--json"));

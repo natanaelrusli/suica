@@ -20,6 +20,7 @@ public final class WindowModel {
     public private(set) var errorText: String?
     public private(set) var banner: String?
     public private(set) var restarting = false
+    public private(set) var cleaningUp = false
     /// A one-key save from Overview is in flight.
     public private(set) var savingSetting = false
     /// The list the Messages page shows. It lives here so a `suica://` link can switch it.
@@ -200,5 +201,17 @@ public final class WindowModel {
         restarting = false
         await refresh()
         return restarted
+    }
+
+    /// Clears caches and leftovers; the banner says how much space it freed.
+    public func cleanUp() async {
+        guard !cleaningUp else { return }
+        cleaningUp = true
+        do {
+            banner = Copy.cleanupDone(try await client.cleanUp().freedBytes)
+        } catch {
+            banner = MenuModel.message(for: error)
+        }
+        cleaningUp = false
     }
 }

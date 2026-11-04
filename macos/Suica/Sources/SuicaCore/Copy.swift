@@ -879,6 +879,17 @@ public enum Copy {
     }
 
     public static let configOverviewHint = "Pick a category. Search looks through every setting."
+    public static let cleanupTitle = "Storage"
+    public static let cleanupDetail =
+        "Clear caches, update downloads, leftover fix checkouts and old logs, and compact the database. Settings, templates and history stay."
+    public static let cleanupButton = "Clear cache and junk…"
+    public static let cleanupConfirm = "Clear cache and junk?"
+    public static let cleanupConfirmMessage =
+        "Agent Usage scans your agents' logs again on its next load, which takes longer once."
+    public static let cleanupAction = "Clear"
+    public static func cleanupDone(_ bytes: Int64) -> String {
+        bytes > 0 ? "Cleaned up \(ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file))." : "Already clean."
+    }
     public static let messageTemplatesDetail = "Teams messages and alerts"
     public static let appearanceDetail = "Look, accent and motion"
     public static let backToConfiguration = "Back to Configuration"

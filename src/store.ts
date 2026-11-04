@@ -311,6 +311,8 @@ export interface Store {
   recoverStalePostings(now: number): number;
   loadIdentity(username: string): string | undefined;
   saveIdentity(username: string, email: string, now: number): void;
+  /** Folds the write-ahead log into the file and rebuilds it without free pages. */
+  compact(): void;
   close(): void;
 }
 
@@ -1536,6 +1538,9 @@ export function openStore(path: string): Store {
     isPaused: () => metaValue(META_PAUSED) === "1",
     setPaused: (paused) => {
       setMeta(META_PAUSED, paused ? "1" : "0");
+    },
+    compact: () => {
+      db.exec("PRAGMA wal_checkpoint(TRUNCATE); VACUUM; PRAGMA wal_checkpoint(TRUNCATE);");
     },
     close: () => {
       db.close();

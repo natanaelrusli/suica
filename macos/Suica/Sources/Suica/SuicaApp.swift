@@ -23,6 +23,7 @@ extension UnconfiguredClient: DashboardClient {
         throw AgentError.launchFailed
     }
     func restartAgent() async throws(AgentError) -> ActionResult { throw AgentError.launchFailed }
+    func cleanUp() async throws(AgentError) -> CleanupResult { throw AgentError.launchFailed }
 }
 
 extension UnconfiguredClient: ReviewsClient {
