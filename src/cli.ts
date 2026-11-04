@@ -84,13 +84,16 @@ import { buildBrainstormPrompt } from "./ideas/brainstorm.ts";
 import { geminiResumeId, sendToSession } from "./office/send.ts";
 import { adaptersFor, collectOffice } from "./office/collect.ts";
 import { realProbe } from "./office/probe.ts";
+import { buildAgentUsage } from "./agent-usage/document.ts";
+import { loadRate } from "./agent-usage/rate.ts";
+import { scanAgentUsage } from "./agent-usage/scan.ts";
 import { buildUsage } from "./usage.ts";
 import { PUBLIC_KEY_PEM } from "./update-key.ts";
 import { applyUpdate, checkForUpdate } from "./update.ts";
 import { VERSION } from "./version.ts";
 
 const USAGE =
-  "usage: suica <version|once|status|state|stats|usage|office --json|office chat <agent> <sessionId> --json|office send <agent> <sessionId> --json (message on stdin)|ideas list|show|create|update|archive|restore|note|link-plan|link-session|prompt --json|pause|resume|pending [--all]|send <id> [--json]|skip <id> [--json]|retry <id> [--json]|clear <id|yours|others|all> [--json]|selftest|message <key> --json (request on stdin)|reviews --json|mr <key> --json|mr approve <key> <sha> --json|mr comment <key> --json (body on stdin)|mr close <key> --json|mr merge <key> <sha> [--squash] [--remove-source-branch] [--when-pipeline-succeeds] --json (message on stdin)|review options [--cli <id>] --json|review queue <key> [--skill <name>] [--model <name>] [--auto] --json|review post <id> [--inline|--comment] --json|review discard <id> --json|review cancel <id> --json|fix list --json|fix queue <key> [--pipeline] --json|fix watch <key> --json|fix unwatch <key> --json|fix confirm <id> --json (edits on stdin)|fix retry <id> --json (note on stdin)|fix discard <id> --json|fix cancel <id> --json|fix replies <id> --json|config show --json|config set --json|templates show --json|templates set --json|gitlab check <host> --json|lessons mcp|lessons install [--yes] [--json]|lessons uninstall [--json]|lessons status --json|lessons export [--zip <file>] [--json]|lessons list --json|lessons usage --json|lessons show <id> --json|lessons archive <id> --json|lessons merge <keep> <gone> --json|update check --json|update apply --json|agent install [--json]|agent uninstall|agent restart --json>\n";
+  "usage: suica <version|once|status|state|stats|usage|usage agents --json|office --json|office chat <agent> <sessionId> --json|office send <agent> <sessionId> --json (message on stdin)|ideas list|show|create|update|archive|restore|note|link-plan|link-session|prompt --json|pause|resume|pending [--all]|send <id> [--json]|skip <id> [--json]|retry <id> [--json]|clear <id|yours|others|all> [--json]|selftest|message <key> --json (request on stdin)|reviews --json|mr <key> --json|mr approve <key> <sha> --json|mr comment <key> --json (body on stdin)|mr close <key> --json|mr merge <key> <sha> [--squash] [--remove-source-branch] [--when-pipeline-succeeds] --json (message on stdin)|review options [--cli <id>] --json|review queue <key> [--skill <name>] [--model <name>] [--auto] --json|review post <id> [--inline|--comment] --json|review discard <id> --json|review cancel <id> --json|fix list --json|fix queue <key> [--pipeline] --json|fix watch <key> --json|fix unwatch <key> --json|fix confirm <id> --json (edits on stdin)|fix retry <id> --json (note on stdin)|fix discard <id> --json|fix cancel <id> --json|fix replies <id> --json|config show --json|config set --json|templates show --json|templates set --json|gitlab check <host> --json|lessons mcp|lessons install [--yes] [--json]|lessons uninstall [--json]|lessons status --json|lessons export [--zip <file>] [--json]|lessons list --json|lessons usage --json|lessons show <id> --json|lessons archive <id> --json|lessons merge <keep> <gone> --json|update check --json|update apply --json|agent install [--json]|agent uninstall|agent restart --json>\n";
 const TEAMS_DISABLED = "teams is disabled: set teams.enabled to true in the config\n";
 const SHOWN_WITH_ALL = 50;
 
@@ -285,6 +288,23 @@ function usageJson(): number {
   } finally {
     store.close();
   }
+}
+
+/** `suica usage agents --json`: what Claude Code and Codex usage costs at API prices. No runtime. */
+async function agentUsageJson(): Promise<number> {
+  const config = loadConfig(defaultConfigPath());
+  const dir = dirname(config.statePath ?? defaultStatePath());
+  const now = Date.now();
+  const buckets = await scanAgentUsage({
+    home: homedir(),
+    cachePath: join(dir, "agent-usage-cache.json"),
+    now,
+  });
+  const rate = await loadRate({ path: join(dir, "exchange-rate.json"), now, fetch });
+  process.stdout.write(
+    `${JSON.stringify(buildAgentUsage({ buckets, now, dayKey: localDayKey, rate }))}\n`,
+  );
+  return 0;
 }
 
 /** `suica office --json`: the Coding Agents running on this Mac. Reads local files; no runtime. */
@@ -1423,6 +1443,8 @@ async function main(argv: readonly string[]): Promise<number> {
   }
   if (command === "status" && argv.includes("--json")) return statusJson();
   if (command === "stats") return statsJson();
+  if (command === "usage" && argv[1] === "agents" && argv.includes("--json"))
+    return agentUsageJson();
   if (command === "usage") return usageJson();
   const runtime = createRuntime(defaultConfigPath());
   try {
