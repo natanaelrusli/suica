@@ -25,7 +25,7 @@ interface Entry {
 
 // `pricesAsOf` is part of the key because each bucket's `long` flag depends on the price table.
 interface Cache {
-  version: 1;
+  version: 2;
   pricesAsOf: string;
   files: Record<string, Entry>;
 }
@@ -36,7 +36,7 @@ async function loadCache(path: string): Promise<Cache> {
   try {
     const c = JSON.parse(await readFile(path, "utf8")) as Partial<Cache> | null;
     if (
-      c?.version === 1 &&
+      c?.version === 2 &&
       c.pricesAsOf === PRICES_AS_OF &&
       c.files &&
       typeof c.files === "object"
@@ -46,7 +46,7 @@ async function loadCache(path: string): Promise<Cache> {
   } catch {
     // missing or corrupt: rebuild
   }
-  return { version: 1, pricesAsOf: PRICES_AS_OF, files: {} };
+  return { version: 2, pricesAsOf: PRICES_AS_OF, files: {} };
 }
 
 /** Best effort: an unwritable cache must not lose the result, so a failure is swallowed. */

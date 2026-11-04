@@ -30,9 +30,10 @@ export function readClaudeLines(lines: Iterable<string>): Bucket[] {
     const u = m?.usage;
     const at = Date.parse(d?.timestamp ?? "");
     if (!m || !u || typeof m.model !== "string" || Number.isNaN(at)) continue;
-    // one reply is logged once per content block with the same ids
-    if (m.id && d?.requestId) {
-      const id = `${m.id}|${d.requestId}`;
+    // one reply is logged once per content block with the same ids; older Claude Code
+    // versions omit requestId, so message.id alone still dedupes (usage is identical)
+    if (m.id) {
+      const id = `${m.id}|${d?.requestId ?? ""}`;
       if (seen.has(id)) continue;
       seen.add(id);
     }

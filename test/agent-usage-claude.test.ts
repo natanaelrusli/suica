@@ -38,4 +38,30 @@ describe("readClaudeLines", () => {
     expect(readClaudeLines(lines).reduce((n, b) => n + b.input, 0)).toBe(12 + 50 + 50);
     expect(readClaudeLines(['{"type":"assistant","message":{"usage":{"input_tok'])).toEqual([]);
   });
+
+  it("counts a reply logged without a request id once, per message id", () => {
+    const at = "2026-11-04T05:10:00.000Z";
+    const reply = (id: string, out: number, rid?: string) =>
+      JSON.stringify({
+        ...(rid ? { requestId: rid } : {}),
+        timestamp: at,
+        message: { id, model: "claude-sonnet-5-5", usage: { input_tokens: 1, output_tokens: out } },
+      });
+    const [b] = readClaudeLines([
+      reply("msg_X", 10),
+      reply("msg_X", 10),
+      reply("msg_X", 10),
+      reply("msg_Y", 5),
+      reply("msg_X", 10, "req_X"), // same id with a request id is a separate reply
+      JSON.stringify({
+        timestamp: at,
+        message: { model: "claude-sonnet-5-5", usage: { output_tokens: 1 } },
+      }),
+      JSON.stringify({
+        timestamp: at,
+        message: { model: "claude-sonnet-5-5", usage: { output_tokens: 1 } },
+      }),
+    ]);
+    expect(b).toMatchObject({ input: 3, output: 10 + 5 + 10 + 1 + 1 });
+  });
 });

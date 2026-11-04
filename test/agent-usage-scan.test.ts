@@ -127,7 +127,7 @@ describe("scanAgentUsage", () => {
     ],
     [
       "a different pricesAsOf",
-      (f: object) => JSON.stringify({ version: 1, pricesAsOf: "2000-01-01", files: f }),
+      (f: object) => JSON.stringify({ version: 2, pricesAsOf: "2000-01-01", files: f }),
     ],
     ["invalid json", () => "{not json"],
   ])("rebuilds a cache with %s", async (_name, body) => {
@@ -138,7 +138,7 @@ describe("scanAgentUsage", () => {
     await writeFile(cachePath, body({ [p]: { size: s.size, mtimeMs: s.mtimeMs, buckets: [] } }));
     expect(total(await scan())).toBe(5);
     expect(JSON.parse(await readFile(cachePath, "utf8"))).toMatchObject({
-      version: 1,
+      version: 2,
       pricesAsOf: PRICES_AS_OF,
     });
   });
@@ -189,7 +189,7 @@ describe("scanAgentUsage", () => {
     const s = await stat(p);
     await mkdir(dirname(cachePath), { recursive: true });
     const bad = {
-      version: 1,
+      version: 2,
       pricesAsOf: PRICES_AS_OF,
       files: { [p]: { size: s.size, mtimeMs: s.mtimeMs } },
     };
