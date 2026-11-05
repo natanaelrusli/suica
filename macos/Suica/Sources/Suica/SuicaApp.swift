@@ -272,8 +272,11 @@ struct SuicaApp: App {
         let documentsModel = DocumentsModel(plans: plansModel)
         _documents = State(initialValue: documentsModel)
         LinkDelegate.documents = documentsModel
+        // The swap script gives up waiting for the quit after about 30 s, so it never starts while a Draft could still
+        // make the quit ask (and be cancelled): false shows the install failure, and Retry stages again once none is left.
         let updatesModel = UpdatesModel(
-            client: updatesClient, store: UserDefaults.standard, now: Date.init, relaunch: relaunchAfterUpdate)
+            client: updatesClient, store: UserDefaults.standard, now: Date.init,
+            relaunch: { applied in documentsModel.unsavedPaths.isEmpty ? relaunchAfterUpdate(applied) : false })
         _updates = State(initialValue: updatesModel)
         let onboardingModel = OnboardingModel(dashboard: dashboard, setup: setupClient)
         _onboarding = State(initialValue: onboardingModel)

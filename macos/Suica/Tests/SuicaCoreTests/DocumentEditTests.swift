@@ -442,4 +442,35 @@ import Testing
         #expect(try String(contentsOfFile: a, encoding: .utf8) == "changed elsewhere")
         #expect(try String(contentsOfFile: b, encoding: .utf8) == "B2")
     }
+
+    @Test func aFailedSaveStopsTheQuitAndKeepsTheDraft() async throws {
+        let root = try tree(["a.md": "A"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let a = root.appendingPathComponent("a.md").path
+        let documents = model()
+        await edit(documents, a, "A2")
+        try FileManager.default.setAttributes([.posixPermissions: 0o444], ofItemAtPath: a)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: a) }
+        let result = await run(documents, answer: .saveAll)
+        #expect(!result.quit && result.explained == ["\(a)=The file is read-only."])
+        #expect(Copy.quitStoppedDetail([(a, "The file is read-only.")]).hasPrefix("a.md: The file is read-only."))
+        #expect(documents.draft(for: a) == "A2")
+        #expect(try String(contentsOfFile: a, encoding: .utf8) == "A")
+    }
+
+    @Test func textTypedDuringSaveAllStopsTheQuit() async throws {
+        let root = try tree(["a.md": "A"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let a = root.appendingPathComponent("a.md").path
+        let documents = model()
+        await edit(documents, a, "A2")
+        var typed = false
+        // saveAll suspends on its disk write, so this runs on the main actor while the save is in flight.
+        let typing = Task { @MainActor in documents.draftText = "A3"; typed = true }
+        let result = await run(documents, answer: .saveAll)
+        await typing.value
+        #expect(typed && !result.quit)
+        #expect(result.explained == ["\(a)=\(Copy.unsavedDuringSave)"])
+        #expect(documents.draft(for: a) == "A3")
+    }
 }
