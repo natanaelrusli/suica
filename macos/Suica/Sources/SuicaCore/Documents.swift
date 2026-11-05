@@ -307,6 +307,54 @@ public enum DocumentText {
     }
 }
 
+public struct DiskDocument: Equatable, Sendable {
+    /// LF text.
+    public let text: String
+    public let ending: LineEnding
+}
+
+public enum SaveOutcome: Equatable, Sendable { case saved, conflict, failed(String) }
+
+public enum DocumentDisk {
+    /// nil when the file is missing, unreadable, over `maxBytes` or not UTF-8.
+    public static func read(_ path: String) -> DiskDocument? {
+        guard let size = (try? FileManager.default.attributesOfItem(atPath: path))?[.size] as? Int,
+            size <= MarkdownFiles.maxBytes, let data = FileManager.default.contents(atPath: path),
+            data.count <= MarkdownFiles.maxBytes, String(data: data, encoding: .utf8) != nil
+        else { return nil }
+        // String(data:encoding:) drops a leading BOM and saving would lose it, so decode again to keep it.
+        let (text, ending) = DocumentText.normalise(String(decoding: data, as: UTF8.self))
+        return DiskDocument(text: text, ending: ending)
+    }
+
+    /// Writes `text` (LF) with `ending` only if the file on disk still reads as `base` (`overwrite: true` skips that check).
+    /// The new bytes go to a temp file beside the original, which is renamed over it after a last re-read, so a
+    /// failure leaves the original whole. shortcut: a writer that lands between that re-read and the rename is
+    /// still overwritten (no file locking), when that matters use a coordinated write (NSFileCoordinator).
+    public static func write(
+        _ text: String, ending: LineEnding, to path: String, expecting base: String, overwrite: Bool = false
+    ) -> SaveOutcome {
+        let data = Data(DocumentText.restore(text, ending: ending).utf8)
+        guard data.count <= MarkdownFiles.maxBytes else { return .failed("The text is over \(MarkdownFiles.maxBytes) bytes.") }
+        let fm = FileManager.default
+        let target = URL(fileURLWithPath: path).resolvingSymlinksInPath()  // rename must replace the file, not a link to it
+        let temp = target.deletingLastPathComponent().appendingPathComponent(".\(UUID().uuidString).suica-tmp")
+        defer { try? fm.removeItem(at: temp) }
+        do {
+            let attributes = try fm.attributesOfItem(atPath: target.path)  // throws when the file is missing: never recreated
+            guard fm.isWritableFile(atPath: target.path) else { return .failed("The file is read-only.") }
+            try data.write(to: temp, options: .withoutOverwriting)
+            try fm.setAttributes([.posixPermissions: attributes[.posixPermissions] ?? 0o644], ofItemAtPath: temp.path)
+            if !overwrite, read(target.path)?.text != base { return .conflict }
+            guard rename(temp.path, target.path) == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+            return .saved
+        } catch {
+            let reason = error.localizedDescription
+            return .failed(reason.isEmpty ? "The file could not be saved." : reason)
+        }
+    }
+}
+
 public enum LinkOutcome: Equatable, Sendable { case opened, ignored, external }
 
 @MainActor @Observable
@@ -412,11 +460,7 @@ public final class DocumentsModel {
     public func loadContent() async {
         guard let path = selectedPath else { content = .none; return }
         let loaded = await Task.detached { () -> DocumentContent in
-            guard let size = (try? FileManager.default.attributesOfItem(atPath: path))?[.size] as? Int,
-                size <= MarkdownFiles.maxBytes, let data = FileManager.default.contents(atPath: path),
-                data.count <= MarkdownFiles.maxBytes, let text = String(data: data, encoding: .utf8)
-            else { return .unavailable }
-            return DocumentText.render(DocumentText.normalise(text).text)
+            DocumentDisk.read(path).map { DocumentText.render(String($0.text.trimmingPrefix("\u{FEFF}"))) } ?? .unavailable
         }.value
         guard path == selectedPath else { return }
         content = loaded
