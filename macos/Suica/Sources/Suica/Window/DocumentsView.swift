@@ -31,6 +31,7 @@ struct DocumentsView: View {
         }
         .task { await model.refresh() }
         .task(id: model.selectedPath) {
+            failure = nil  // one file's failure never shows under another
             // In Edit the new file needs its base; loadContent also renders a Draft for View.
             if model.mode == .edit { await model.startEditing() }
             await model.loadContent()
@@ -141,6 +142,7 @@ struct DocumentsView: View {
             }
         }
         .background { editShortcut }
+        .onChange(of: dirty) { _, isDirty in if !isDirty { failure = nil } }
         .searchable(text: $model.query, placement: .toolbar, prompt: Copy.searchDocuments)
     }
 
@@ -200,7 +202,8 @@ struct DocumentsView: View {
 
     @ViewBuilder private func notices(_ path: String) -> some View {
         let changed = model.diskChanged && keptConflict != path
-        let reason = (failure?.path == path ? failure?.reason : nil) ?? model.saveError
+        // A failure means nothing once the Draft is gone (saved, reverted, reloaded or typed back to the base).
+        let reason = dirty ? (failure?.path == path ? failure?.reason : nil) ?? model.saveError : nil
         if changed || reason != nil {
             VStack(spacing: 8) {
                 if changed {
