@@ -1828,6 +1828,17 @@ extension Copy {
     public static let goForward = "Forward"
     public static let readPlan = "Read"
     public static let openDocument = "Open"
+    public static let editMode = "Edit"
+    public static let viewMode = "View"
+    public static let saveDocument = "Save"
+    public static let revertDraft = "Revert"
+    public static let unsavedDot = "Unsaved changes"
+    public static let fileChangedOnDisk = "The file changed on disk"
+    public static let overwriteFile = "Overwrite"
+    public static let reloadFile = "Reload"
+    public static let keepEditing = "Keep editing"
+    public static func saveFailed(_ reason: String) -> String { "Couldn't save: \(reason)" }
+    public static let cantEditFile = "This file can't be edited"
 }
 
 // MARK: - Updates
