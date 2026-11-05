@@ -272,13 +272,30 @@ import Testing
     }
 
     @Test func refreshWithNoFoldersEmptiesTheList() async {
-        let (documents, _) = model(folders: []) { _ in
-            Issue.record("find must not run without folders")
-            return ([], false)
+        final class Calls: @unchecked Sendable { var finds = 0 }
+        let calls = Calls()
+        let seeded = [file("a.md"), file("b/c.md")]
+        let (documents, plans) = model { _ in
+            calls.finds += 1
+            return (seeded, true)
         }
         await documents.refresh()
-        #expect(documents.files == [])
+        #expect(documents.files == seeded && documents.truncated && !documents.tree.isEmpty)
+        plans.removeFolder("/p")
+        await documents.refresh()
+        #expect(documents.files.isEmpty)
+        #expect(documents.tree.isEmpty)
+        #expect(!documents.truncated)
         #expect(!documents.isScanning)
+        #expect(calls.finds == 1)
+    }
+
+    @Test func treeAlwaysEqualsTheTreeBuiltFromTheFiles() async {
+        let two = [file("a.md"), file("b/c.md")]
+        let (documents, _) = model { _ in (two, false) }
+        #expect(documents.tree == DocumentTree.build([]))
+        await documents.refresh()
+        #expect(documents.tree == DocumentTree.build(two))
     }
 
     @Test func anOlderSlowScanNeverOverwritesANewerOne() async {
@@ -364,7 +381,7 @@ import Testing
         #expect(documents.selectedPath == "/r/b.md")
     }
 
-    @Test func openLinkResolvesRelativeLinksAndLeavesWebLinksToTheSystem() async {
+    @Test func openLinkResolvesRelativeLinksAndOnlyHandsWebLinksToTheSystem() async {
         let documents = await documents(opening: ["/r/a.md", "/r/b.md"])
         #expect(documents.openLink(URL(string: "a.md")!) == .ignored)
         documents.open(path: "/r/b.md")
@@ -373,7 +390,11 @@ import Testing
         documents.open(path: "/r/b.md")
         #expect(documents.openLink(URL(string: "../x.md")!) == .ignored)
         #expect(documents.openLink(URL(string: "https://example.com")!) == .external)
-        #expect(documents.openLink(URL(string: "mailto:a@b.c")!) == .external)
+        let before = documents.selectedPath
+        for blocked in ["mailto:a@b.c", "file:///etc/hosts", "shortcuts://run-shortcut?name=x", "suica-doc:100%"] {
+            #expect(documents.openLink(URL(string: blocked)!) == .ignored, "\(blocked)")
+        }
+        #expect(documents.selectedPath == before)
     }
 
     @Test func loadContentReadsTextFrontMatterAndRewritesWikilinks() async throws {
@@ -422,15 +443,23 @@ import Testing
         #expect(documents.content == .none)
     }
 
+    /// A is large so its read is still running when the selection moves to B; without the guard its
+    /// late result would overwrite B's. Repeated because the read/yield ordering is not deterministic.
     @Test func loadContentDropsItsResultWhenTheSelectionChangedMeanwhile() async throws {
-        let root = try tree(["a.md": "a"])
+        let root = try tree(["a.md": String(repeating: "[[x]]\n", count: 40_000), "b.md": "bee"])
         defer { try? FileManager.default.removeItem(at: root) }
-        let (documents, _) = model { _ in ([], false) }
-        documents.open(path: root.appendingPathComponent("a.md").path)
-        let load = Task { await documents.loadContent() }
-        await Task.yield()  // let the load start reading before the selection moves
-        documents.open(path: "/elsewhere.md")
-        await load.value
-        #expect(documents.content == .none)
+        let b = root.appendingPathComponent("b.md").path
+        for _ in 0..<3 {
+            let (documents, _) = model { _ in ([], false) }
+            documents.open(path: root.appendingPathComponent("a.md").path)
+            let first = Task { await documents.loadContent() }
+            await Task.yield()  // let the first load start reading before the selection moves
+            documents.open(path: b)
+            await first.value
+            let dropped = documents.content == .none  // not compared inline: a failure would print A's whole text
+            #expect(dropped, "A's late result must not land on B")
+            await documents.loadContent()
+            #expect(documents.content == .text(entries: [], body: "bee"))
+        }
     }
 }

@@ -106,6 +106,8 @@ enum WindowSection: String, CaseIterable, Identifiable {
         switch section {
         case .reviews: [.reviews, .myMergeRequests]
         case .myMergeRequests: []
+        case .plans: [.plans, .documents]
+        case .documents: []
         default: [section]
         }
     }

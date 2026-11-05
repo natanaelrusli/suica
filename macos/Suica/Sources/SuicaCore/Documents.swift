@@ -295,6 +295,8 @@ public final class DocumentsModel {
     private var generation = 0
 
     public private(set) var files: [DocumentFile] = []
+    /// Always `DocumentTree.build(files)`, built when the list changes rather than on every redraw.
+    public private(set) var tree: [DocumentNode] = []
     public private(set) var truncated = false
     public private(set) var isScanning = false
     public var query = ""
@@ -319,8 +321,6 @@ public final class DocumentsModel {
         files.filter { Search.matches(query, [$0.relativePath, URL(fileURLWithPath: $0.folder).lastPathComponent]) }
     }
 
-    public var tree: [DocumentNode] { DocumentTree.build(files) }
-
     /// Scans off the main thread; the previous list stays until the scan is done. Only the newest
     /// refresh sets the list: an older scan that finishes later is dropped.
     public func refresh() async {
@@ -329,6 +329,7 @@ public final class DocumentsModel {
         let folders = folders
         guard !folders.isEmpty else {
             files = []
+            tree = []
             truncated = false
             isScanning = false
             return
@@ -338,6 +339,7 @@ public final class DocumentsModel {
         let found = await Task.detached { find(folders) }.value
         guard mine == generation else { return }
         files = found.files
+        tree = DocumentTree.build(found.files)
         truncated = found.truncated
         isScanning = false
     }
@@ -369,7 +371,7 @@ public final class DocumentsModel {
         content = .none
     }
 
-    /// Wikilinks resolve by name, relative links from the open file; any other scheme goes to the system.
+    /// Wikilinks resolve by name, relative links from the open file; http(s) links go to the system and every other scheme is ignored.
     public func openLink(_ url: URL) -> LinkOutcome {
         let target: DocumentFile?
         if let name = DocumentLinks.wikilinkTarget(url) {
@@ -377,7 +379,7 @@ public final class DocumentsModel {
         } else if url.scheme == nil {
             target = selectedPath.flatMap { DocumentLinks.resolveRelative(url.path, from: $0, among: files) }
         } else {
-            return .external
+            return DisplayText.safeURL(url.absoluteString) == nil ? .ignored : .external
         }
         guard let target else { return .ignored }
         open(path: target.path)

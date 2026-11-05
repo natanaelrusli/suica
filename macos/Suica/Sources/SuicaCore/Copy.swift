@@ -1819,6 +1819,7 @@ extension Copy {
     public static let searchDocuments = "Search documents"
     public static let noDocumentsTitle = "No documents found"
     public static let noDocumentsHint = "Markdown files under the Plan folders show here."
+    public static let noDocumentsMatch = "No documents match."
     public static let documentsTruncated = "Showing the first 5,000 documents."
     public static let documentUnavailableTitle = "This file can't be shown"
     public static let documentUnavailableHint = "It may have been moved or deleted, be larger than 1 MB, or not be UTF-8 text."

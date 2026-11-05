@@ -81,14 +81,17 @@ struct DocumentsView: View {
 
     @ViewBuilder private func list(titleBar: CGFloat) -> some View {
         Group {
-            if model.query.isEmpty {
+            let shown = model.visible
+            if model.query.trimmingCharacters(in: .whitespaces).isEmpty {
                 List(model.tree, children: \.children, selection: selection) { node in
                     // A folder row would take the highlight while the file stays open.
                     Label(node.name, systemImage: node.file == nil ? "folder" : "doc.text").lineLimit(1)
                         .selectionDisabled(node.file == nil)
                 }
+            } else if shown.isEmpty {
+                Text(Copy.noDocumentsMatch).foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                List(model.visible, selection: selection) { file in
+                List(shown, selection: selection) { file in
                     VStack(alignment: .leading, spacing: 2) {
                         Text(file.name).lineLimit(1)
                         Text(file.relativePath).font(.caption).foregroundStyle(.secondary).lineLimit(1)
