@@ -132,9 +132,49 @@ private let refreshInterval: Duration = .seconds(30)
 final class LinkDelegate: NSObject, NSApplicationDelegate {
     /// Set when the app starts, before the system can deliver the link that launched it.
     static var window: WindowModel?
+    /// Set with `window`; its Drafts are what quitting asks about.
+    static var documents: DocumentsModel?
+    private var asking = false
 
     func application(_ application: NSApplication, open urls: [URL]) {
         if let link = urls.compactMap(DeepLink.init(url:)).last { Self.window?.receive(link) }
+    }
+
+    /// Quit, the menu's and the updater's alike, with Drafts asks first. The saves are async, so the answer comes later.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let documents = Self.documents, !documents.unsavedPaths.isEmpty else { return .terminateNow }
+        guard !asking else { return .terminateCancel }
+        asking = true
+        Task { @MainActor in
+            // The alert is the app's only window here; a quit from the popover must not hide it behind others.
+            NSApp.activate()
+            let quit = await documents.shouldQuit(ask: Self.ask, explain: Self.explain)
+            asking = false
+            NSApp.reply(toApplicationShouldTerminate: quit)
+        }
+        return .terminateLater
+    }
+
+    private static func ask(_ paths: [String]) -> QuitChoice {
+        let alert = NSAlert()
+        alert.messageText = Copy.unsavedQuitMessage(count: paths.count)
+        alert.informativeText = Copy.unsavedQuitDetail(paths: paths)
+        alert.addButton(withTitle: Copy.saveAllDocuments)  // first: Return
+        alert.addButton(withTitle: Copy.discardDrafts)
+        alert.addButton(withTitle: Copy.cancel).keyEquivalent = "\u{1b}"
+        switch alert.runModal() {
+        case .alertFirstButtonReturn: return .saveAll
+        case .alertSecondButtonReturn: return .discard
+        default: return .cancel
+        }
+    }
+
+    private static func explain(_ failures: [(path: String, reason: String)]) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = Copy.quitStopped
+        alert.informativeText = Copy.quitStoppedDetail(failures)
+        alert.runModal()
     }
 }
 
@@ -229,7 +269,9 @@ struct SuicaApp: App {
         // Documents reads the Plan folders, so both share one PlansModel.
         let plansModel = PlansModel(store: UserDefaults.standard)
         _plans = State(initialValue: plansModel)
-        _documents = State(initialValue: DocumentsModel(plans: plansModel))
+        let documentsModel = DocumentsModel(plans: plansModel)
+        _documents = State(initialValue: documentsModel)
+        LinkDelegate.documents = documentsModel
         let updatesModel = UpdatesModel(
             client: updatesClient, store: UserDefaults.standard, now: Date.init, relaunch: relaunchAfterUpdate)
         _updates = State(initialValue: updatesModel)

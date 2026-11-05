@@ -16,7 +16,7 @@ The Plans page tracks where a plan stands but, by its own spec, never shows the 
 
 ## Non-goals
 
-- Editing, creating or deleting files. The page never writes to a document; "Open in editor" and "Show in Finder" cover changes.
+- Creating, renaming or deleting files; editing is in `2026-11-05-document-edit-mode-design.md`. The page writes to a document only through that edit mode's Save; "Open in editor" and "Show in Finder" cover the rest.
 - Backlinks, graph, outline, tags, callouts (`> [!note]`), embeds (`![[x]]` is shown as written), images, math, Mermaid, tabs, themes (_my call_: each needs its own parser work; the first cut is reading).
 - Scrolling to the `#Heading` of a link: the file opens at the top.
 - A folder list of its own (_my call_: the Documents page uses the **Plan folders**, so there is one list to keep and the Read button lands on a file the page already lists). Adding or removing a folder on either page changes both.
@@ -37,4 +37,4 @@ The Plans page tracks where a plan stands but, by its own spec, never shows the 
 
 - A scan or a file read that blocks the window.
 - A file that fails to open taking the page down: it shows "can't be shown" with Open and Show in Finder, and the list stays usable.
-- A new Node command, config key or contract golden: the page reads files and keeps nothing but what Plans already keeps (the folders), plus the last page state in memory only.
+- A new Node command, config key or contract golden: the page reads files and keeps nothing but what Plans already keeps (the folders), plus the last page state in memory only (and, with edit mode, unsaved Drafts in memory; it writes a file only when the Owner saves).

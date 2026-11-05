@@ -1839,6 +1839,26 @@ extension Copy {
     public static let keepEditing = "Keep editing"
     public static func saveFailed(_ reason: String) -> String { "Couldn't save: \(reason)" }
     public static let cantEditFile = "This file can't be edited"
+    public static func unsavedQuitMessage(count: Int) -> String {
+        "You have unsaved changes in \(count) \(count == 1 ? "document" : "documents")"
+    }
+    /// Up to five file names (the last path component), then "and N more".
+    public static func unsavedQuitDetail(paths: [String]) -> String {
+        let names = paths.map { URL(fileURLWithPath: $0).lastPathComponent }
+        let more = names.count > 5 ? " and \(names.count - 5) more" : ""
+        return names.prefix(5).joined(separator: ", ") + more
+    }
+    public static let saveAllDocuments = "Save All"
+    public static let discardDrafts = "Discard"
+    public static let quitStopped = "Suica did not quit because some documents were not saved"
+    public static let conflictReason = "The file changed on disk."
+    public static let unsavedDuringSave = "Text was typed while saving."
+    /// One "name: reason" line per file, up to five, then "and N more"; the Drafts are all still open.
+    public static func quitStoppedDetail(_ failures: [(path: String, reason: String)]) -> String {
+        let lines = failures.prefix(5).map { "\(URL(fileURLWithPath: $0.path).lastPathComponent): \($0.reason)" }
+        let more = failures.count > 5 ? ["and \(failures.count - 5) more"] : []
+        return (lines + more + ["Your changes are still in the app."]).joined(separator: "\n")
+    }
 }
 
 // MARK: - Updates

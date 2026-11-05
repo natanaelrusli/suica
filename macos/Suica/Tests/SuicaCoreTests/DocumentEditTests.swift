@@ -343,3 +343,103 @@ import Testing
         }
     }
 }
+
+@Suite struct QuitCopyTests {
+    @Test func messageIsSingularForOne() {
+        #expect(Copy.unsavedQuitMessage(count: 1) == "You have unsaved changes in 1 document")
+        #expect(Copy.unsavedQuitMessage(count: 2) == "You have unsaved changes in 2 documents")
+    }
+
+    @Test func detailNamesFilesByLastComponentAndStopsAtFive() {
+        #expect(Copy.unsavedQuitDetail(paths: ["/p/plans/a.md"]) == "a.md")
+        #expect(Copy.unsavedQuitDetail(paths: ["/p/a.md", "/q/b.md"]) == "a.md, b.md")
+        let five = (1...5).map { "/p/\($0).md" }
+        #expect(Copy.unsavedQuitDetail(paths: five) == "1.md, 2.md, 3.md, 4.md, 5.md")
+        #expect(Copy.unsavedQuitDetail(paths: five + ["/p/6.md"]) == "1.md, 2.md, 3.md, 4.md, 5.md and 1 more")
+        #expect(Copy.unsavedQuitDetail(paths: five + ["/p/6.md", "/p/7.md"]).hasSuffix(" and 2 more"))
+    }
+
+    @Test func failureDetailGivesTheReasonPerFile() {
+        let text = Copy.quitStoppedDetail([("/p/a.md", Copy.conflictReason), ("/q/b.md", "The file is read-only.")])
+        #expect(text == "a.md: The file changed on disk.\nb.md: The file is read-only.\nYour changes are still in the app.")
+        let many = (1...6).map { (path: "/p/\($0).md", reason: "x") }
+        #expect(Copy.quitStoppedDetail(many).contains("and 1 more"))
+    }
+}
+
+@MainActor @Suite struct QuitGuardTests {
+    private func model() -> DocumentsModel {
+        let plans = PlansModel(store: MemoryStore(), scan: { _ in [] })
+        plans.addFolders(["/p"])
+        return DocumentsModel(plans: plans, find: { _ in ([], false) })
+    }
+
+    private func edit(_ documents: DocumentsModel, _ path: String, _ text: String) async {
+        documents.open(path: path)
+        await documents.startEditing()
+        documents.draftText = text
+    }
+
+    /// Runs the guard with a stubbed alert answer; returns the decision, what the alert was asked about and what it explained.
+    private func run(_ documents: DocumentsModel, answer: QuitChoice) async -> (quit: Bool, asked: [String]?, explained: [String]?) {
+        var asked: [String]?, explained: [String]?
+        let quit = await documents.shouldQuit(
+            ask: { asked = $0; return answer }, explain: { explained = $0.map { "\($0.path)=\($0.reason)" } })
+        return (quit, asked, explained)
+    }
+
+    @Test func withoutDraftsItQuitsAndAsksNothing() async {
+        let result = await run(model(), answer: .cancel)
+        #expect(result.quit && result.asked == nil)
+    }
+
+    @Test func saveAllWritesTheFilesAndQuits() async throws {
+        let root = try tree(["a.md": "A", "b.md": "B"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let a = root.appendingPathComponent("a.md").path, b = root.appendingPathComponent("b.md").path
+        let documents = model()
+        await edit(documents, a, "A2")
+        await edit(documents, b, "B2")
+        let result = await run(documents, answer: .saveAll)
+        #expect(result.quit && result.asked == [a, b] && result.explained == nil)
+        #expect(try [String(contentsOfFile: a, encoding: .utf8), String(contentsOfFile: b, encoding: .utf8)] == ["A2", "B2"])
+    }
+
+    @Test func discardDropsTheDraftsAndLeavesTheFiles() async throws {
+        let root = try tree(["a.md": "A"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let a = root.appendingPathComponent("a.md").path
+        let documents = model()
+        await edit(documents, a, "A2")
+        let result = await run(documents, answer: .discard)
+        #expect(result.quit && documents.unsavedPaths.isEmpty)
+        #expect(try String(contentsOfFile: a, encoding: .utf8) == "A")
+    }
+
+    @Test func cancelKeepsEverything() async throws {
+        let root = try tree(["a.md": "A"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let a = root.appendingPathComponent("a.md").path
+        let documents = model()
+        await edit(documents, a, "A2")
+        let result = await run(documents, answer: .cancel)
+        #expect(!result.quit && documents.draft(for: a) == "A2" && result.explained == nil)
+        #expect(try String(contentsOfFile: a, encoding: .utf8) == "A")
+    }
+
+    @Test func aConflictStopsTheQuitAndKeepsEveryDraft() async throws {
+        let root = try tree(["a.md": "A", "b.md": "B"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let a = root.appendingPathComponent("a.md").path, b = root.appendingPathComponent("b.md").path
+        let documents = model()
+        await edit(documents, a, "A2")
+        await edit(documents, b, "B2")
+        try "changed elsewhere".write(toFile: a, atomically: true, encoding: .utf8)
+        let result = await run(documents, answer: .saveAll)
+        #expect(!result.quit && result.explained == ["\(a)=\(Copy.conflictReason)"])
+        // b is on disk and no longer a Draft; a keeps its Draft and the other writer's text is untouched.
+        #expect(documents.draft(for: a) == "A2" && documents.unsavedPaths == [a])
+        #expect(try String(contentsOfFile: a, encoding: .utf8) == "changed elsewhere")
+        #expect(try String(contentsOfFile: b, encoding: .utf8) == "B2")
+    }
+}

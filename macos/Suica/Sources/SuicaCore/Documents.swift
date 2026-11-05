@@ -362,6 +362,8 @@ public enum DocumentDisk {
     }
 }
 
+public enum QuitChoice: Equatable, Sendable { case saveAll, discard, cancel }
+
 public enum LinkOutcome: Equatable, Sendable { case opened, ignored, external }
 
 @MainActor @Observable
@@ -609,5 +611,32 @@ public final class DocumentsModel {
         var outcomes: [String: SaveOutcome] = [:]
         for path in unsavedPaths.sorted() { outcomes[path] = await save(path, overwrite: false) }
         return outcomes
+    }
+
+    /// What the quit guard decides, after `ask` (which shows the alert) answers. Quits only when no Draft is left:
+    /// Discard drops them, Save All must save every one, and any failure keeps them all and says why through `explain`.
+    public func shouldQuit(
+        ask: (_ paths: [String]) async -> QuitChoice, explain: (_ failures: [(path: String, reason: String)]) async -> Void
+    ) async -> Bool {
+        let paths = unsavedPaths.sorted()
+        if paths.isEmpty { return true }
+        switch await ask(paths) {
+        case .cancel: return false
+        case .discard: discardAll(); return true
+        case .saveAll:
+            let outcomes = await saveAll()  // a path with no outcome had its Draft typed back to the base meanwhile
+            var failures = paths.compactMap { path -> (path: String, reason: String)? in
+                switch outcomes[path] {
+                case .saved, nil: nil
+                case .conflict: (path, Copy.conflictReason)
+                case .failed(let reason): (path, reason)
+                }
+            }
+            // Text typed while a save ran stays a Draft: quitting now would lose it.
+            for path in unsavedPaths.subtracting(failures.map(\.path)).sorted() { failures.append((path, Copy.unsavedDuringSave)) }
+            if failures.isEmpty { return true }
+            await explain(failures)
+            return false
+        }
     }
 }
