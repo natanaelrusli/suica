@@ -226,6 +226,58 @@ import Testing
         #expect(documents.draft(for: a) == "mine" && documents.content == .text(entries: [], body: "mine"))
     }
 
+    private func node(_ id: String, in nodes: [DocumentNode]) -> DocumentNode? {
+        for n in nodes { if n.id == id { return n }; if let hit = node(id, in: n.children ?? []) { return hit } }
+        return nil
+    }
+
+    /// The Draft's file is gone from disk or moved: its row stays until the Draft is gone and a later scan runs.
+    private func orphanCheck(_ move: Bool) async throws {
+        let root = try tree(["a.md": "A", "b.md": "B"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let a = root.appendingPathComponent("a.md").path
+        let plans = PlansModel(store: MemoryStore(), scan: { _ in [] })
+        plans.addFolders([root.path])
+        let documents = DocumentsModel(plans: plans)
+        await documents.refresh()
+        await edit(documents, a, "mine")
+        if move {
+            try FileManager.default.createDirectory(at: root.appendingPathComponent("sub"), withIntermediateDirectories: true)
+            try FileManager.default.moveItem(atPath: a, toPath: root.appendingPathComponent("sub/a.md").path)
+        } else {
+            try FileManager.default.removeItem(atPath: a)
+        }
+        await documents.refresh()
+        #expect(documents.files.contains { $0.path == a })
+        #expect(documents.visible.contains { $0.path == a })
+        #expect(node(a, in: documents.tree)?.file?.path == a)
+        #expect(documents.unsavedPaths == [a])
+        #expect(documents.tree == DocumentTree.build(documents.files))
+        documents.revert()
+        await documents.refresh()
+        #expect(!documents.files.contains { $0.path == a } && node(a, in: documents.tree) == nil)
+    }
+
+    @Test func aDraftWhoseFileWasDeletedStaysListedUntilRevertedAndRescanned() async throws { try await orphanCheck(false) }
+    @Test func aDraftWhoseFileWasMovedStaysListedUntilRevertedAndRescanned() async throws { try await orphanCheck(true) }
+
+    @Test func aDraftStaysListedWhenNoFolderIsLeft() async throws {
+        let root = try tree(["a.md": "A"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let a = root.appendingPathComponent("a.md").path
+        let plans = PlansModel(store: MemoryStore(), scan: { _ in [] })
+        plans.addFolders([root.path])
+        let documents = DocumentsModel(plans: plans)
+        await documents.refresh()
+        await edit(documents, a, "mine")
+        plans.removeFolder(root.path)
+        await documents.refresh()
+        #expect(documents.files.map(\.path) == [a] && node(a, in: documents.tree) != nil)
+        documents.revert()
+        await documents.refresh()
+        #expect(documents.files.isEmpty && documents.tree.isEmpty)
+    }
+
     @Test func viewModeShowsTheDraftAsAPreview() async throws {
         let root = try tree(["a.md": "orig"])
         defer { try? FileManager.default.removeItem(at: root) }

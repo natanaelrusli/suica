@@ -407,8 +407,7 @@ public final class DocumentsModel {
         let mine = generation
         let folders = folders
         guard !folders.isEmpty else {
-            files = []
-            tree = []
+            setFiles([])
             truncated = false
             isScanning = false
             return
@@ -417,10 +416,16 @@ public final class DocumentsModel {
         let find = find
         let found = await Task.detached { find(folders) }.value
         guard mine == generation else { return }
-        files = found.files
-        tree = DocumentTree.build(found.files)
+        setFiles(found.files)
         truncated = found.truncated
         isScanning = false
+    }
+
+    /// A Draft's file that the scan no longer finds (moved or deleted) stays listed, so the Draft stays reachable until reverted.
+    private func setFiles(_ found: [DocumentFile]) {
+        let seen = Set(found.map(\.path))
+        files = found + files.filter { drafts[$0.path] != nil && !seen.contains($0.path) }
+        tree = DocumentTree.build(files)
     }
 
     public func addFolders(_ chosen: [String]) { plans.addFolders(chosen) }
