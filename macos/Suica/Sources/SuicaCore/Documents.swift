@@ -285,6 +285,28 @@ public enum DocumentContent: Equatable, Sendable {
     case text(entries: [FrontMatterEntry], body: String)
 }
 
+public enum LineEnding: Equatable, Sendable { case lf, crlf }
+
+public enum DocumentText {
+    /// Text with every `\r\n` and lone `\r` turned into `\n`, and the ending the file used (`.crlf` when it held any `\r\n`).
+    /// rewriteWikilinks splits on "\n", and Swift reads "\r\n" as one Character, so fences need LF.
+    public static func normalise(_ raw: String) -> (text: String, ending: LineEnding) {
+        let lf = raw.replacingOccurrences(of: "\r\n", with: "\n")
+        return (lf.replacingOccurrences(of: "\r", with: "\n"), lf == raw ? .lf : .crlf)
+    }
+
+    /// The inverse for saving: `\n` become `\r\n` for `.crlf`.
+    public static func restore(_ text: String, ending: LineEnding) -> String {
+        ending == .crlf ? text.replacingOccurrences(of: "\n", with: "\r\n") : text
+    }
+
+    /// What View mode draws for `text` (already LF): front matter split, wikilinks rewritten.
+    public static func render(_ text: String) -> DocumentContent {
+        let (entries, body) = FrontMatter.split(text)
+        return .text(entries: entries, body: DocumentLinks.rewriteWikilinks(body))
+    }
+}
+
 public enum LinkOutcome: Equatable, Sendable { case opened, ignored, external }
 
 @MainActor @Observable
@@ -394,10 +416,7 @@ public final class DocumentsModel {
                 size <= MarkdownFiles.maxBytes, let data = FileManager.default.contents(atPath: path),
                 data.count <= MarkdownFiles.maxBytes, let text = String(data: data, encoding: .utf8)
             else { return .unavailable }
-            // rewriteWikilinks splits on "\n", and Swift reads "\r\n" as one Character, so fences need LF.
-            let lf = text.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
-            let (entries, body) = FrontMatter.split(lf)
-            return .text(entries: entries, body: DocumentLinks.rewriteWikilinks(body))
+            return DocumentText.render(DocumentText.normalise(text).text)
         }.value
         guard path == selectedPath else { return }
         content = loaded
