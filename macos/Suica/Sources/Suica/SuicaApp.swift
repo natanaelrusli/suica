@@ -170,7 +170,8 @@ struct SuicaApp: App {
     @State private var lessons: LessonsModel
     @State private var updates: UpdatesModel
     @State private var ideas: IdeasModel
-    @State private var plans = PlansModel(store: UserDefaults.standard)
+    @State private var plans: PlansModel
+    @State private var documents: DocumentsModel
     @State private var appearance = AppearanceSettings()
     @State private var navigator = Navigator()
     @State private var celebrations = CelebrationCounter()
@@ -225,6 +226,10 @@ struct SuicaApp: App {
         _office = State(initialValue: OfficeModel(client: officeClient))
         _lessons = State(initialValue: LessonsModel(client: lessonsClient))
         _ideas = State(initialValue: IdeasModel(client: ideasClient))
+        // Documents reads the Plan folders, so both share one PlansModel.
+        let plansModel = PlansModel(store: UserDefaults.standard)
+        _plans = State(initialValue: plansModel)
+        _documents = State(initialValue: DocumentsModel(plans: plansModel))
         let updatesModel = UpdatesModel(
             client: updatesClient, store: UserDefaults.standard, now: Date.init, relaunch: relaunchAfterUpdate)
         _updates = State(initialValue: updatesModel)
@@ -259,7 +264,7 @@ struct SuicaApp: App {
         Window(Copy.appName, id: "main") {
             MainWindow(
                 window: window, editor: editor, reviews: reviews, fixes: fixes, templates: templates,
-                office: office, lessons: lessons, ideas: ideas, plans: plans, updates: updatesOffered,
+                office: office, lessons: lessons, ideas: ideas, plans: plans, documents: documents, updates: updatesOffered,
                 onboarding: onboarding, settings: appearance, navigator: navigator
             )
             .modifier(Celebrations(model: model, reviews: reviews, settings: appearance, counter: celebrations))

@@ -56,14 +56,7 @@ struct PlansView: View {
     }
 
     private func addFolders() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = true
-        panel.showsHiddenFiles = true
-        panel.prompt = Copy.addFoldersPrompt
-        guard panel.runModal() == .OK else { return }
-        model.addFolders(panel.urls.map(\.path))
+        model.addFolders(pickFolders())
         Task { await model.refresh() }
     }
 

@@ -19,6 +19,8 @@ enum WindowSection: String, CaseIterable, Identifiable {
     case ideas
     /// Check for updates and install one; ⇧⌘U, under Settings after Configuration. Hidden when the app has no CLI to update.
     case updates
+    /// The Markdown files under the Plan folders, read in the app; ⇧⌘D, under Insights after Plans.
+    case documents
 
     var id: String { rawValue }
 
@@ -39,6 +41,7 @@ enum WindowSection: String, CaseIterable, Identifiable {
         case .plans: Copy.plans
         case .ideas: "Idea Box"
         case .updates: Copy.updatesHeading
+        case .documents: Copy.documents
         }
     }
 
@@ -60,6 +63,7 @@ enum WindowSection: String, CaseIterable, Identifiable {
         case .plans: "list.bullet.clipboard"
         case .ideas: "lightbulb"
         case .updates: "arrow.down.circle"
+        case .documents: "doc.richtext"
         }
     }
 
@@ -81,6 +85,7 @@ enum WindowSection: String, CaseIterable, Identifiable {
         case .plans: .teal
         case .ideas: .orange
         case .updates: .green
+        case .documents: .yellow
         }
     }
 
@@ -91,6 +96,7 @@ enum WindowSection: String, CaseIterable, Identifiable {
         if self == .plans { return KeyboardShortcut("p", modifiers: [.command, .shift]) }
         if self == .ideas { return KeyboardShortcut("i", modifiers: [.command, .shift]) }
         if self == .updates { return KeyboardShortcut("u", modifiers: [.command, .shift]) }
+        if self == .documents { return KeyboardShortcut("d", modifiers: [.command, .shift]) }
         let index = Self.allCases.firstIndex(of: self) ?? 0
         return KeyboardShortcut(KeyEquivalent(Character(String((index + 1) % 10))))
     }
@@ -259,7 +265,7 @@ struct SidebarNode: Identifiable {
                     children: StatisticsPage.allCases.map {
                         SidebarNode(item: .statistics($0), title: $0.title, symbol: $0.symbol, tint: $0.tint)
                     }),
-                SidebarNode(.lessons), SidebarNode(.plans), SidebarNode(.usage), SidebarNode(.logs), SidebarNode(.system),
+                SidebarNode(.lessons), SidebarNode(.plans), SidebarNode(.documents), SidebarNode(.usage), SidebarNode(.logs), SidebarNode(.system),
             ]
         ),
         (
