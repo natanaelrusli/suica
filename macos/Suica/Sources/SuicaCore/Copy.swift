@@ -1826,6 +1826,7 @@ extension Copy {
     public static let goBack = "Back"
     public static let goForward = "Forward"
     public static let readPlan = "Read"
+    public static let openDocument = "Open"
 }
 
 // MARK: - Updates

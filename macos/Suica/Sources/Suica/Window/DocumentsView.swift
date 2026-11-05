@@ -121,6 +121,8 @@ struct DocumentsView: View {
                         .padding(20)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
+                    // A new scroll view per file, so each one opens at the top.
+                    .id(path)
                 case .unavailable:
                     ContentUnavailableView {
                         Label(Copy.documentUnavailableTitle, systemImage: "exclamationmark.triangle")
@@ -164,7 +166,7 @@ struct DocumentsView: View {
     }
 
     @ViewBuilder private func fileButtons(_ path: String) -> some View {
-        Button(Copy.openPlan) { NSWorkspace.shared.open(URL(fileURLWithPath: path)) }
+        Button(Copy.openDocument) { NSWorkspace.shared.open(URL(fileURLWithPath: path)) }
         Button(Copy.showInFinder) { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]) }
     }
 }
