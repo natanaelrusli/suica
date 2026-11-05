@@ -247,3 +247,72 @@ import Testing
         #expect(DocumentTree.build([]).isEmpty)
     }
 }
+
+@MainActor @Suite struct DocumentsModelTests {
+    private func file(_ relative: String, in folder: String = "/p") -> DocumentFile {
+        DocumentFile(path: folder + "/" + relative, folder: folder, relativePath: relative)
+    }
+
+    private func model(
+        folders: [String] = ["/p"], find: @escaping @Sendable ([String]) -> (files: [DocumentFile], truncated: Bool)
+    ) -> (DocumentsModel, PlansModel) {
+        let plans = PlansModel(store: MemoryStore(), scan: { _ in [] })
+        plans.addFolders(folders)
+        return (DocumentsModel(plans: plans, find: find), plans)
+    }
+
+    @Test func refreshListsTheFilesOfThePlanFolders() async {
+        let two = [file("a.md"), file("b/c.md")]
+        let (documents, _) = model { _ in (two, true) }
+        await documents.refresh()
+        #expect(documents.files == two)
+        #expect(documents.truncated)
+        #expect(!documents.isScanning)
+        #expect(documents.tree.count == 1)
+    }
+
+    @Test func refreshWithNoFoldersEmptiesTheList() async {
+        let (documents, _) = model(folders: []) { _ in
+            Issue.record("find must not run without folders")
+            return ([], false)
+        }
+        await documents.refresh()
+        #expect(documents.files == [])
+        #expect(!documents.isScanning)
+    }
+
+    @Test func anOlderSlowScanNeverOverwritesANewerOne() async {
+        let a = file("a.md", in: "/a"), b = file("b.md", in: "/b")
+        let (documents, plans) = model(folders: ["/a", "/b"]) { folders in
+            if folders.count == 2 { Thread.sleep(forTimeInterval: 0.3) }
+            return (folders.count == 2 ? [a, b] : [a], false)
+        }
+        let slow = Task { await documents.refresh() }
+        try? await Task.sleep(for: .milliseconds(50))
+        plans.removeFolder("/b")
+        await documents.refresh()
+        await slow.value
+        #expect(documents.files == [a])
+        #expect(!documents.isScanning)
+    }
+
+    @Test func searchMatchesEveryWordOfTheRelativePathIgnoringCaseAndAccents() async {
+        let resume = file("docs/Résumé.md"), plan = file("docs/plans/a.md")
+        let (documents, _) = model { _ in ([resume, plan], false) }
+        await documents.refresh()
+        documents.query = "resume docs"
+        #expect(documents.visible == [resume])
+        documents.query = ""
+        #expect(documents.visible == [resume, plan])
+        documents.query = "zzz"
+        #expect(documents.visible == [])
+    }
+
+    @Test func addAndRemoveFoldersChangeThePlansFoldersToo() {
+        let (documents, plans) = model(folders: []) { _ in ([], false) }
+        documents.addFolders(["/dir"])
+        #expect(plans.folders == ["/dir"] && documents.folders == ["/dir"])
+        documents.removeFolder("/dir")
+        #expect(plans.folders.isEmpty && documents.folders.isEmpty)
+    }
+}

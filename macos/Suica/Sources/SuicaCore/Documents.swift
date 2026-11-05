@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 
 /// A Markdown file found under one of the Owner's folders.
 public struct DocumentFile: Equatable, Identifiable, Sendable {
@@ -276,4 +277,58 @@ public enum DocumentTree {
         let byName = { (a: DocumentNode, b: DocumentNode) in a.name.localizedStandardCompare(b.name) == .orderedAscending }
         return dirs.sorted(by: byName) + leaves.sorted(by: byName)
     }
+}
+
+@MainActor @Observable
+public final class DocumentsModel {
+    private let plans: PlansModel
+    private let find: @Sendable ([String]) -> (files: [DocumentFile], truncated: Bool)
+    /// Bumped by every refresh, so a slow scan that was overtaken drops its result.
+    private var generation = 0
+
+    public private(set) var files: [DocumentFile] = []
+    public private(set) var truncated = false
+    public private(set) var isScanning = false
+    public var query = ""
+
+    public init(
+        plans: PlansModel,
+        find: @escaping @Sendable ([String]) -> (files: [DocumentFile], truncated: Bool) = { MarkdownFiles.find(in: $0) }
+    ) {
+        self.plans = plans
+        self.find = find
+    }
+
+    public var folders: [String] { plans.folders }
+
+    /// The files whose path or folder name hold every word of the search; all of them without one.
+    public var visible: [DocumentFile] {
+        files.filter { Search.matches(query, [$0.relativePath, URL(fileURLWithPath: $0.folder).lastPathComponent]) }
+    }
+
+    public var tree: [DocumentNode] { DocumentTree.build(files) }
+
+    /// Scans off the main thread; the previous list stays until the scan is done. Only the newest
+    /// refresh sets the list: an older scan that finishes later is dropped.
+    public func refresh() async {
+        generation += 1
+        let mine = generation
+        let folders = folders
+        guard !folders.isEmpty else {
+            files = []
+            truncated = false
+            isScanning = false
+            return
+        }
+        isScanning = true
+        let find = find
+        let found = await Task.detached { find(folders) }.value
+        guard mine == generation else { return }
+        files = found.files
+        truncated = found.truncated
+        isScanning = false
+    }
+
+    public func addFolders(_ chosen: [String]) { plans.addFolders(chosen) }
+    public func removeFolder(_ path: String) { plans.removeFolder(path) }
 }
