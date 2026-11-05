@@ -53,7 +53,7 @@ struct DocumentsView: View {
             .pickerStyle(.segmented)
             .help(model.content == .unavailable ? Copy.cantEditFile : "")
             .disabled(model.selectedPath == nil)
-            if model.mode == .edit {
+            if model.mode == .edit || dirty {  // View mode previews a Draft, so it saves and reverts too
                 Button { save() } label: { Label(Copy.saveDocument, systemImage: "square.and.arrow.down") }
                     .keyboardShortcut("s")
                     .disabled(!dirty)
