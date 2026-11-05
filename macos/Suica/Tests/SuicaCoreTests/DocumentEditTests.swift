@@ -126,3 +126,181 @@ import Testing
         #expect(try bytes(url) == Data("x\r\n\r\ny".utf8))
     }
 }
+
+@MainActor @Suite struct DocumentDraftTests {
+    private func model() -> DocumentsModel {
+        let plans = PlansModel(store: MemoryStore(), scan: { _ in [] })
+        plans.addFolders(["/p"])
+        return DocumentsModel(plans: plans, find: { _ in ([], false) })
+    }
+
+    private func edit(_ documents: DocumentsModel, _ path: String, _ text: String? = nil) async {
+        documents.open(path: path)
+        await documents.startEditing()
+        if let text { documents.draftText = text }
+    }
+
+    private func read(_ path: String) throws -> String { try String(contentsOfFile: path, encoding: .utf8) }
+
+    @Test func typingMakesADraftAndRestoringTheTextRemovesIt() async throws {
+        let root = try tree(["a.md": "orig"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let path = root.appendingPathComponent("a.md").path
+        let documents = model()
+        #expect(documents.mode == .view)
+        await edit(documents, path, "new")
+        #expect(documents.mode == .edit)
+        #expect(documents.draft(for: path) == "new" && documents.unsavedPaths == [path])
+        documents.draftText = "orig"
+        #expect(documents.draft(for: path) == nil && documents.unsavedPaths.isEmpty)
+        #expect(documents.draftText == "orig")
+    }
+
+    @Test func saveWritesTheFileAndClearsTheDraft() async throws {
+        let root = try tree(["a.md": "orig"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let path = root.appendingPathComponent("a.md").path
+        let documents = model()
+        await edit(documents, path, "one")
+        #expect(await documents.save() == .saved)
+        #expect(try read(path) == "one" && documents.unsavedPaths.isEmpty && documents.saveError == nil)
+        #expect(documents.draftText == "one")
+        documents.draftText = "two"
+        #expect(await documents.save() == .saved)
+        #expect(try read(path) == "two")
+    }
+
+    @Test func savingWithoutADraftDoesNotTouchTheFile() async throws {
+        let root = try tree(["a.md": "a\rb"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let path = root.appendingPathComponent("a.md").path
+        let documents = model()
+        await edit(documents, path)
+        #expect(await documents.save() == .saved)
+        #expect(try Data(contentsOf: URL(fileURLWithPath: path)) == Data("a\rb".utf8))
+    }
+
+    @Test func saveRefusesAfterAnExternalChangeAndKeepsTheDraft() async throws {
+        let root = try tree(["a.md": "orig"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let path = root.appendingPathComponent("a.md").path
+        let documents = model()
+        await edit(documents, path, "mine")
+        try "theirs".write(toFile: path, atomically: true, encoding: .utf8)
+        #expect(await documents.save() == .conflict)
+        #expect(try read(path) == "theirs" && documents.draft(for: path) == "mine")
+        #expect(await documents.save(overwrite: true) == .saved)
+        #expect(try read(path) == "mine")
+
+        documents.draftText = "again"
+        try "theirs2".write(toFile: path, atomically: true, encoding: .utf8)
+        await documents.reload()
+        #expect(documents.draft(for: path) == nil && documents.draftText == "theirs2")
+    }
+
+    @Test func aFailedSaveKeepsTheDraftAndSaysWhy() async throws {
+        let root = try tree(["a.md": "orig"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = root.appendingPathComponent("a.md")
+        let documents = model()
+        await edit(documents, url.path, "mine")
+        try FileManager.default.setAttributes([.posixPermissions: 0o444], ofItemAtPath: url.path)
+        guard case .failed = await documents.save() else { Issue.record("expected .failed"); return }
+        #expect(documents.saveError?.isEmpty == false && documents.draft(for: url.path) == "mine")
+        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: url.path)
+        #expect(await documents.save() == .saved)
+        #expect(documents.saveError == nil)
+    }
+
+    @Test func draftsSurviveNavigationAndRescan() async throws {
+        let root = try tree(["a.md": "A", "b.md": "B"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let a = root.appendingPathComponent("a.md").path, b = root.appendingPathComponent("b.md").path
+        let documents = model()
+        await edit(documents, a, "mine")
+        documents.open(path: b)
+        documents.back()
+        #expect(documents.draft(for: a) == "mine" && documents.unsavedPaths == [a])
+        await documents.refresh()
+        await documents.loadContent()
+        #expect(documents.draft(for: a) == "mine" && documents.content == .text(entries: [], body: "mine"))
+    }
+
+    @Test func viewModeShowsTheDraftAsAPreview() async throws {
+        let root = try tree(["a.md": "orig"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let documents = model()
+        await edit(documents, root.appendingPathComponent("a.md").path, "\u{FEFF}see [[x]]")
+        documents.mode = .view
+        await documents.loadContent()
+        #expect(documents.content == .text(entries: [], body: "see [x](suica-doc:x)"))
+        documents.revert()
+        await documents.loadContent()
+        #expect(documents.content == .text(entries: [], body: "orig"))
+    }
+
+    @Test func checkDiskReloadsACleanDocumentAndFlagsADirtyOne() async throws {
+        let root = try tree(["a.md": "orig"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let path = root.appendingPathComponent("a.md").path
+        let documents = model()
+        documents.open(path: path)
+        await documents.loadContent()
+        try "new".write(toFile: path, atomically: true, encoding: .utf8)
+        await documents.checkDisk()
+        #expect(documents.content == .text(entries: [], body: "new") && !documents.diskChanged)
+
+        await documents.startEditing()
+        documents.draftText = "mine"
+        try "newer".write(toFile: path, atomically: true, encoding: .utf8)
+        await documents.checkDisk()
+        #expect(documents.diskChanged && documents.draft(for: path) == "mine")
+        #expect(await documents.save(overwrite: true) == .saved)
+        #expect(!documents.diskChanged)
+    }
+
+    @Test func startEditingAnUnavailableFileStaysInViewMode() async throws {
+        let root = try tree([:])
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let big = root.appendingPathComponent("big.md"), bad = root.appendingPathComponent("bad.md")
+        try Data(repeating: 0x61, count: 1_000_001).write(to: big)
+        try Data([0xFF, 0xFE]).write(to: bad)
+        let documents = model()
+        for url in [big, bad] {
+            await edit(documents, url.path, "x")
+            #expect(documents.mode == .view && documents.unsavedPaths.isEmpty)
+        }
+    }
+
+    @Test func saveAllAndDiscardAll() async throws {
+        let root = try tree(["a.md": "A", "b.md": "B"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let a = root.appendingPathComponent("a.md").path, b = root.appendingPathComponent("b.md").path
+        let documents = model()
+        await edit(documents, a, "A2")
+        await edit(documents, b, "B2")
+        #expect(documents.unsavedPaths == [a, b])
+        #expect(await documents.saveAll() == [a: .saved, b: .saved])
+        #expect(try [read(a), read(b)] == ["A2", "B2"])
+
+        await edit(documents, a, "A3")
+        await edit(documents, b, "B3")
+        documents.discardAll()
+        #expect(documents.unsavedPaths.isEmpty)
+        #expect(try [read(a), read(b)] == ["A2", "B2"])
+    }
+
+    @Test func aSecondSaveWhileOneIsInFlightIsRefused() async throws {
+        let root = try tree(["a.md": "orig"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let path = root.appendingPathComponent("a.md").path
+        let documents = model()
+        await edit(documents, path, "mine")
+        async let first = documents.save()
+        async let second = documents.save()
+        let outcomes = await [first, second]
+        #expect(outcomes.filter { $0 == .saved }.count >= 1)
+        #expect(try read(path) == "mine" && documents.unsavedPaths.isEmpty)
+    }
+}
