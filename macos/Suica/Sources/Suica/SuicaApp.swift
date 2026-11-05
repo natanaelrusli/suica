@@ -276,7 +276,17 @@ struct SuicaApp: App {
         // make the quit ask (and be cancelled): false shows the install failure, and Retry stages again once none is left.
         let updatesModel = UpdatesModel(
             client: updatesClient, store: UserDefaults.standard, now: Date.init,
-            relaunch: { applied in documentsModel.unsavedPaths.isEmpty ? relaunchAfterUpdate(applied) : false })
+            relaunch: { applied in
+                let unsaved = documentsModel.unsavedPaths
+                if unsaved.isEmpty { return relaunchAfterUpdate(applied) }
+                NSApp.activate()
+                let alert = NSAlert()
+                alert.messageText = Copy.installNeedsSavedDocuments
+                alert.informativeText = Copy.unsavedQuitMessage(count: unsaved.count)
+                alert.addButton(withTitle: Copy.ok)
+                alert.runModal()
+                return false
+            })
         _updates = State(initialValue: updatesModel)
         let onboardingModel = OnboardingModel(dashboard: dashboard, setup: setupClient)
         _onboarding = State(initialValue: onboardingModel)

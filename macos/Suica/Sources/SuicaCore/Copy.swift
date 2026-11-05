@@ -1848,6 +1848,8 @@ extension Copy {
         let more = names.count > 5 ? " and \(names.count - 5) more" : ""
         return names.prefix(5).joined(separator: ", ") + more
     }
+    public static let installNeedsSavedDocuments = "Save or discard your documents before installing the update"
+    public static let ok = "OK"
     public static let saveAllDocuments = "Save All"
     public static let discardDrafts = "Discard"
     public static let quitStopped = "Suica did not quit because some documents were not saved"
