@@ -343,6 +343,10 @@ public enum DocumentDisk {
         do {
             let attributes = try fm.attributesOfItem(atPath: target.path)  // throws when the file is missing: never recreated
             guard fm.isWritableFile(atPath: target.path) else { return .failed("The file is read-only.") }
+            // A file the Owner could not have seen (grew past the limit, not UTF-8) is never replaced, even with `overwrite`.
+            guard read(target.path) != nil else {
+                return .failed("The file on disk is over \(MarkdownFiles.maxBytes) bytes or not UTF-8 text, so it was not replaced.")
+            }
             try data.write(to: temp, options: .withoutOverwriting)
             try fm.setAttributes([.posixPermissions: attributes[.posixPermissions] ?? 0o644], ofItemAtPath: temp.path)
             if !overwrite, read(target.path)?.text != base { return .conflict }

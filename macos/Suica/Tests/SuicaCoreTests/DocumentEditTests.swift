@@ -101,6 +101,22 @@ import Testing
         #expect(try names(ro).sorted() == ["big.md", "ro.md"])
     }
 
+    @Test func writeNeverReplacesAFileItCannotRead() throws {
+        for unreadable in [Data(repeating: 0x61, count: 1_000_001), Data([0xFF, 0xFE, 0x41])] {
+            let root = try tree(["a.md": "x"])
+            defer { try? FileManager.default.removeItem(at: root) }
+            let url = root.appendingPathComponent("a.md")
+            try unreadable.write(to: url)
+            for overwrite in [false, true] {
+                let outcome = DocumentDisk.write("mine", ending: .lf, to: url.path, expecting: "x", overwrite: overwrite)
+                guard case .failed(let reason) = outcome else { Issue.record("expected .failed, got \(outcome)"); continue }
+                #expect(!reason.isEmpty)
+                #expect(try bytes(url) == unreadable)
+                #expect(try names(url) == ["a.md"])
+            }
+        }
+    }
+
     @Test func savingUnchangedTextRewritesTheSameBytes() throws {
         let root = try tree(["a.md": "x\r\n\r\ny"])
         defer { try? FileManager.default.removeItem(at: root) }
