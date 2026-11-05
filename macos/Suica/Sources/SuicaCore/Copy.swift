@@ -1812,6 +1812,57 @@ extension Copy {
     public static let rescanPlans = "Rescan"
 }
 
+// MARK: - Documents
+
+extension Copy {
+    public static let documents = "Documents"
+    public static let searchDocuments = "Search documents"
+    public static let noDocumentsTitle = "No documents found"
+    public static let noDocumentsHint = "Markdown files under the Plan folders show here."
+    public static let noDocumentsMatch = "No documents match."
+    public static let documentsTruncated = "Showing the first 5,000 documents."
+    public static let documentUnavailableTitle = "This file can't be shown"
+    public static let documentUnavailableHint = "It may have been moved or deleted, be larger than 1 MB, or not be UTF-8 text."
+    public static let documentProperties = "Properties"
+    public static let goBack = "Back"
+    public static let goForward = "Forward"
+    public static let readPlan = "Read"
+    public static let openDocument = "Open"
+    public static let editMode = "Edit"
+    public static let viewMode = "View"
+    public static let saveDocument = "Save"
+    public static let revertDraft = "Revert"
+    public static let unsavedDot = "Unsaved changes"
+    public static let fileChangedOnDisk = "The file changed on disk"
+    public static let overwriteFile = "Overwrite"
+    public static let reloadFile = "Reload"
+    public static let keepEditing = "Keep editing"
+    public static func saveFailed(_ reason: String) -> String { "Couldn't save: \(reason)" }
+    public static let cantEditFile = "This file can't be edited"
+    public static func unsavedQuitMessage(count: Int) -> String {
+        "You have unsaved changes in \(count) \(count == 1 ? "document" : "documents")"
+    }
+    /// Up to five file names (the last path component), then "and N more".
+    public static func unsavedQuitDetail(paths: [String]) -> String {
+        let names = paths.map { URL(fileURLWithPath: $0).lastPathComponent }
+        let more = names.count > 5 ? " and \(names.count - 5) more" : ""
+        return names.prefix(5).joined(separator: ", ") + more
+    }
+    public static let installNeedsSavedDocuments = "Save or discard your documents before installing the update"
+    public static let ok = "OK"
+    public static let saveAllDocuments = "Save All"
+    public static let discardDrafts = "Discard"
+    public static let quitStopped = "Suica did not quit because some documents were not saved"
+    public static let conflictReason = "The file changed on disk."
+    public static let unsavedDuringSave = "Text was typed while saving."
+    /// One "name: reason" line per file, up to five, then "and N more"; the Drafts are all still open.
+    public static func quitStoppedDetail(_ failures: [(path: String, reason: String)]) -> String {
+        let lines = failures.prefix(5).map { "\(URL(fileURLWithPath: $0.path).lastPathComponent): \($0.reason)" }
+        let more = failures.count > 5 ? ["and \(failures.count - 5) more"] : []
+        return (lines + more + ["Your changes are still in the app."]).joined(separator: "\n")
+    }
+}
+
 // MARK: - Updates
 
 extension Copy {

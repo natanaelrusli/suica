@@ -17,6 +17,8 @@ extension PlanStatus {
 /// The plans of the Owner's folders: the list on the left, the selected plan and its marks on the right.
 struct PlansView: View {
     @Bindable var model: PlansModel
+    let documents: DocumentsModel
+    let navigator: Navigator
     @State private var selectedPath: String?
 
     var body: some View {
@@ -56,14 +58,7 @@ struct PlansView: View {
     }
 
     private func addFolders() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = true
-        panel.showsHiddenFiles = true
-        panel.prompt = Copy.addFoldersPrompt
-        guard panel.runModal() == .OK else { return }
-        model.addFolders(panel.urls.map(\.path))
+        model.addFolders(pickFolders())
         Task { await model.refresh() }
     }
 
@@ -108,7 +103,7 @@ struct PlansView: View {
 
     @ViewBuilder private var detail: some View {
         if let plan = model.plans.first(where: { $0.path == selectedPath }) {
-            PlanDetail(model: model, plan: plan).id(plan.path)
+            PlanDetail(model: model, documents: documents, navigator: navigator, plan: plan).id(plan.path)
         } else {
             ContentUnavailableView(Copy.plans, systemImage: "list.bullet.clipboard")
         }
@@ -146,6 +141,8 @@ private struct PlanRow: View {
 
 private struct PlanDetail: View {
     let model: PlansModel
+    let documents: DocumentsModel
+    let navigator: Navigator
     let plan: PlanDocument
     @State private var note = ""
 
@@ -183,6 +180,10 @@ private struct PlanDetail: View {
                     }
                 }
                 HStack {
+                    Button {
+                        documents.open(path: plan.path)
+                        navigator.selection = .section(.documents)
+                    } label: { Label(Copy.readPlan, systemImage: "book") }
                     Button(Copy.openPlan) { NSWorkspace.shared.open(URL(fileURLWithPath: plan.path)) }
                     Button(Copy.showInFinder) { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: plan.path)]) }
                 }
