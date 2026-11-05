@@ -260,17 +260,53 @@ import Testing
     }
 
     @Test func startEditingAnUnavailableFileStaysInViewMode() async throws {
-        let root = try tree([:])
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let root = try tree(["good.md": "good"])
         defer { try? FileManager.default.removeItem(at: root) }
         let big = root.appendingPathComponent("big.md"), bad = root.appendingPathComponent("bad.md")
         try Data(repeating: 0x61, count: 1_000_001).write(to: big)
         try Data([0xFF, 0xFE]).write(to: bad)
         let documents = model()
         for url in [big, bad] {
-            await edit(documents, url.path, "x")
+            await edit(documents, root.appendingPathComponent("good.md").path)
+            #expect(documents.mode == .edit)
+            await edit(documents, url.path)
             #expect(documents.mode == .view && documents.unsavedPaths.isEmpty)
+            documents.draftText = "x"  // no stale base from the previous file
+            #expect(documents.unsavedPaths.isEmpty)
         }
+    }
+
+    @Test func typingBackToTheSavedTextClearsTheConflictAndTheError() async throws {
+        let root = try tree(["a.md": "orig"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = root.appendingPathComponent("a.md")
+        let documents = model()
+        await edit(documents, url.path, "mine")
+        try "theirs".write(to: url, atomically: true, encoding: .utf8)
+        #expect(await documents.save() == .conflict && documents.diskChanged)
+        documents.draftText = "orig"
+        #expect(documents.draft(for: url.path) == nil && !documents.diskChanged)
+        #expect(await documents.save() == .saved && !documents.diskChanged)
+
+        try FileManager.default.setAttributes([.posixPermissions: 0o444], ofItemAtPath: url.path)
+        documents.draftText = "mine"
+        guard case .failed = await documents.save() else { Issue.record("expected .failed"); return }
+        #expect(documents.saveError != nil)
+        documents.draftText = "orig"
+        #expect(documents.saveError == nil)
+        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: url.path)
+    }
+
+    @Test func aDocumentThatBecomesUneditableLeavesEditMode() async throws {
+        let root = try tree(["a.md": "orig"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = root.appendingPathComponent("a.md")
+        let documents = model()
+        await edit(documents, url.path)
+        #expect(documents.mode == .edit)
+        try Data([0xFF, 0xFE]).write(to: url)
+        await documents.checkDisk()
+        #expect(documents.mode == .view && documents.unsavedPaths.isEmpty && documents.content == .unavailable)
     }
 
     @Test func saveAllAndDiscardAll() async throws {
@@ -296,11 +332,14 @@ import Testing
         defer { try? FileManager.default.removeItem(at: root) }
         let path = root.appendingPathComponent("a.md").path
         let documents = model()
-        await edit(documents, path, "mine")
-        async let first = documents.save()
-        async let second = documents.save()
-        let outcomes = await [first, second]
-        #expect(outcomes.filter { $0 == .saved }.count >= 1)
-        #expect(try read(path) == "mine" && documents.unsavedPaths.isEmpty)
+        // Both calls run on the main actor: the first suspends on its disk write before the second starts, so they overlap.
+        for round in 1...3 {
+            await edit(documents, path, "mine \(round)")
+            async let first = documents.save()
+            async let second = documents.save()
+            let outcomes = await [first, second]
+            #expect(outcomes.contains(.saved) && outcomes.contains(.failed("The file is already being saved.")))
+            #expect(try read(path) == "mine \(round)" && documents.unsavedPaths.isEmpty)
+        }
     }
 }

@@ -503,7 +503,14 @@ public final class DocumentsModel {
         set {
             guard let path = selectedPath, let base = bases[path] else { return }
             drafts[path] = newValue == base.text ? nil : newValue
+            if drafts[path] == nil { clearNotices(path) }
         }
+    }
+
+    /// `diskChanged` and `saveError` only mean something while a Draft exists.
+    private func clearNotices(_ path: String) {
+        diskChangedPaths.remove(path)
+        saveErrors[path] = nil
     }
 
     private func read(_ path: String) async -> (disk: DiskDocument?, fresh: Bool) {
@@ -518,7 +525,10 @@ public final class DocumentsModel {
         guard fresh, drafts[path] == nil else { return }
         bases[path] = disk
         diskChangedPaths.remove(path)
-        if path == selectedPath { content = disk.map { DocumentText.renderFile($0.text) } ?? .unavailable }
+        if path == selectedPath {
+            content = disk.map { DocumentText.renderFile($0.text) } ?? .unavailable
+            if disk == nil { mode = .view }  // an editor without a base would swallow every keystroke
+        }
     }
 
     /// Loads the file's text as the base (an existing Draft keeps its base) and switches to Edit; an unavailable file stays in View.
@@ -536,7 +546,7 @@ public final class DocumentsModel {
 
     private func save(_ path: String, overwrite: Bool) async -> SaveOutcome {
         // No Draft means nothing to write; a mixed-ending file would not come back byte-identical.
-        guard let text = drafts[path], let base = bases[path] else { return .saved }
+        guard let text = drafts[path], let base = bases[path] else { clearNotices(path); return .saved }
         guard saving.insert(path).inserted else { return .failed("The file is already being saved.") }
         versions[path, default: 0] += 1
         let outcome = await Task.detached {
