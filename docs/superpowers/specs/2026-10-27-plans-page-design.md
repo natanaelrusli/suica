@@ -28,6 +28,7 @@ Plans written with the writing-plans skill pile up in `docs/superpowers/plans/` 
 - **Marks** (status and note) are keyed by the plan's absolute path. A mark whose file is gone stays stored and is not listed (_my call_: a plan that comes back, or a folder on an unmounted volume, keeps its status).
 - The page lists a plan's tasks with their progress in the detail pane; it does not render the whole plan.
 - Sidebar: Insights, after Lessons; ⇧⌘P.
+- A **Read** button opens the plan on the Documents page.
 
 ## Anti-goals
 

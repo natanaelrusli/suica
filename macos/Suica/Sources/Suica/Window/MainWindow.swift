@@ -439,7 +439,7 @@ struct MainWindow: View {
         case .office: OfficeView(model: office, settings: settings)
         case .system: SystemView()
         case .lessons: LessonsView(model: lessons, navigator: navigator)
-        case .plans: PlansView(model: plans)
+        case .plans: PlansView(model: plans, documents: documents, navigator: navigator)
         case .documents: DocumentsView(model: documents)
         case .ideas: IdeasView(model: ideas, office: office, plans: plans, navigator: navigator)
         case .updates:

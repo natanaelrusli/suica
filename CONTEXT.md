@@ -112,6 +112,10 @@ _Avoid_: autonomous ideation
 The status and note the Owner sets on a plan on the Plans page. Kept in the app, never in the plan file.
 _Avoid_: tracker entry
 
+**Document**:
+A Markdown file under the Plan folders, read on the Documents page. Suica never edits it.
+_Avoid_: note
+
 **Pending Message**:
 A Reviewer Nudge, Re-review Nudge or Review Notice written by the agent but held until the Owner sends or skips it, when that flow is set to require approval.
 _Avoid_: Draft, queued message
