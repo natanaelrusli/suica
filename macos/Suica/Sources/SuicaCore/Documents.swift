@@ -279,6 +279,14 @@ public enum DocumentTree {
     }
 }
 
+public enum DocumentContent: Equatable, Sendable {
+    case none, unavailable
+    /// `body` has already been through `DocumentLinks.rewriteWikilinks`.
+    case text(entries: [FrontMatterEntry], body: String)
+}
+
+public enum LinkOutcome: Equatable, Sendable { case opened, ignored, external }
+
 @MainActor @Observable
 public final class DocumentsModel {
     private let plans: PlansModel
@@ -290,6 +298,11 @@ public final class DocumentsModel {
     public private(set) var truncated = false
     public private(set) var isScanning = false
     public var query = ""
+    /// Changed only through `open`, `back` and `forward`.
+    public private(set) var selectedPath: String?
+    public private(set) var content = DocumentContent.none
+    private var backStack: [String] = []
+    private var forwardStack: [String] = []
 
     public init(
         plans: PlansModel,
@@ -331,4 +344,60 @@ public final class DocumentsModel {
 
     public func addFolders(_ chosen: [String]) { plans.addFolders(chosen) }
     public func removeFolder(_ path: String) { plans.removeFolder(path) }
+
+    public var canGoBack: Bool { !backStack.isEmpty }
+    public var canGoForward: Bool { !forwardStack.isEmpty }
+
+    public func open(path: String) {
+        guard path != selectedPath else { return }
+        if let current = selectedPath {
+            backStack.append(current)
+            if backStack.count > 50 { backStack.removeFirst() }
+        }
+        forwardStack = []
+        selectedPath = path
+        content = .none
+    }
+
+    public func back() { step(from: &backStack, to: &forwardStack) }
+    public func forward() { step(from: &forwardStack, to: &backStack) }
+
+    private func step(from source: inout [String], to other: inout [String]) {
+        guard let path = source.popLast() else { return }
+        if let current = selectedPath { other.append(current) }
+        selectedPath = path
+        content = .none
+    }
+
+    /// Wikilinks resolve by name, relative links from the open file; any other scheme goes to the system.
+    public func openLink(_ url: URL) -> LinkOutcome {
+        let target: DocumentFile?
+        if let name = DocumentLinks.wikilinkTarget(url) {
+            target = DocumentLinks.resolveWikilink(name, from: selectedPath ?? "", among: files)
+        } else if url.scheme == nil {
+            target = selectedPath.flatMap { DocumentLinks.resolveRelative(url.path, from: $0, among: files) }
+        } else {
+            return .external
+        }
+        guard let target else { return .ignored }
+        open(path: target.path)
+        return .opened
+    }
+
+    /// Reads the open file off the main thread; the result is dropped if the selection moved meanwhile.
+    public func loadContent() async {
+        guard let path = selectedPath else { content = .none; return }
+        let loaded = await Task.detached { () -> DocumentContent in
+            guard let size = (try? FileManager.default.attributesOfItem(atPath: path))?[.size] as? Int,
+                size <= MarkdownFiles.maxBytes, let data = FileManager.default.contents(atPath: path),
+                data.count <= MarkdownFiles.maxBytes, let text = String(data: data, encoding: .utf8)
+            else { return .unavailable }
+            // rewriteWikilinks splits on "\n", and Swift reads "\r\n" as one Character, so fences need LF.
+            let lf = text.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
+            let (entries, body) = FrontMatter.split(lf)
+            return .text(entries: entries, body: DocumentLinks.rewriteWikilinks(body))
+        }.value
+        guard path == selectedPath else { return }
+        content = loaded
+    }
 }

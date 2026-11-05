@@ -315,4 +315,122 @@ import Testing
         documents.removeFolder("/dir")
         #expect(plans.folders.isEmpty && documents.folders.isEmpty)
     }
+
+    private func documents(opening paths: [String]) async -> DocumentsModel {
+        let files = paths.map { DocumentFile(path: $0, folder: "/r", relativePath: String($0.dropFirst(3))) }
+        let (documents, _) = model(folders: ["/r"]) { _ in (files, false) }
+        await documents.refresh()
+        return documents
+    }
+
+    @Test func openWalksBackAndForwardAndANewOpenDropsForward() {
+        let (documents, _) = model { _ in ([], false) }
+        ["a", "b", "c"].forEach { documents.open(path: $0) }
+        documents.back()
+        documents.back()
+        #expect(documents.selectedPath == "a" && !documents.canGoBack && documents.canGoForward)
+        documents.forward()
+        #expect(documents.selectedPath == "b")
+        documents.open(path: "d")
+        #expect(!documents.canGoForward)
+        documents.back()
+        #expect(documents.selectedPath == "b")
+    }
+
+    @Test func openingTheCurrentFileAgainDoesNotGrowBack() {
+        let (documents, _) = model { _ in ([], false) }
+        documents.open(path: "a")
+        documents.open(path: "a")
+        #expect(!documents.canGoBack)
+    }
+
+    @Test func backKeepsTheLast50Entries() {
+        let (documents, _) = model { _ in ([], false) }
+        for i in 0..<60 { documents.open(path: "f\(i)") }
+        var steps = 0
+        while documents.canGoBack {
+            documents.back()
+            steps += 1
+        }
+        #expect(steps == 50 && documents.selectedPath == "f9")
+    }
+
+    @Test func openLinkOpensAResolvedWikilinkAndIgnoresAMissingOne() async {
+        let documents = await documents(opening: ["/r/a.md", "/r/b.md"])
+        documents.open(path: "/r/a.md")
+        #expect(documents.openLink(URL(string: "suica-doc:b")!) == .opened)
+        #expect(documents.selectedPath == "/r/b.md")
+        #expect(documents.openLink(URL(string: "suica-doc:nope")!) == .ignored)
+        #expect(documents.selectedPath == "/r/b.md")
+    }
+
+    @Test func openLinkResolvesRelativeLinksAndLeavesWebLinksToTheSystem() async {
+        let documents = await documents(opening: ["/r/a.md", "/r/b.md"])
+        #expect(documents.openLink(URL(string: "a.md")!) == .ignored)
+        documents.open(path: "/r/b.md")
+        #expect(documents.openLink(URL(string: "a.md")!) == .opened)
+        #expect(documents.selectedPath == "/r/a.md")
+        documents.open(path: "/r/b.md")
+        #expect(documents.openLink(URL(string: "../x.md")!) == .ignored)
+        #expect(documents.openLink(URL(string: "https://example.com")!) == .external)
+        #expect(documents.openLink(URL(string: "mailto:a@b.c")!) == .external)
+    }
+
+    @Test func loadContentReadsTextFrontMatterAndRewritesWikilinks() async throws {
+        let root = try tree(["a.md": "---\ntitle: T\n---\nsee [[x]]\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let (documents, _) = model { _ in ([], false) }
+        documents.open(path: root.appendingPathComponent("a.md").path)
+        await documents.loadContent()
+        #expect(documents.content == .text(entries: [FrontMatterEntry(key: "title", value: "T")], body: "see [x](suica-doc:x)\n"))
+    }
+
+    @Test func loadContentNormalisesCRLFSoFencesAreRecognised() async throws {
+        let root = try tree(["a.md": "```\r\n[[x]]\r\n```\r\n[[y]]\r\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let (documents, _) = model { _ in ([], false) }
+        documents.open(path: root.appendingPathComponent("a.md").path)
+        await documents.loadContent()
+        #expect(documents.content == .text(entries: [], body: "```\n[[x]]\n```\n[y](suica-doc:y)\n"))
+    }
+
+    @Test func loadContentIsUnavailableForAMissingNonUTF8OrHugeFileAndBackToItRecovers() async throws {
+        let root = try tree(["ok.md": "fine", "gone.md": "x", "big.md": String(repeating: "a", count: 1_000_001)])
+        defer { try? FileManager.default.removeItem(at: root) }
+        try Data([0xFF, 0xFE]).write(to: root.appendingPathComponent("bad.md"))
+        try FileManager.default.removeItem(at: root.appendingPathComponent("gone.md"))
+        let (documents, _) = model { _ in ([], false) }
+        for name in ["gone.md", "bad.md", "big.md"] {
+            documents.open(path: root.appendingPathComponent(name).path)
+            await documents.loadContent()
+            #expect(documents.content == .unavailable, "\(name)")
+        }
+        documents.open(path: root.appendingPathComponent("ok.md").path)
+        documents.open(path: root.appendingPathComponent("gone.md").path)
+        documents.back()
+        await documents.loadContent()
+        #expect(documents.content == .text(entries: [], body: "fine"))
+        documents.forward()
+        #expect(documents.content == .none)
+        await documents.loadContent()
+        #expect(documents.content == .unavailable)
+    }
+
+    @Test func loadContentWithNothingSelectedIsNone() async {
+        let (documents, _) = model { _ in ([], false) }
+        await documents.loadContent()
+        #expect(documents.content == .none)
+    }
+
+    @Test func loadContentDropsItsResultWhenTheSelectionChangedMeanwhile() async throws {
+        let root = try tree(["a.md": "a"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let (documents, _) = model { _ in ([], false) }
+        documents.open(path: root.appendingPathComponent("a.md").path)
+        let load = Task { await documents.loadContent() }
+        await Task.yield()  // let the load start reading before the selection moves
+        documents.open(path: "/elsewhere.md")
+        await load.value
+        #expect(documents.content == .none)
+    }
 }
