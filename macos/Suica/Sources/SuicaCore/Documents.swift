@@ -285,6 +285,85 @@ public enum DocumentContent: Equatable, Sendable {
     case text(entries: [FrontMatterEntry], body: String)
 }
 
+public enum LineEnding: Equatable, Sendable { case lf, crlf }
+
+public enum DocumentText {
+    /// Text with every `\r\n` and lone `\r` turned into `\n`, and the ending the file used (`.crlf` when it held any `\r\n`).
+    /// rewriteWikilinks splits on "\n", and Swift reads "\r\n" as one Character, so fences need LF.
+    public static func normalise(_ raw: String) -> (text: String, ending: LineEnding) {
+        let lf = raw.replacingOccurrences(of: "\r\n", with: "\n")
+        return (lf.replacingOccurrences(of: "\r", with: "\n"), lf == raw ? .lf : .crlf)
+    }
+
+    /// The inverse for saving: `\n` become `\r\n` for `.crlf`.
+    public static func restore(_ text: String, ending: LineEnding) -> String {
+        ending == .crlf ? text.replacingOccurrences(of: "\n", with: "\r\n") : text
+    }
+
+    /// What View mode draws for `text` (already LF): front matter split, wikilinks rewritten.
+    public static func render(_ text: String) -> DocumentContent {
+        let (entries, body) = FrontMatter.split(text)
+        return .text(entries: entries, body: DocumentLinks.rewriteWikilinks(body))
+    }
+
+    /// `render` for text as `DocumentDisk.read` keeps it: one leading BOM is dropped first.
+    public static func renderFile(_ text: String) -> DocumentContent { render(String(text.trimmingPrefix("\u{FEFF}"))) }
+}
+
+public struct DiskDocument: Equatable, Sendable {
+    /// LF text.
+    public let text: String
+    public let ending: LineEnding
+}
+
+public enum SaveOutcome: Equatable, Sendable { case saved, conflict, failed(String) }
+
+public enum DocumentDisk {
+    /// nil when the file is missing, unreadable, over `maxBytes` or not UTF-8.
+    public static func read(_ path: String) -> DiskDocument? {
+        guard let size = (try? FileManager.default.attributesOfItem(atPath: path))?[.size] as? Int,
+            size <= MarkdownFiles.maxBytes, let data = FileManager.default.contents(atPath: path),
+            data.count <= MarkdownFiles.maxBytes, String(data: data, encoding: .utf8) != nil
+        else { return nil }
+        // String(data:encoding:) drops a leading BOM and saving would lose it, so decode again to keep it.
+        let (text, ending) = DocumentText.normalise(String(decoding: data, as: UTF8.self))
+        return DiskDocument(text: text, ending: ending)
+    }
+
+    /// Writes `text` (LF) with `ending` only if the file on disk still reads as `base` (`overwrite: true` skips that check).
+    /// The new bytes go to a temp file beside the original, which is renamed over it after a last re-read, so a
+    /// failure leaves the original whole. shortcut: a writer that lands between that re-read and the rename is
+    /// still overwritten (no file locking), when that matters use a coordinated write (NSFileCoordinator).
+    public static func write(
+        _ text: String, ending: LineEnding, to path: String, expecting base: String, overwrite: Bool = false
+    ) -> SaveOutcome {
+        let data = Data(DocumentText.restore(text, ending: ending).utf8)
+        guard data.count <= MarkdownFiles.maxBytes else { return .failed("The text is over \(MarkdownFiles.maxBytes) bytes.") }
+        let fm = FileManager.default
+        let target = URL(fileURLWithPath: path).resolvingSymlinksInPath()  // rename must replace the file, not a link to it
+        let temp = target.deletingLastPathComponent().appendingPathComponent(".\(UUID().uuidString).suica-tmp")
+        defer { try? fm.removeItem(at: temp) }
+        do {
+            let attributes = try fm.attributesOfItem(atPath: target.path)  // throws when the file is missing: never recreated
+            guard fm.isWritableFile(atPath: target.path) else { return .failed("The file is read-only.") }
+            // A file the Owner could not have seen (grew past the limit, not UTF-8) is never replaced, even with `overwrite`.
+            guard read(target.path) != nil else {
+                return .failed("The file on disk is over \(MarkdownFiles.maxBytes) bytes or not UTF-8 text, so it was not replaced.")
+            }
+            try data.write(to: temp, options: .withoutOverwriting)
+            try fm.setAttributes([.posixPermissions: attributes[.posixPermissions] ?? 0o644], ofItemAtPath: temp.path)
+            if !overwrite, read(target.path)?.text != base { return .conflict }
+            guard rename(temp.path, target.path) == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+            return .saved
+        } catch {
+            let reason = error.localizedDescription
+            return .failed(reason.isEmpty ? "The file could not be saved." : reason)
+        }
+    }
+}
+
+public enum QuitChoice: Equatable, Sendable { case saveAll, discard, cancel }
+
 public enum LinkOutcome: Equatable, Sendable { case opened, ignored, external }
 
 @MainActor @Observable
@@ -328,8 +407,7 @@ public final class DocumentsModel {
         let mine = generation
         let folders = folders
         guard !folders.isEmpty else {
-            files = []
-            tree = []
+            setFiles([])
             truncated = false
             isScanning = false
             return
@@ -338,10 +416,16 @@ public final class DocumentsModel {
         let find = find
         let found = await Task.detached { find(folders) }.value
         guard mine == generation else { return }
-        files = found.files
-        tree = DocumentTree.build(found.files)
+        setFiles(found.files)
         truncated = found.truncated
         isScanning = false
+    }
+
+    /// A Draft's file that the scan no longer finds (moved or deleted) stays listed, so the Draft stays reachable until reverted.
+    private func setFiles(_ found: [DocumentFile]) {
+        let seen = Set(found.map(\.path))
+        files = found + files.filter { drafts[$0.path] != nil && !seen.contains($0.path) }
+        tree = DocumentTree.build(files)
     }
 
     public func addFolders(_ chosen: [String]) { plans.addFolders(chosen) }
@@ -387,19 +471,177 @@ public final class DocumentsModel {
     }
 
     /// Reads the open file off the main thread; the result is dropped if the selection moved meanwhile.
+    /// A Draft is never replaced: View mode shows its preview instead of the disk text.
     public func loadContent() async {
         guard let path = selectedPath else { content = .none; return }
-        let loaded = await Task.detached { () -> DocumentContent in
-            guard let size = (try? FileManager.default.attributesOfItem(atPath: path))?[.size] as? Int,
-                size <= MarkdownFiles.maxBytes, let data = FileManager.default.contents(atPath: path),
-                data.count <= MarkdownFiles.maxBytes, let text = String(data: data, encoding: .utf8)
-            else { return .unavailable }
-            // rewriteWikilinks splits on "\n", and Swift reads "\r\n" as one Character, so fences need LF.
-            let lf = text.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
-            let (entries, body) = FrontMatter.split(lf)
-            return .text(entries: entries, body: DocumentLinks.rewriteWikilinks(body))
-        }.value
+        let (disk, fresh) = await read(path)
         guard path == selectedPath else { return }
-        content = loaded
+        if let draft = drafts[path] {
+            content = DocumentText.renderFile(draft)
+        } else if fresh {
+            content = disk.map { DocumentText.renderFile($0.text) } ?? .unavailable
+        }
+    }
+
+    // MARK: Drafts
+
+    public enum Mode: Equatable, Sendable { case view, edit }
+    /// One switch for the page; the view sets it through `startEditing()` so the base is loaded.
+    public var mode = Mode.view
+
+    /// path → the file as last read or saved; a Draft is judged and saved against it.
+    private var bases: [String: DiskDocument] = [:]
+    private var drafts: [String: String] = [:]
+    private var diskChangedPaths: Set<String> = []
+    private var saveErrors: [String: String] = [:]
+    private var saving: Set<String> = []
+    /// Bumped when a save starts and ends, so a read that began before it is not trusted.
+    private var versions: [String: Int] = [:]
+
+    public func draft(for path: String) -> String? { drafts[path] }
+    public var unsavedPaths: Set<String> { Set(drafts.keys) }
+    /// The open file changed on disk while a Draft exists.
+    public var diskChanged: Bool { selectedPath.map(diskChangedPaths.contains) ?? false }
+    public var saveError: String? { selectedPath.flatMap { saveErrors[$0] } }
+
+    /// The open document's text while editing; setting it to the base text drops the Draft. Ignored until the base is loaded.
+    public var draftText: String {
+        get { selectedPath.flatMap { drafts[$0] ?? bases[$0]?.text } ?? "" }
+        set {
+            guard let path = selectedPath, let base = bases[path] else { return }
+            drafts[path] = newValue == base.text ? nil : newValue
+            if drafts[path] == nil { clearNotices(path) }
+        }
+    }
+
+    /// `diskChanged` and `saveError` only mean something while a Draft exists.
+    private func clearNotices(_ path: String) {
+        diskChangedPaths.remove(path)
+        saveErrors[path] = nil
+    }
+
+    private func read(_ path: String) async -> (disk: DiskDocument?, fresh: Bool) {
+        let version = versions[path, default: 0]
+        let disk = await Task.detached { DocumentDisk.read(path) }.value
+        return (disk, version == versions[path, default: 0])
+    }
+
+    /// Makes the disk text the base of a file without a Draft (nil: it cannot be shown); `content` follows for the open file.
+    private func adopt(_ path: String) async {
+        let (disk, fresh) = await read(path)
+        guard fresh, drafts[path] == nil else { return }
+        bases[path] = disk
+        diskChangedPaths.remove(path)
+        if path == selectedPath {
+            content = disk.map { DocumentText.renderFile($0.text) } ?? .unavailable
+            if disk == nil { mode = .view }  // an editor without a base would swallow every keystroke
+        }
+    }
+
+    /// Loads the file's text as the base (an existing Draft keeps its base) and switches to Edit; an unavailable file stays in View.
+    public func startEditing() async {
+        guard let path = selectedPath else { mode = .view; return }
+        if drafts[path] == nil { await adopt(path) }
+        guard path == selectedPath else { return }
+        mode = bases[path] == nil ? .view : .edit
+    }
+
+    public func save(overwrite: Bool = false) async -> SaveOutcome {
+        guard let path = selectedPath else { return .failed("No document is open.") }
+        return await save(path, overwrite: overwrite)
+    }
+
+    private func save(_ path: String, overwrite: Bool) async -> SaveOutcome {
+        // No Draft means nothing to write; a mixed-ending file would not come back byte-identical.
+        guard let text = drafts[path], let base = bases[path] else { clearNotices(path); return .saved }
+        guard saving.insert(path).inserted else { return .failed("The file is already being saved.") }
+        versions[path, default: 0] += 1
+        let outcome = await Task.detached {
+            DocumentDisk.write(text, ending: base.ending, to: path, expecting: base.text, overwrite: overwrite)
+        }.value
+        saving.remove(path)
+        versions[path, default: 0] += 1
+        switch outcome {
+        case .saved:
+            bases[path] = DiskDocument(text: text, ending: base.ending)
+            if drafts[path] == text { drafts[path] = nil }  // text typed during the save stays a Draft
+            diskChangedPaths.remove(path)
+            saveErrors[path] = nil
+            if path == selectedPath { content = DocumentText.renderFile(drafts[path] ?? text) }
+        case .conflict:
+            diskChangedPaths.insert(path)
+            saveErrors[path] = nil
+        case .failed(let reason):
+            saveErrors[path] = reason
+        }
+        return outcome
+    }
+
+    /// Drops the open file's Draft.
+    public func revert() {
+        guard let path = selectedPath else { return }
+        drafts[path] = nil
+        diskChangedPaths.remove(path)
+        saveErrors[path] = nil
+        if let base = bases[path] { content = DocumentText.renderFile(base.text) }
+    }
+
+    /// After a conflict: drops the Draft and rereads the file.
+    public func reload() async {
+        guard let path = selectedPath else { return }
+        drafts[path] = nil
+        saveErrors[path] = nil
+        await adopt(path)
+    }
+
+    /// On app activation: a clean open document reloads silently; a Draft whose file changed is flagged and kept.
+    public func checkDisk() async {
+        for path in unsavedPaths.union(selectedPath.map { [$0] } ?? []) {
+            if drafts[path] == nil { await adopt(path); continue }
+            let (disk, fresh) = await read(path)
+            guard fresh, drafts[path] != nil else { continue }
+            if disk?.text == bases[path]?.text { diskChangedPaths.remove(path) } else { diskChangedPaths.insert(path) }
+        }
+    }
+
+    /// Quit path.
+    public func discardAll() {
+        drafts = [:]
+        diskChangedPaths = []
+        saveErrors = [:]
+    }
+
+    /// Quit path: saves each Draft without overwriting.
+    public func saveAll() async -> [String: SaveOutcome] {
+        var outcomes: [String: SaveOutcome] = [:]
+        for path in unsavedPaths.sorted() { outcomes[path] = await save(path, overwrite: false) }
+        return outcomes
+    }
+
+    /// What the quit guard decides, after `ask` (which shows the alert) answers. Quits only when no Draft is left:
+    /// Discard drops them, Save All must save every one, and any failure keeps them all and says why through `explain`.
+    public func shouldQuit(
+        ask: (_ paths: [String]) async -> QuitChoice, explain: (_ failures: [(path: String, reason: String)]) async -> Void
+    ) async -> Bool {
+        let paths = unsavedPaths.sorted()
+        if paths.isEmpty { return true }
+        switch await ask(paths) {
+        case .cancel: return false
+        case .discard: discardAll(); return true
+        case .saveAll:
+            let outcomes = await saveAll()  // a path with no outcome had its Draft typed back to the base meanwhile
+            var failures = paths.compactMap { path -> (path: String, reason: String)? in
+                switch outcomes[path] {
+                case .saved, nil: nil
+                case .conflict: (path, Copy.conflictReason)
+                case .failed(let reason): (path, reason)
+                }
+            }
+            // Text typed while a save ran stays a Draft: quitting now would lose it.
+            for path in unsavedPaths.subtracting(failures.map(\.path)).sorted() { failures.append((path, Copy.unsavedDuringSave)) }
+            if failures.isEmpty { return true }
+            await explain(failures)
+            return false
+        }
     }
 }

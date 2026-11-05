@@ -16,7 +16,7 @@ The Plans page tracks where a plan stands but, by its own spec, never shows the 
 
 ## Non-goals
 
-- Editing, creating or deleting files. The page never writes to a document; "Open in editor" and "Show in Finder" cover changes.
+- Creating, renaming or deleting files; editing is in `2026-11-05-document-edit-mode-design.md`. The page writes to a document only through that edit mode's Save; "Open in editor" and "Show in Finder" cover the rest.
 - Backlinks, graph, outline, tags, callouts (`> [!note]`), embeds (`![[x]]` is shown as written), images, math, Mermaid, tabs, themes (_my call_: each needs its own parser work; the first cut is reading).
 - Scrolling to the `#Heading` of a link: the file opens at the top.
 - A folder list of its own (_my call_: the Documents page uses the **Plan folders**, so there is one list to keep and the Read button lands on a file the page already lists). Adding or removing a folder on either page changes both.
@@ -30,11 +30,11 @@ The Plans page tracks where a plan stands but, by its own spec, never shows the 
 - **Link targets:** a wikilink target is a file name without `.md` (case-insensitive), or a path suffix when it holds `/`. With several matches the one in the file's own folder wins, then the shortest relative path, then the first by path (_my call_). A relative link is tried from the file's folder, then each parent up to its Plan folder, and must end in `.md` and stay inside that Plan folder (_my call_: plans cite specs by repo-relative path, not file-relative). A link that resolves to nothing does nothing; `http(s)` links open in the browser. A wikilink inside a code span or a code fence is left as written.
 - **History:** opening a file other than the current one drops the Forward list and adds the current one to Back; at most 50 entries are kept (_my call_). Back to a file deleted since shows it as unavailable.
 - **Front matter:** a file whose first line is `---` and that has a closing `---` or `...` line starts with front matter. Only `key: value` lines, `key: [a, b]` and `key:` followed by `- item` lines are read; list values are joined with `, `; quotes around a value are dropped. Without a closing line, or when a line between the markers is prose (not blank, a `#` comment, indented, a `- ` item or `key:`), the whole file is the body, so a `---` at the top used as a rule is not swallowed (_my call_).
-- **Reloading:** the open file is read again when the app becomes active and on Rescan, so a plan an agent just rewrote is current.
+- **Reloading:** the open file is read again when the app becomes active and on Rescan, so a plan an agent just rewrote is current (a file with a Draft is flagged, not replaced; see `2026-11-05-document-edit-mode-design.md`).
 - Sidebar: Insights, after Plans; ⇧⌘D.
 
 ## Anti-goals
 
 - A scan or a file read that blocks the window.
 - A file that fails to open taking the page down: it shows "can't be shown" with Open and Show in Finder, and the list stays usable.
-- A new Node command, config key or contract golden: the page reads files and keeps nothing but what Plans already keeps (the folders), plus the last page state in memory only.
+- A new Node command, config key or contract golden: the page reads files and keeps nothing but what Plans already keeps (the folders), plus the last page state in memory only (and, with edit mode, unsaved Drafts in memory; it writes a file only when the Owner saves).
