@@ -100,7 +100,7 @@ run: ## Run the CLI from the checkout: make run ARGS="status --json"
 
 ## Release
 
-release: ## Build, sign and publish a GitHub release (DRY_RUN=1 skips publishing)
+release: check ## Check, then build, sign and publish a GitHub release (DRY_RUN=1 skips publishing)
 	scripts/release.sh
 
 ## Operate (the installed CLI)
