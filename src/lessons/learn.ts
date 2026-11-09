@@ -59,6 +59,17 @@ const findingAnswerSchema = z
     }
   });
 
+/** A Lesson an agent writes itself (MCP `add_lesson`): same limits as a learned one. */
+export const newLessonSchema = z
+  .object({
+    title: z.string().trim().min(1).max(TITLE_MAX),
+    rule: z.string().trim().min(1).max(RULE_MAX),
+    topics: z.array(z.string().regex(TOPIC)).min(1).max(5),
+    globs: z.array(z.string().trim().min(1)).min(1).max(5),
+    related: z.array(z.number().int()).max(10).optional(),
+  })
+  .strict();
+
 export const learnAnswerSchema: z.ZodType<{
   findings: {
     occurrence: number;

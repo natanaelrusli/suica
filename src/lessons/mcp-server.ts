@@ -2,12 +2,14 @@
 // it needs no dependency. Any Coding Agent can ask it for the review Lessons that apply to a path.
 // Scope isolation is the rule that matters: every tool resolves `path` to a lesson scope first and
 // reads nothing outside it. Nothing but JSON-RPC frames is ever written to `output`.
+import { randomUUID } from "node:crypto";
 import { statSync } from "node:fs";
 import { basename, extname, isAbsolute, relative } from "node:path";
 import { createInterface } from "node:readline";
 import type { Readable, Writable } from "node:stream";
 import type { Config } from "../config.ts";
-import type { LessonReader, OccurrenceRow } from "../lesson-store.ts";
+import type { LessonReader, LessonStore, OccurrenceRow } from "../lesson-store.ts";
+import { newLessonSchema } from "./learn.ts";
 import { resolveScope } from "./hook.ts";
 import { lessonsForFile, rankLessons, renderLessons } from "./match.ts";
 import type { RankedLesson } from "./match.ts";
@@ -21,6 +23,10 @@ export interface LessonsServerDeps {
   readonly config: () => Config["lessons"];
   /** Opened and closed per call, so a daemon migration between calls is picked up. */
   readonly openReader: () => LessonReader | undefined;
+  /** A writable store for `add_lesson`, opened and closed per call; undefined when there is none. */
+  readonly openWriter?: () => { readonly lessons: LessonStore; close(): void } | undefined;
+  /** Runs after a successful write (the vault export); a throw is ignored. */
+  readonly onWrite?: () => void;
   readonly scan: () => ScopeMap;
   /** Where each answer that carries Lessons is noted; a failing log never turns into FAILED. */
   readonly usage: UsageLog;
@@ -80,6 +86,33 @@ const TOOLS = [
       additionalProperties: false,
     },
   },
+  {
+    name: "add_lesson",
+    description:
+      "Record a lesson you learned in the repository of `path`, so later sessions get it. Write a short, general rule (not a story); a lesson with the same title is reinforced instead of duplicated. `related` are lesson ids from the other tools, linked in the graph.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: PATH_PROPERTY,
+        title: { type: "string", description: "At most 80 characters." },
+        rule: { type: "string", description: "The rule to follow, at most 600 characters." },
+        topics: {
+          type: "array",
+          items: { type: "string" },
+          description: "1 to 5 kebab-case topics, such as `database`.",
+        },
+        globs: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            "1 to 5 globs of the files it applies to, relative to the repo, e.g. `**/*.go`.",
+        },
+        related: { type: "array", items: { type: "integer" }, description: "Related lesson ids." },
+      },
+      required: ["path", "title", "rule", "topics", "globs"],
+      additionalProperties: false,
+    },
+  },
 ] as const;
 
 /** A -32602 the caller sees as a JSON-RPC error. */
@@ -110,6 +143,7 @@ const isPath = (v: unknown): boolean =>
   typeof v === "string" && v !== "" && !v.includes("\0") && isAbsolute(v);
 const isWords = (v: unknown): boolean => typeof v === "string" && v.trim() !== "";
 const isString = (v: unknown): boolean => typeof v === "string";
+const isArray = (v: unknown): boolean => Array.isArray(v);
 const isId = (v: unknown): boolean => typeof v === "number" && Number.isSafeInteger(v);
 
 /**
@@ -151,6 +185,87 @@ function text(body: string): Record<string, unknown> {
   return { content: [{ type: "text", text: body }], isError: false };
 }
 
+/** `add_lesson`: only into the scope of `path`; bad fields are invalid params, never half-written. */
+function addLesson(
+  args: Record<string, unknown>,
+  path: string,
+  found: NonNullable<ReturnType<typeof resolveScope>>,
+  deps: LessonsServerDeps,
+): Record<string, unknown> {
+  const parsed = newLessonSchema.safeParse({
+    title: args["title"],
+    rule: args["rule"],
+    topics: args["topics"],
+    globs: args["globs"],
+    related: args["related"],
+  });
+  if (!parsed.success) {
+    throw new InvalidParams(
+      `invalid lesson: ${parsed.error.issues.map((i) => i.path.join(".")).join(", ")}`,
+    );
+  }
+  const fields = parsed.data;
+  const store = deps.openWriter?.();
+  if (store === undefined) return text(FAILED);
+  try {
+    const known = store.lessons.lessons(found.scope);
+    const live = new Set(known.map((l) => l.id));
+    if (!(fields.related ?? []).every((id) => live.has(id))) {
+      throw new InvalidParams("invalid lesson: related");
+    }
+    const at = deps.now();
+    const same = known.find((l) => l.title.toLowerCase() === fields.title.toLowerCase());
+    const sourceKey = `agent:${randomUUID()}`;
+    let id = 0;
+    store.lessons.transaction(() => {
+      id =
+        same?.id ??
+        store.lessons.createLesson(
+          {
+            scope: found.scope,
+            title: fields.title,
+            rule: fields.rule,
+            topics: fields.topics,
+            globs: fields.globs,
+          },
+          at,
+        );
+      // The occurrence is what ranks a lesson, so an agent's write carries one of its own.
+      store.lessons.addOccurrences([
+        {
+          sourceKey,
+          source: "agent",
+          mrKey: `${found.repo?.project ?? basename(found.scope)}!agent`,
+          mrTitle: "Written by a coding agent",
+          mrUrl: "",
+          path: found.repo !== undefined && isFile(path) ? relative(found.repo.dir, path) : null,
+          line: null,
+          severity: "Minor",
+          title: fields.title,
+          text: fields.rule,
+          outcome: "open",
+          at,
+        },
+      ]);
+      const occurrence = store.lessons.occurrenceBySource(sourceKey);
+      if (occurrence !== undefined) store.lessons.attach([occurrence.id], id, at);
+      for (const other of fields.related ?? []) if (other !== id) store.lessons.link(id, other);
+    });
+    try {
+      deps.onWrite?.();
+    } catch {
+      // The lesson is saved; the vault catches up on the next export.
+    }
+    return text(
+      same === undefined
+        ? `Added lesson #${String(id)}.`
+        : `Lesson #${String(id)} already existed; reinforced it.`,
+    );
+  } finally {
+    store.close();
+  }
+}
+
 function runTool(name: string, rawArgs: unknown, deps: LessonsServerDeps): Record<string, unknown> {
   let args: Record<string, unknown>;
   switch (name) {
@@ -166,6 +281,20 @@ function runTool(name: string, rawArgs: unknown, deps: LessonsServerDeps): Recor
     case "get_lesson":
       args = parseArgs(rawArgs, { path: isPath, id: isId }, ["path", "id"]);
       break;
+    case "add_lesson":
+      args = parseArgs(
+        rawArgs,
+        {
+          path: isPath,
+          title: isString,
+          rule: isString,
+          topics: isArray,
+          globs: isArray,
+          related: isArray,
+        },
+        ["path", "title", "rule", "topics", "globs"],
+      );
+      break;
     default:
       throw new InvalidParams(`unknown tool: ${name}`);
   }
@@ -174,6 +303,7 @@ function runTool(name: string, rawArgs: unknown, deps: LessonsServerDeps): Recor
   if (!config.enabled) return text(NONE);
   const found = resolveScope(path, config.scopes, deps.scan);
   if (found === undefined) return text(NONE);
+  if (name === "add_lesson") return addLesson(args, path, found, deps);
   const reader = deps.openReader();
   if (reader === undefined) return text(NONE);
   // The one place an answer is logged: only a reply that carries at least one Lesson.

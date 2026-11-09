@@ -218,7 +218,12 @@ describe("protocol", () => {
       serverInfo: { name: "suica-lessons", version: "0.1.0" },
     });
     const tools = list?.result?.["tools"] as { name: string; inputSchema: unknown }[];
-    expect(tools.map((t) => t.name)).toEqual(["lessons_for_path", "search_lessons", "get_lesson"]);
+    expect(tools.map((t) => t.name)).toEqual([
+      "lessons_for_path",
+      "search_lessons",
+      "get_lesson",
+      "add_lesson",
+    ]);
     for (const t of tools) {
       expect(t.inputSchema).toMatchObject({ type: "object", additionalProperties: false });
     }
@@ -629,4 +634,55 @@ describe("as a child process", () => {
     expect(lines).toHaveLength(3);
     for (const l of lines) expect((JSON.parse(l) as Frame).jsonrpc).toBe("2.0");
   }, 20_000);
+});
+
+describe("add_lesson", () => {
+  const args = (extra: Record<string, unknown> = {}): Record<string, unknown> => ({
+    path: join(repoA, "src", "a.go"),
+    title: "Wrap errors",
+    rule: "Wrap errors with %w.",
+    topics: ["errors"],
+    globs: ["**/*.go"],
+    ...extra,
+  });
+  const writer = (): Pick<LessonsServerDeps, "openWriter"> => ({
+    openWriter: () => openStore(statePath),
+  });
+  const run = async (a: Record<string, unknown>): Promise<Frame> => {
+    const [, frame] = await talk(
+      [rpc(1, "initialize", {}), rpc(2, "tools/call", { name: "add_lesson", arguments: a })],
+      { ...deps(), ...writer() },
+    );
+    return frame as Frame;
+  };
+
+  it("writes a lesson that is then served, linked, and reinforced on a repeat", async () => {
+    const first = await run(args({ related: [ids.go] }));
+    expect(JSON.stringify(first.result)).toContain("Added lesson");
+    const reader = openLessonsReadOnly(statePath);
+    const added = reader?.lessons(scopeA).find((l) => l.title === "Wrap errors");
+    expect(added).toBeDefined();
+    expect(reader?.links(ids.go)).toContain(added?.id);
+    reader?.close();
+    const again = await run(args());
+    expect(JSON.stringify(again.result)).toContain("reinforced");
+    const [, listed] = await talk([
+      rpc(1, "initialize", {}),
+      rpc(2, "tools/call", {
+        name: "search_lessons",
+        arguments: { path: join(repoA, "src", "a.go"), query: "wrap" },
+      }),
+    ]);
+    expect(JSON.stringify(listed?.result)).toContain("Wrap errors");
+  });
+
+  it("rejects bad fields and a related id from another scope", async () => {
+    expect((await run(args({ topics: ["Bad Topic"] }))).error?.code).toBe(-32602);
+    expect((await run(args({ related: [ids.other] }))).error?.code).toBe(-32602);
+  });
+
+  it("writes nothing while lessons are off", async () => {
+    enabled = false;
+    expect(JSON.stringify((await run(args())).result)).toContain(NONE);
+  });
 });

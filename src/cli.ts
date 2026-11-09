@@ -26,7 +26,13 @@ import { readScopeCache } from "./lessons/hook.ts";
 import { applyInstall, applyUninstall, lessonsStatus, planInstall } from "./lessons/install.ts";
 import type { LessonsPaths } from "./lessons/install.ts";
 import { serveLessons } from "./lessons/mcp-server.ts";
-import { archiveLesson, buildLessonList, buildLessonShow, mergeLessons } from "./lessons/owner.ts";
+import {
+  archiveLesson,
+  buildLessonGraph,
+  buildLessonList,
+  buildLessonShow,
+  mergeLessons,
+} from "./lessons/owner.ts";
 import type { ChangeResult } from "./lessons/owner.ts";
 import { scanScopes } from "./lessons/scopes.ts";
 import { USAGE_DAYS, buildLessonUsage, fileUsageLog, readUsage } from "./lessons/usage.ts";
@@ -863,6 +869,25 @@ function listLessonsCommand(): number {
   }
 }
 
+/** `suica lessons graph [--out <file>]`: the knowledge graph as JSON on stdout or at an absolute path. */
+function lessonsGraphCommand(out?: string): number {
+  const reader = openLessonsReadOnly(
+    loadConfig(defaultConfigPath()).statePath ?? defaultStatePath(),
+  );
+  try {
+    const graph =
+      reader === undefined
+        ? { version: 1, nodes: [], edges: [] }
+        : buildLessonGraph(reader, Date.now());
+    const body = `${JSON.stringify(graph)}\n`;
+    if (out === undefined) process.stdout.write(body);
+    else writeFileSync(out, body);
+    return 0;
+  } finally {
+    reader?.close();
+  }
+}
+
 /** `suica lessons usage --json`: the Lessons handed to Coding Agents in the last 30 days. */
 function lessonsUsageCommand(): number {
   const config = loadConfig(defaultConfigPath());
@@ -934,6 +959,22 @@ async function lessonsMcp(): Promise<number> {
   await serveLessons(process.stdin, process.stdout, {
     config: () => loadConfig(path).lessons,
     openReader: () => openLessonsReadOnly(loadConfig(path).statePath ?? defaultStatePath()),
+    // No state yet means no scope to write into; openStore would create one.
+    openWriter: () => {
+      const statePath = loadConfig(path).statePath ?? defaultStatePath();
+      return existsSync(statePath) ? openStore(statePath) : undefined;
+    },
+    onWrite: () => {
+      const { scopes, vaultPath } = loadConfig(path).lessons;
+      const reader = openLessonsReadOnly(loadConfig(path).statePath ?? defaultStatePath());
+      try {
+        if (vaultPath !== undefined && reader !== undefined) {
+          exportVault(reader, scopes, vaultPath, Date.now());
+        }
+      } finally {
+        reader?.close();
+      }
+    },
     scan: () => lessonScopeMap(loadConfig(path)),
     // shortcut: the log folder follows the state path as of server start, restart to follow a change.
     usage: fileUsageLog(join(dirname(logStatePath), "lessons-usage"), Date.now()),
@@ -1416,6 +1457,15 @@ async function main(argv: readonly string[]): Promise<number> {
       }
     }
     if (argv[1] === "list" && json && flags.length === 1) return listLessonsCommand();
+    if (argv[1] === "graph" && flags.length === 0) return lessonsGraphCommand();
+    if (
+      argv[1] === "graph" &&
+      flags.length === 2 &&
+      flags[0] === "--out" &&
+      isAbsolute(flags[1] ?? "")
+    ) {
+      return lessonsGraphCommand(flags[1]);
+    }
     if (argv[1] === "usage" && json && flags.length === 1) return lessonsUsageCommand();
     const ids = flags.filter((flag) => flag !== "--json");
     const counts: Readonly<Record<string, number>> = { show: 1, archive: 1, merge: 2 };
