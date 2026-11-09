@@ -4,7 +4,7 @@ import { projectOfMrKey } from "./lessons/scopes.ts";
 import { integer, nullableInteger, nullableText, text } from "./sql-row.ts";
 import type { Row } from "./sql-row.ts";
 
-export type OccurrenceSource = "review" | "thread";
+export type OccurrenceSource = "review" | "thread" | "agent";
 export type Outcome =
   "open" | "fixed" | "not-fixed" | "partly-fixed" | "changed" | "replied" | "resolved";
 
@@ -126,6 +126,7 @@ export interface LessonStore {
 export type LessonReader = Pick<
   LessonStore,
   | "lessons"
+  | "allLessons"
   | "lesson"
   | "occurrences"
   | "links"
@@ -158,7 +159,7 @@ function toOccurrence(row: Row): OccurrenceRow {
   return {
     id: integer(row, "id"),
     sourceKey: text(row, "source_key"),
-    source: text(row, "source") === "thread" ? "thread" : "review",
+    source: ((v) => (v === "thread" || v === "agent" ? v : "review"))(text(row, "source")),
     mrKey: text(row, "mr_key"),
     mrTitle: text(row, "mr_title"),
     mrUrl: text(row, "mr_url"),
@@ -209,6 +210,7 @@ function placeholders(count: number): string {
 type Reads = Pick<
   LessonStore,
   | "lessons"
+  | "allLessons"
   | "lesson"
   | "occurrences"
   | "links"
@@ -225,6 +227,9 @@ function createReads(db: DatabaseSync): Reads {
         .prepare(`SELECT * FROM lesson WHERE scope = ?${archived} ORDER BY id`)
         .all(scope)
         .map(toLesson);
+    },
+    allLessons() {
+      return db.prepare("SELECT * FROM lesson ORDER BY id").all().map(toLesson);
     },
     lesson(id) {
       const row = db.prepare("SELECT * FROM lesson WHERE id = ?").get(id);
@@ -443,9 +448,6 @@ export function createLessonStore(db: DatabaseSync): LessonStore {
         at,
         lessonId,
       );
-    },
-    allLessons() {
-      return db.prepare("SELECT * FROM lesson ORDER BY id").all().map(toLesson);
     },
     setRepoPath(occurrenceId, repoPath) {
       db.prepare("UPDATE lesson_occurrence SET repo_path = ? WHERE id = ?").run(

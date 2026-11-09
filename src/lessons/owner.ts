@@ -242,3 +242,54 @@ export function mergeLessons(
   });
   return result;
 }
+
+export interface LessonGraphJson {
+  readonly version: 1;
+  readonly nodes: readonly Record<string, unknown>[];
+  readonly edges: readonly { source: string; target: string; type: "related" | "topic" }[];
+}
+
+/**
+ * The whole knowledge graph for analysis elsewhere: Lesson and topic nodes, `related` edges
+ * between Lessons and `topic` edges to topics. Live Lessons of every scope; no finding text.
+ */
+export function buildLessonGraph(
+  reader: Pick<LessonStore, "allLessons" | "occurrences" | "links">,
+  now: number,
+): LessonGraphJson {
+  const live = reader.allLessons().filter((l) => !l.archived);
+  const nodes: Record<string, unknown>[] = [];
+  const edges: { source: string; target: string; type: "related" | "topic" }[] = [];
+  const topics = new Set<string>();
+  for (const l of live) {
+    const occurrences = reader.occurrences(l.id);
+    nodes.push({
+      id: `lesson:${String(l.id)}`,
+      type: "lesson",
+      scope: l.scope,
+      title: l.title,
+      rule: l.rule,
+      globs: l.globs,
+      weight: rounded(weight(occurrences, now)),
+      count: occurrences.length,
+      repos: [...new Set(occurrences.map((o) => projectOfMrKey(o.mrKey)))].sort(),
+      createdAt: iso(l.createdAt),
+    });
+    for (const t of l.topics) {
+      topics.add(t);
+      edges.push({ source: `lesson:${String(l.id)}`, target: `topic:${t}`, type: "topic" });
+    }
+    for (const other of reader.links(l.id)) {
+      // Links are undirected; emit each once.
+      if (other > l.id && live.some((x) => x.id === other)) {
+        edges.push({
+          source: `lesson:${String(l.id)}`,
+          target: `lesson:${String(other)}`,
+          type: "related",
+        });
+      }
+    }
+  }
+  for (const t of [...topics].sort()) nodes.push({ id: `topic:${t}`, type: "topic", title: t });
+  return { version: 1, nodes, edges };
+}
