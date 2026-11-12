@@ -13,6 +13,13 @@ public struct ReleaseNote: Identifiable, Sendable {
 
     public static let recent: [ReleaseNote] = [
         ReleaseNote(
+            version: "0.1.11", date: "12 Nov 2026", title: "Fairer approvals, quieter Teams",
+            changes: [
+                "Reviews no longer stay unapproved over items that only wait on a CI run or a device check; a CI item is lifted once the head pipeline is green.",
+                "A burst of pushes now sends one re-review chat about the latest review, with what is still open from earlier ones.",
+                "Review Notices for MRs of one ticket go out as one chat, and an approved review sends a single message.",
+            ]),
+        ReleaseNote(
             version: "0.1.10", date: "12 Nov 2026", title: "A clearer view of updates",
             changes: [
                 "The Updates page fills the window, with release cards that adapt to its width.",
