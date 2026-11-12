@@ -235,6 +235,8 @@ function rereviewInstructions(input: PromptInput): string[] {
         ? `- ./since-last-review.diff is the diff from ${previousSha} to ${input.headSha}. Review only those changes; use ./mr.diff for context.`
         : `- The diff since ${previousSha} is not available (the branch was rebased or force-pushed, or GitLab could not provide it): review the whole merge request and say so in the scope.`,
     "- Before the findings, add a section headed exactly `## Previous review`. List every open item of the previous review: its findings, and the items its own `## Previous review` section marked not fixed or partly fixed. One line each: severity, the `path:line` code span, a short title, then fixed, not fixed or partly fixed, and one sentence of evidence. Refer to items by location and title, never by number.",
+    // A partly fixed item kept its first severity forever, so evidence-only gaps held approval.
+    "- Grade a partly fixed item by what is still missing, not by its old severity: a Major with only a small gap left is now Minor or Nit. An item whose code is done and that only lacks evidence a code reading cannot show (a pipeline result for the head, a device or manual run) is partly fixed at Minor; say what to check. Name only that severity on the line.",
     "- Under the findings, list only problems in the changes since the previous review; never repeat an item from ## Previous review there.",
   ];
 }
