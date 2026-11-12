@@ -8,6 +8,8 @@ describe("buildJudgePrompt", () => {
   it("gives the bar of approveWhen, the Owner's rules and the review fenced as data", () => {
     const prompt = buildJudgePrompt(OPEN_MAJOR, "nit", ["  Accepted risks are fine ", ""]);
     expect(prompt).toContain("Only Nit problems may be left.");
+    // A partly fixed item that only waits on evidence no longer holds approval as a Major.
+    expect(prompt).toContain("only waits on evidence a code reading cannot show");
     expect(prompt).toContain("win over it where they differ:\n- Accepted risks are fine\n");
     expect(prompt).toContain(`<review>\n${OPEN_MAJOR}\n</review>`);
   });
