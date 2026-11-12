@@ -250,7 +250,12 @@ export function planTeams(input: PlanInput): TeamsPlan {
     // A re-review that did not approve waits for a quiet gap: each push makes a new review, and
     // only the latest is announced, with what is still open from the earlier ones.
     const held = posted?.rereview === true && !reapproved;
-    const pending = posted !== undefined && posted.id > (round.announcedReview ?? 0);
+    let pending = posted !== undefined && posted.id > (round.announcedReview ?? 0);
+    if (live && pending && held && round.myState === APPROVED) {
+      // Approved while the notice waited: the approval notice says it all, the findings are moot.
+      round = { ...round, announcedReview: posted.id };
+      pending = false;
+    }
     const due =
       posted !== undefined &&
       (held

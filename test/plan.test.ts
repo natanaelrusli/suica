@@ -364,6 +364,17 @@ describe("review notices (flow C)", () => {
     ]);
   });
 
+  it("drops a held re-review notice once the Owner approves, and sends only the approval", () => {
+    const state = withRound(round({ announcedReview: 3, changedAt: NOW - HOUR }), {
+      ...posted(4, NOW - MINUTE),
+      rereview: true,
+    });
+    const current = snapshot({ reviewRequested: [theirs("APPROVED", [note("a", ME)])] });
+    const result = plan({ snapshot: current, state });
+    expect(result.intents.map((i) => i.variant)).toEqual(["notice.approved"]);
+    expect(result.roundUpdates[0]?.round.announcedReview).toBe(4);
+  });
+
   it("announces a posted re-review as notice.refindings with its new findings, once", () => {
     const state = withRound(round({ announcedReview: 3 }), {
       ...posted(4, NOW - 30 * MINUTE),

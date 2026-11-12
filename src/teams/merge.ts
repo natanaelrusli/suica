@@ -1,4 +1,3 @@
-import { YOUR_MR_KINDS } from "./types.ts";
 import type { OutboxRow } from "./types.ts";
 
 /** Most MRs one merged chat lists; a bigger group is split in order. */
@@ -14,14 +13,14 @@ export function ticketKey(title: string): string | null {
 
 /**
  * Groups rows that one chat can carry: same recipient, variant and ticket key, at most
- * `MERGE_MAX` each. A row without a key, or that is not a message about the Owner's own MR,
- * stays alone. Groups come in the order of their first row, which is the lead.
+ * `MERGE_MAX` each. A row without a key stays alone. Groups come in the order of their first
+ * row, which is the lead.
  */
 export function groupForMerge(rows: readonly OutboxRow[]): OutboxRow[][] {
   const groups: OutboxRow[][] = [];
   const open = new Map<string, OutboxRow[]>();
   for (const row of rows) {
-    const ticket = YOUR_MR_KINDS.includes(row.kind) ? ticketKey(row.mrTitle) : null;
+    const ticket = ticketKey(row.mrTitle);
     if (ticket === null) {
       groups.push([row]);
       continue;
