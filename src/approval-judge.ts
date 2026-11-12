@@ -28,12 +28,14 @@ const BAR: Record<ApproveWhen, string> = {
  * The judge's prompt. The review is a model's text about an untrusted MR, so it is fenced as data
  * and a closing tag inside it is defused. With `discussion` (the MR's threads, as
  * `formatDiscussion` writes them) it also weighs what was said since the review, on unchanged code.
+ * `pipelineStatus` is the head pipeline's; only the recheck passes it, so the first judge cannot lift a CI-only item.
  */
 export function buildJudgePrompt(
   review: string,
   when: ApproveWhen,
   rules: readonly string[],
   discussion?: string,
+  pipelineStatus?: string,
 ): string {
   const ownRules = rules.map((rule) => rule.trim()).filter((rule) => rule !== "");
   return [
@@ -44,7 +46,12 @@ export function buildJudgePrompt(
     "What counts as left:",
     "- Every finding of this review (its Findings section), with its severity.",
     "- Every item of a `Previous review` section that is not fixed: not fixed, partly fixed or unclear all count as left, with the severity the item names.",
-    "- A partly fixed item whose code is done and that only waits on evidence a code reading cannot show (a pipeline result for the head, a device or manual run) counts as Minor.",
+    "- A partly fixed item that only waits on a pipeline result counts as Minor when the head pipeline's status is SUCCESS, and keeps its severity otherwise.",
+    "- A partly fixed item whose code is done and that only waits on a device or manual run counts as Minor.",
+    // GitLab's status is one uppercase word; anything else is left out so it cannot carry text into the prompt.
+    ...(pipelineStatus !== undefined && /^[A-Z_]+$/.test(pipelineStatus)
+      ? [`The head pipeline's status is ${pipelineStatus}.`]
+      : []),
     "- A problem whose severity the review does not give counts as Major.",
     "- Items under Done well, Scope, Guardrails checked or Candidates for a rule are not problems.",
     "",

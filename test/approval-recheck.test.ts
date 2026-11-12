@@ -221,6 +221,15 @@ describe("createApprovalRecheck", () => {
     ]);
   });
 
+  it("passes the head pipeline to the judge", async () => {
+    const h = harness();
+    const pipeline = { iid: "9", status: "SUCCESS", url: "https://gitlab.example/p/9" };
+    await createApprovalRecheck(h.deps).run(
+      snapshot({ reviewRequested: [candidate(1, "UNREVIEWED", { pipeline })] }),
+    );
+    expect(h.prompts[0]).toContain("The head pipeline's status is SUCCESS.");
+  });
+
   it("leaves an MR that is still not ready alone, and fails closed when the agent fails", async () => {
     for (const verdict of [{ approve: false, reason: "a Major is open." }, new Error("boom")]) {
       const h = harness(verdict);

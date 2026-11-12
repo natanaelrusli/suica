@@ -127,6 +127,7 @@ export function createApprovalRecheck(deps: RecheckDeps): ApprovalRecheck {
       config.review.approveWhen,
       config.review.approveRules,
       formatDiscussion(await deps.discussions(mr.key)),
+      mr.pipeline?.status,
     );
     let verdict: ApprovalVerdict;
     try {
