@@ -244,15 +244,16 @@ export function planTeams(input: PlanInput): TeamsPlan {
     // An Agent Review is announced with its findings once its comments show (or, should they
     // never be counted, after the debounce), and that announces those comments too. A re-review
     // the agent approved after says so, and that announces the approval too; an approved first
-    // review is announced with its findings, and the approval follows as its own notice.
+    // review is announced by the approval notice alone.
     const posted = state.postedReviews.get(mr.key);
     const reapproved = posted?.approved === true && posted.rereview;
     // A re-review that did not approve waits for a quiet gap: each push makes a new review, and
     // only the latest is announced, with what is still open from the earlier ones.
     const held = posted?.rereview === true && !reapproved;
     let pending = posted !== undefined && posted.id > (round.announcedReview ?? 0);
-    if (live && pending && held && round.myState === APPROVED) {
-      // Approved while the notice waited: the approval notice says it all, the findings are moot.
+    const approvedFirst = posted?.approved === true && !posted.rereview;
+    if (live && pending && round.myState === APPROVED && (held || approvedFirst)) {
+      // Approved: the approval notice is the one chat about this review; its findings are moot.
       round = { ...round, announcedReview: posted.id };
       pending = false;
     }

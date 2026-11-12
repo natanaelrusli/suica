@@ -44,7 +44,7 @@ export function buildJudgePrompt(
     "What counts as left:",
     "- Every finding of this review (its Findings section), with its severity.",
     "- Every item of a `Previous review` section that is not fixed: not fixed, partly fixed or unclear all count as left, with the severity the item names.",
-    "- A partly fixed item counts with the severity of what its evidence says is still missing, not its old severity. One whose code is done and that only waits on evidence a code reading cannot show (a pipeline result for the head, a device or manual run) counts as Minor.",
+    "- A partly fixed item whose code is done and that only waits on evidence a code reading cannot show (a pipeline result for the head, a device or manual run) counts as Minor.",
     "- A problem whose severity the review does not give counts as Major.",
     "- Items under Done well, Scope, Guardrails checked or Candidates for a rule are not problems.",
     "",
