@@ -13,6 +13,13 @@ public struct ReleaseNote: Identifiable, Sendable {
 
     public static let recent: [ReleaseNote] = [
         ReleaseNote(
+            version: "0.1.10", date: "12 Nov 2026", title: "A clearer view of updates",
+            changes: [
+                "The Updates page fills the window, with release cards that adapt to its width.",
+                "Read changelog summaries for the last five versions offline, with links to each release.",
+                "Clearer checking, installation and error states make the next action easier to find.",
+            ]),
+        ReleaseNote(
             version: "0.1.9", date: "9 Nov 2026", title: "Lessons from your agents",
             changes: [
                 "Coding agents can save lessons directly through the add_lesson MCP tool.",
