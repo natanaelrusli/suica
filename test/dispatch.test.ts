@@ -912,6 +912,35 @@ describe("merged messages", () => {
     expect(h.store.loadTeams().undelivered.size).toBe(0);
   });
 
+  it("merges findings notices of one ticket, each MR's findings in its own bullet", async () => {
+    const h = setup();
+    const notice = (iid: number, findings: string) =>
+      intent(1, {
+        dedupeKey: `findings:${String(iid)}`,
+        kind: "notice",
+        variant: "notice.findings",
+        mr: { key: `g/p!${iid}`, iid, projectPath: "g/p", title: `ABC-1 n${iid}`, url: url(iid) },
+        recipient: person("bob", "Bob"),
+        findings,
+      });
+    h.store.applyTeamsPlan(
+      teamsPlan({
+        intents: [notice(7, "ada 1 finding (1 Minor)"), notice(8, "tidak ada findings")],
+      }),
+      NOW,
+    );
+    const theirs = (iid: number) =>
+      mr(iid, { title: `ABC-1 n${iid}`, reviewers: [reviewer("me", "UNREVIEWED")] });
+    const result = await dispatchQueued(
+      h.deps,
+      snapshot({ reviewRequested: [theirs(7), theirs(8)] }),
+    );
+    expect(result.sent).toBe(1);
+    expect(h.sent[0]?.text).toBe(
+      `Halo Bob, saya Bahlil, agen review-nya Nata. Saya sudah review MR kamu: hasilnya per MR di bawah.\n- [ABC-1 n7](${url(7)}): ada 1 finding (1 Minor)\n- [ABC-1 n8](${url(8)}): tidak ada findings\nDetailnya ada di komentar MR.`,
+    );
+  });
+
   it("escapes Markdown in every bullet", async () => {
     const h = setup();
     const a = { iid: 5, title: "[ABC-1] Fix *x*" };

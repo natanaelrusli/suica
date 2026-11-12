@@ -205,7 +205,7 @@ function stillNeededInState(store: TeamsStore, row: OutboxRow, state: PreviousSt
   return state.trackedAuthored.has(row.mrKey) && state.reviewerStates.get(key) === UNREVIEWED;
 }
 
-type LinkedMr = Pick<OutboxRow, "mrTitle" | "mrUrl">;
+type LinkedMr = Pick<OutboxRow, "mrTitle" | "mrUrl" | "findings">;
 
 function linkTo(mr: LinkedMr): string {
   return markdownLink(clean(mr.mrTitle, TITLE_MAX), mr.mrUrl);
@@ -213,7 +213,8 @@ function linkTo(mr: LinkedMr): string {
 
 /**
  * `mates` are the rows of a merged message: `mr.link` becomes one bullet per MR, `row` first, and
- * every other placeholder comes from `row`.
+ * every other placeholder comes from `row`. A notice's findings differ per MR, so each bullet
+ * carries its own and `review.findings` points at them.
  */
 function valuesFor(
   row: Pick<OutboxRow, "recipientName" | "mrTitle" | "mrUrl" | "mrIid" | "mrProject" | "findings">,
@@ -229,7 +230,9 @@ function valuesFor(
     "mr.link":
       mates.length === 0
         ? linkTo(row)
-        : [row, ...mates].map((each) => `- ${linkTo(each)}`).join("\n"),
+        : [row, ...mates]
+            .map((each) => `- ${linkTo(each)}${each.findings === null ? "" : `: ${each.findings}`}`)
+            .join("\n"),
     "mr.iid": String(row.mrIid),
     "mr.project": escapeMarkdown(row.mrProject),
     "person.name": escapeMarkdown(recipient),
@@ -237,7 +240,7 @@ function valuesFor(
     "owner.name": escapeMarkdown(clean(ownerName, NAME_MAX)),
     "agent.name": escapeMarkdown(clean(agentName, NAME_MAX)),
     // Built by describeFindings, which already escapes what it took from the review.
-    "review.findings": row.findings ?? "",
+    "review.findings": mates.length === 0 ? (row.findings ?? "") : "hasilnya per MR di bawah",
     "time.greeting": greetingAt(new Date(nowMs)),
   };
 }

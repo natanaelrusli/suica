@@ -55,19 +55,26 @@ export function markdownLink(title: string, url: string): string {
 
 /**
  * The `review.findings` value: "tidak ada findings", or the total and each severity in order.
- * An Agent Re-review reports `fresh` ones, so it says "baru" after "finding".
+ * An Agent Re-review reports `fresh` ones, so it says "baru" after "finding", and how many items of
+ * its Previous review section are still open.
  */
-export function describeFindings(counts: readonly FindingCount[], fresh = false): string {
+export function describeFindings(
+  counts: readonly FindingCount[],
+  fresh = false,
+  openPrevious = 0,
+): string {
+  const tail =
+    openPrevious > 0 ? `, dan ${openPrevious} item dari review sebelumnya masih terbuka` : "";
   const total = counts.reduce((sum, each) => sum + each.count, 0);
   const baru = fresh ? " baru" : "";
-  if (total === 0) return `tidak ada findings${baru}`;
+  if (total === 0) return `tidak ada findings${baru}${tail}`;
   const head = `ada ${total} ${total === 1 ? "finding" : "findings"}${baru}`;
-  if (counts.every((each) => each.severity === "")) return head;
+  if (counts.every((each) => each.severity === "")) return `${head}${tail}`;
   const parts = counts.map(
     (each) =>
       `${each.count} ${each.severity === "" ? "tanpa severity" : escapeMarkdown(each.severity)}`,
   );
-  return `${head} (${parts.join(", ")})`;
+  return `${head} (${parts.join(", ")})${tail}`;
 }
 
 export class TemplateError extends Error {

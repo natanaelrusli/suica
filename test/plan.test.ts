@@ -343,8 +343,43 @@ describe("review notices (flow C)", () => {
     ]);
   });
 
+  it("holds a re-review notice until 30 minutes pass with no newer review, comments or not", () => {
+    const current = snapshot({
+      reviewRequested: [theirs("UNREVIEWED", [note("a", ME), note("b", ME)])],
+    });
+    const state = (postedAt: number) =>
+      withRound(round({ announcedReview: 3, changedAt: NOW - HOUR }), {
+        ...posted(4, postedAt),
+        body: `## Previous review\n- Major, \`a.ts:1\`, x: partly fixed.\n- Minor, \`b.ts:2\`, y: fixed.\n${REVIEW_BODY}`,
+        rereview: true,
+      });
+    // Held: no refindings, and the review's own comments do not leak out as notice.comments.
+    expect(plan({ snapshot: current, state: state(NOW - 29 * MINUTE) }).intents).toEqual([]);
+    const due = plan({ snapshot: current, state: state(NOW - 30 * MINUTE) });
+    expect(due.intents.map((i) => [i.variant, i.findings])).toEqual([
+      [
+        "notice.refindings",
+        "ada 3 findings baru (2 Minor, 1 Nit), dan 1 item dari review sebelumnya masih terbuka",
+      ],
+    ]);
+  });
+
+  it("drops a held re-review notice once the Owner approves, and sends only the approval", () => {
+    const state = withRound(round({ announcedReview: 3, changedAt: NOW - HOUR }), {
+      ...posted(4, NOW - MINUTE),
+      rereview: true,
+    });
+    const current = snapshot({ reviewRequested: [theirs("APPROVED", [note("a", ME)])] });
+    const result = plan({ snapshot: current, state });
+    expect(result.intents.map((i) => i.variant)).toEqual(["notice.approved"]);
+    expect(result.roundUpdates[0]?.round.announcedReview).toBe(4);
+  });
+
   it("announces a posted re-review as notice.refindings with its new findings, once", () => {
-    const state = withRound(round({ announcedReview: 3 }), { ...posted(4), rereview: true });
+    const state = withRound(round({ announcedReview: 3 }), {
+      ...posted(4, NOW - 30 * MINUTE),
+      rereview: true,
+    });
     const current = snapshot({
       reviewRequested: [theirs("UNREVIEWED", [note("a", ME), note("b", ME)])],
     });
@@ -421,7 +456,7 @@ describe("review notices (flow C)", () => {
     expect(later.intents).toEqual([]);
   });
 
-  it("announces an approved first review with its findings, then the approval", () => {
+  it("announces an approved first review with the approval alone, one chat for the MR", () => {
     const state = withRound(round(), {
       ...posted(4),
       body: "## Findings\n### Minor\n1. `a.ts:1` naming.",
@@ -431,7 +466,8 @@ describe("review notices (flow C)", () => {
       reviewRequested: [theirs("APPROVED", [note("a", ME), note("b", ME)])],
     });
     const result = plan({ snapshot: current, state });
-    expect(result.intents.map((i) => i.variant)).toEqual(["notice.findings", "notice.approved"]);
+    expect(result.intents.map((i) => i.variant)).toEqual(["notice.approved"]);
+    expect(result.roundUpdates[0]?.round.announcedReview).toBe(4);
   });
 
   it("announces each Agent Review once and still notices a later approval", () => {

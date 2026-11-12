@@ -61,9 +61,13 @@ describe("groupForMerge", () => {
     expect(ids(groupForMerge(rows))).toEqual([[1], [2]]);
   });
 
-  it("never merges a notice", () => {
-    const notice = { kind: "notice", variant: "notice.approved" } as const;
-    expect(ids(groupForMerge([row(1, notice), row(2, notice)]))).toEqual([[1], [2]]);
+  it("merges notices of one variant and ticket, so an Author gets one chat per batch", () => {
+    const notice = { kind: "notice", variant: "notice.findings" } as const;
+    const approved = { kind: "notice", variant: "notice.approved" } as const;
+    expect(ids(groupForMerge([row(1, notice), row(2, notice), row(3, approved)]))).toEqual([
+      [1, 2],
+      [3],
+    ]);
   });
 
   it("splits a group of twelve into 10 and 2", () => {

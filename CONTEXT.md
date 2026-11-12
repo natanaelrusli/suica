@@ -33,7 +33,7 @@ A single Teams chat that carries the Reviewer Nudges, Reminders or Re-review Nud
 _Avoid_: Batch, digest
 
 **Review Notice**:
-A Teams chat from the Owner to the Author of someone else's MR, sent after the Owner has reviewed it. After an Agent Review is posted, it says how many findings the review has per severity; after an Agent Re-review is posted, it says how many new findings it has. After an Agent Re-review the agent approved, it says the MR is approved. Every Teams chat opens with the agent introducing itself by its name (`teams.agentName`).
+A Teams chat from the Owner to the Author of someone else's MR, sent after the Owner has reviewed it. After an Agent Review is posted, it says how many findings the review has per severity; after an Agent Re-review is posted, it says how many new findings it has and how many items of the earlier review are still open, once 30 minutes pass with no newer review of the MR, so a burst of pushes makes one chat about the latest review. After an Agent Re-review the agent approved, it says the MR is approved; a first Agent Review the agent approved is announced by the approval alone. Every Teams chat opens with the agent introducing itself by its name (`teams.agentName`).
 _Avoid_: Review reply, feedback ping
 
 **Activity Alert**:
