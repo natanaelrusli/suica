@@ -1,7 +1,7 @@
 import { UNREVIEWED } from "../domain.ts";
 import type { MergeRequest, ReviewState, Snapshot } from "../domain.ts";
 import { myReviewState, reviewerKey } from "../events.ts";
-import { countFindings } from "../inline-review.ts";
+import { countFindings, countOpenPreviousItems } from "../inline-review.ts";
 import type { PreviousState } from "../events.ts";
 import type {
   Intent,
@@ -31,6 +31,9 @@ export interface PlanInput {
 }
 
 const APPROVED = "APPROVED";
+// shortcut: a fixed quiet gap, make it a teams setting when an Owner asks to tune it
+/** A re-review notice waits this long with no newer review, so a burst of pushes is one chat. */
+export const REREVIEW_NOTICE_QUIET_MS = 30 * 60_000;
 const REQUESTED_CHANGES = "REQUESTED_CHANGES";
 const UNAPPROVED = "UNAPPROVED";
 
@@ -244,12 +247,16 @@ export function planTeams(input: PlanInput): TeamsPlan {
     // review is announced with its findings, and the approval follows as its own notice.
     const posted = state.postedReviews.get(mr.key);
     const reapproved = posted?.approved === true && posted.rereview;
-    if (
-      live &&
+    // A re-review that did not approve waits for a quiet gap: each push makes a new review, and
+    // only the latest is announced, with what is still open from the earlier ones.
+    const held = posted?.rereview === true && !reapproved;
+    const pending = posted !== undefined && posted.id > (round.announcedReview ?? 0);
+    const due =
       posted !== undefined &&
-      posted.id > (round.announcedReview ?? 0) &&
-      (round.myNotes > round.noticedNotes || now - posted.postedAt >= config.noticeDebounceMs)
-    ) {
+      (held
+        ? now - posted.postedAt >= REREVIEW_NOTICE_QUIET_MS
+        : round.myNotes > round.noticedNotes || now - posted.postedAt >= config.noticeDebounceMs);
+    if (live && posted !== undefined && pending && due) {
       intents.push({
         dedupeKey: `findings:${posted.id}`,
         kind: "notice",
@@ -260,7 +267,11 @@ export function planTeams(input: PlanInput): TeamsPlan {
             : "notice.findings",
         mr: intentMr(mr),
         recipient: mr.author,
-        findings: describeFindings(countFindings(posted.body), posted.rereview),
+        findings: describeFindings(
+          countFindings(posted.body),
+          posted.rereview,
+          reapproved ? 0 : countOpenPreviousItems(posted.body),
+        ),
       });
       round = {
         ...round,
@@ -274,7 +285,9 @@ export function planTeams(input: PlanInput): TeamsPlan {
     // the Owner has stopped changing the review.
     const settled =
       variant === "notice.approved" || now - round.changedAt >= config.noticeDebounceMs;
-    if (live && variant !== undefined && settled) {
+    // While a review waits to be announced, its own comments are not a separate notice.
+    const waiting = pending && !due && variant !== "notice.approved";
+    if (live && variant !== undefined && settled && !waiting) {
       intents.push({
         dedupeKey: `notice:${mr.key}:${myState}:${myNotes}`,
         kind: "notice",
