@@ -602,22 +602,25 @@ describe("runAgentReview", () => {
   it("fails an incomplete collected diff before invoking a model CLI", async () => {
     const h = harness();
     const originalRest = h.deps.rest;
-    h.deps.rest = (path) =>
-      path.endsWith("/versions/1")
-        ? Promise.resolve({
-            diffs: DIFFS,
-            state: "collected",
-            real_size: String(DIFFS.length),
-            overflow: true,
-          })
-        : originalRest(path);
+    const deps = {
+      ...h.deps,
+      rest: (path: string) =>
+        path.endsWith("/versions/1")
+          ? Promise.resolve({
+              diffs: DIFFS,
+              state: "collected",
+              real_size: String(DIFFS.length),
+              overflow: true,
+            })
+          : originalRest(path),
+    };
     const queued = h.queue();
 
-    await runAgentReview(h.deps, queued);
+    await runAgentReview(deps, queued);
 
     expect(h.db.getAgentReview(queued.id)).toMatchObject({
       status: "failed",
-      detail: expect.stringContaining("diff version coverage is incomplete"),
+      detail: expect.stringContaining("diff version coverage is incomplete") as string,
     });
     expect(
       h.calls.filter((call) => call.file === "/bin/claude" || call.file === "/bin/codex"),
@@ -1164,16 +1167,27 @@ describe("runAgentReview", () => {
   it("keeps a ready review when workspace cleanup fails and records bounded stage timings", async () => {
     const h = harness();
     const queued = h.queue();
-    await runAgentReview({
-      ...h.deps,
-      removeReviewDirectory: async () => { throw new Error("private path detail"); },
-    }, queued);
+    await runAgentReview(
+      {
+        ...h.deps,
+        removeReviewDirectory: async () => {
+          throw new Error("private path detail");
+        },
+      },
+      queued,
+    );
     expect(h.db.getAgentReview(queued.id)?.status).toBe("ready");
-    const records = h.logs.map((line) => JSON.parse(line) as Record<string, unknown>)
-      .filter((event) => event.message === "agent review stage").map((event) => event.attributes as Record<string, unknown>);
+    const records = h.logs
+      .map((line) => JSON.parse(line) as Record<string, unknown>)
+      .filter((event) => event.message === "agent review stage")
+      .map((event) => event.attributes as Record<string, unknown>);
     expect(records.map((event) => event.stage)).toEqual(["input", "checkout", "model", "cleanup"]);
-    expect(records.every((event) => typeof event.duration_ms === "number" && event.duration_ms >= 0)).toBe(true);
-    expect(records.some((event) => JSON.stringify(event).includes("private path detail"))).toBe(false);
+    expect(
+      records.every((event) => typeof event.duration_ms === "number" && event.duration_ms >= 0),
+    ).toBe(true);
+    expect(records.some((event) => JSON.stringify(event).includes("private path detail"))).toBe(
+      false,
+    );
   });
 
   it("drops a review the Owner cancelled just as the CLI finished, without notifying", async () => {
@@ -1827,7 +1841,9 @@ describe("postAgentReview and discardAgentReview", () => {
 
   it("resumes a frozen plan after an accepted post loses its response", async () => {
     const { h, id } = await ready();
-    expect(h.db.transitionAgentReview(id, ["ready"], "ready", { body: INLINE_REVIEW }, NOW)).toBe(true);
+    expect(h.db.transitionAgentReview(id, ["ready"], "ready", { body: INLINE_REVIEW }, NOW)).toBe(
+      true,
+    );
     const fake = postDeps(h);
     let clock = NOW;
     const originalPost = fake.deps.post;

@@ -56,7 +56,9 @@ export async function loadReviewInput(
   const matching = versions.filter((version) => version.head_commit_sha === detail.headSha);
   if (matching.length !== 1)
     throw new RunFailure("immutable diff version for fetched head is missing or ambiguous");
-  const version = matching[0]!;
+  const version = matching[0];
+  if (version === undefined)
+    throw new RunFailure("immutable diff version for fetched head is missing");
   const raw = versionSchema.parse(await rest(`${mrPath}/versions/${version.id}`));
   const files: ReviewFile[] = raw.diffs.map((file) => ({
     oldPath: file.old_path,
@@ -77,7 +79,14 @@ export async function loadReviewInput(
   return {
     detail: {
       ...detail,
-      files: files.map(({ coverage: _coverage, ...file }) => file),
+      files: files.map((file) => ({
+        oldPath: file.oldPath,
+        newPath: file.newPath,
+        newFile: file.newFile,
+        renamedFile: file.renamedFile,
+        deletedFile: file.deletedFile,
+        diff: file.diff,
+      })),
       filesTruncated:
         raw.overflow === true ||
         raw.state !== "collected" ||

@@ -860,7 +860,7 @@ private func tabbedList(me: Bool = true) throws -> ReviewListDocument {
     await model.refresh()
     #expect(model.refreshSeconds == 10)
     await client.setDetail("g/p!1", .success(try detail("g/p!1", ["pipeline": NSNull()])))
-    await model.refresh()
+    await model.refresh(reason: .manual)
     #expect(model.refreshSeconds == 30)
 }
 
@@ -879,7 +879,7 @@ private func tabbedList(me: Bool = true) throws -> ReviewListDocument {
     } onChange: {
         redrawn.withLock { $0 = true }
     }
-    await model.refresh()
+    await model.refresh(reason: .manual)
     #expect(!redrawn.withLock { $0 })
     #expect(await client.detailCalls == ["g/p!1", "g/p!1"])
 }
