@@ -219,6 +219,19 @@ actor FakeReviewsClient: ReviewsClient {
     #expect(model.selectedDetail?.key == "g/p!1")
 }
 
+@MainActor @Test func eightFreshSelectionsCanBeReselectedWithoutDetailReads() async throws {
+    let keys = (1...8).map { "g/p!\($0)" }
+    let client = FakeReviewsClient(lists: [.success(list(keys[0]))])
+    for key in keys { await client.setDetail(key, .success(try detail(key))) }
+    let model = ReviewsModel(client: client)
+    await model.refresh()
+    for key in keys.dropFirst() { await model.select(key) }
+    for key in keys.reversed() { await model.select(key) }
+    #expect(await client.detailCalls == keys)
+    #expect(model.details.count == 8)
+    #expect(model.selectedDetail?.key == keys[0])
+}
+
 @MainActor @Test func newestQueuedSelectionKeepsAtMostTwoDetailReads() async throws {
     let client = FakeReviewsClient(lists: [.success(list("A", "B", "C", "D", "E"))])
     let gateA = Gate()
@@ -406,12 +419,15 @@ actor FakeReviewsClient: ReviewsClient {
     let first = Task { await model.loadDetail("g/p!1") }
     while await client.detailCalls.isEmpty { await Task.yield() }
     await client.setDetail("g/p!1", .success(try detail("g/p!1")))
-    await model.loadDetail("g/p!1")
+    let second = Task { await model.loadDetail("g/p!1") }
+    // Same-key callers join the active read and request one trailing read.
     await gate.open()
     await first.value
+    await second.value
     #expect(model.details["g/p!1"] != nil)
     #expect(model.detailErrors["g/p!1"] == nil)
     #expect(model.loadingKeys.isEmpty)
+    #expect(await client.detailCalls == ["g/p!1", "g/p!1"])
 }
 
 // MARK: - Grouping
@@ -1059,6 +1075,36 @@ private func options() throws -> ReviewOptions {
 
     clock.withLock { $0 = Date(timeIntervalSince1970: 30) }
     await model.refresh(reason: .automatic)
+    #expect(await client.detailCalls == ["g/p!1", "g/p!1"])
+}
+
+@MainActor @Test func activePipelineAutomaticRefreshesReuseDetailsUntilTenSeconds() async throws {
+    let client = FakeReviewsClient(lists: Array(repeating: .success(list("g/p!1")), count: 3))
+    await client.setDetail("g/p!1", .success(try detail("g/p!1")))
+    let clock = Mutex(Date(timeIntervalSince1970: 0))
+    let model = ReviewsModel(client: client, now: { clock.withLock { $0 } })
+
+    await model.refresh(reason: .automatic)
+    for second in [3, 6, 9] {
+        clock.withLock { $0 = Date(timeIntervalSince1970: TimeInterval(second)) }
+        await model.refresh(reason: .automatic)
+    }
+    #expect(await client.detailCalls == ["g/p!1"])
+
+    clock.withLock { $0 = Date(timeIntervalSince1970: 10) }
+    await model.refresh(reason: .automatic)
+    #expect(await client.detailCalls == ["g/p!1", "g/p!1"])
+}
+
+@MainActor @Test func manualRefreshBypassesDetailFreshness() async throws {
+    let client = FakeReviewsClient(lists: [.success(list("g/p!1")), .success(list("g/p!1"))])
+    await client.setDetail("g/p!1", .success(try detail("g/p!1", ["pipeline": NSNull()])))
+    let clock = Mutex(Date(timeIntervalSince1970: 0))
+    let model = ReviewsModel(client: client, now: { clock.withLock { $0 } })
+
+    await model.refresh(reason: .automatic)
+    clock.withLock { $0 = Date(timeIntervalSince1970: 1) }
+    await model.refresh(reason: .manual)
     #expect(await client.detailCalls == ["g/p!1", "g/p!1"])
 }
 
