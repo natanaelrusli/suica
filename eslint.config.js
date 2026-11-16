@@ -68,7 +68,15 @@ export default tseslint.config(
   },
   {
     files: ["**/*.test.{ts,tsx}"],
-    rules: { "@typescript-eslint/no-non-null-assertion": "off" },
+    // Test doubles are async to satisfy the interfaces they stand in for.
+    rules: {
+      "@typescript-eslint/no-non-null-assertion": "off",
+      "@typescript-eslint/require-await": "off",
+    },
+  },
+  {
+    files: ["scripts/**/*.ts"],
+    rules: { "@typescript-eslint/require-await": "off", "no-console": "off" },
   },
   prettier,
 );

@@ -15,12 +15,13 @@ function fixture() {
   store.transitionAgentReview(id, ["running"], "ready", { body: "review", headSha: "abc" }, 1);
   let now = 100;
   const row = store.getAgentReview(id)!;
+  const log = vi.fn<(message: string) => void>();
   const deps: ReviewPostDeps = {
     store,
     post: vi.fn(async () => ({ id: 7 })),
     postJson: vi.fn(async () => ({ id: 8 })),
     rest: vi.fn(async () => []),
-    log: vi.fn(),
+    log,
     now: () => now,
     ownerUsername: "owner",
     preflight: async () => true,
@@ -38,6 +39,7 @@ function fixture() {
   };
   return {
     deps,
+    log,
     store,
     row,
     advance: (n: number) => {
@@ -125,23 +127,27 @@ describe("resumeReviewPosting", () => {
       throw new Error("timeout");
     });
     const full = Array.from({ length: 100 }, (_, i) => note(i + 1, "unrelated"));
-    f.deps.rest = vi.fn(async (url) => {
+    f.deps.rest = vi.fn(async (url: string) => {
       if (url.endsWith("page=1")) return full;
       return [note(101)];
     });
     expect(await resumeReviewPosting(f.deps, 1)).toBe("held");
     f.advance(900101);
     const result = await resumeReviewPosting(f.deps, 1);
-    expect(result, f.deps.log.mock.calls.map((c) => c[0]).join("\n")).toBe("posted");
+    expect(result, f.log.mock.calls.map((c) => c[0]).join("\n")).toBe("posted");
     expect(f.store.reviewPostParts(1)[0]?.remoteId).toBe("101");
     f.close();
   });
   it("continues beyond short pages until it finds the matching marker", async () => {
     const f = fixture();
-    f.deps.post = vi.fn(async () => { throw new Error("timeout"); });
+    f.deps.post = vi.fn(async () => {
+      throw new Error("timeout");
+    });
     expect(await resumeReviewPosting(f.deps, 1)).toBe("held");
     f.advance(900101);
-    f.deps.rest = vi.fn(async (url) => url.endsWith("page=1") ? [note(1, "unrelated")] : [note(2)]);
+    f.deps.rest = vi.fn(async (url: string) =>
+      url.endsWith("page=1") ? [note(1, "unrelated")] : [note(2)],
+    );
     expect(await resumeReviewPosting(f.deps, 1)).toBe("posted");
     expect(f.deps.rest).toHaveBeenCalledTimes(2);
     expect(f.store.reviewPostParts(1)[0]?.remoteId).toBe("2");
@@ -150,16 +156,18 @@ describe("resumeReviewPosting", () => {
   it("holds on a later page failure without exposing thrown secrets or retrying", async () => {
     const f = fixture();
     const secret = "https://user:secret@example.test/private-body";
-    f.deps.post = vi.fn(async () => { throw new Error(secret); });
+    f.deps.post = vi.fn(async () => {
+      throw new Error(secret);
+    });
     expect(await resumeReviewPosting(f.deps, 1)).toBe("held");
     f.advance(900101);
-    f.deps.rest = vi.fn(async (url) => {
+    f.deps.rest = vi.fn(async (url: string) => {
       if (url.endsWith("page=1")) return [note(1, "unrelated")];
       throw new Error(secret);
     });
     expect(await resumeReviewPosting(f.deps, 1)).toBe("held");
     const detail = f.store.getAgentReview(1)?.detail ?? "";
-    const logs = f.deps.log.mock.calls.map(([message]) => message).join("\n");
+    const logs = f.log.mock.calls.map(([message]) => message).join("\n");
     expect(detail + logs).not.toContain(secret);
     expect(detail.length).toBeLessThanOrEqual(500);
     expect(f.deps.post).toHaveBeenCalledTimes(1);
@@ -167,7 +175,9 @@ describe("resumeReviewPosting", () => {
   });
   it("holds when 100 nonempty pages are exhausted", async () => {
     const f = fixture();
-    f.deps.post = vi.fn(async () => { throw new Error("timeout"); });
+    f.deps.post = vi.fn(async () => {
+      throw new Error("timeout");
+    });
     expect(await resumeReviewPosting(f.deps, 1)).toBe("held");
     f.advance(900101);
     f.deps.rest = vi.fn(async () => [note(1, "unrelated")]);
@@ -176,5 +186,4 @@ describe("resumeReviewPosting", () => {
     expect(f.deps.post).toHaveBeenCalledTimes(1);
     f.close();
   });
-
 });

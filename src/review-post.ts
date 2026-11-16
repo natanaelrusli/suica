@@ -33,14 +33,17 @@ export interface ReviewPostDeps {
 
 const MAX_NOTE_CHARS = 100_000;
 const MAX_WARNING_CHARS = 500;
-const safeKey = (key: string) => /^[a-zA-Z0-9_-]{1,64}$/.test(key) ? key : "part";
+const safeKey = (key: string) => (/^[a-zA-Z0-9_-]{1,64}$/.test(key) ? key : "part");
 function failureCategory(error: unknown): string {
   const status = error instanceof FetchFailure ? error.httpStatus : undefined;
-  if (status !== undefined && Number.isInteger(status) && status >= 100 && status <= 599) return `HTTP ${status}`;
+  if (status !== undefined && Number.isInteger(status) && status >= 100 && status <= 599)
+    return `HTTP ${status}`;
   if (error instanceof FetchFailure) return error.kind;
   return "unexpected error";
 }
-function warning(message: string): string { return message.slice(0, MAX_WARNING_CHARS); }
+function warning(message: string): string {
+  return message.slice(0, MAX_WARNING_CHARS);
+}
 const marker = (id: number, sha: string, key: string) =>
   `<!-- suica-review:${id}:${sha}:${key} -->`;
 function bodyFrom(payload: string): string {
@@ -113,14 +116,18 @@ export async function resumeReviewPosting(
     for (const part of parts) {
       if (part.state === "confirmed") continue;
       if (part.state === "rejected")
-        return hold(warning(`Posting part ${safeKey(part.key)} is rejected; inspect GitLab before retrying.`));
+        return hold(
+          warning(`Posting part ${safeKey(part.key)} is rejected; inspect GitLab before retrying.`),
+        );
       if (part.state === "sending" || part.state === "uncertain") {
         let recovered: string | null;
         try {
           recovered = await reconcile(deps, row, part);
         } catch (error) {
           return hold(
-            warning(`Could not reconcile posting part ${safeKey(part.key)} (${failureCategory(error)}); inspect GitLab.`),
+            warning(
+              `Could not reconcile posting part ${safeKey(part.key)} (${failureCategory(error)}); inspect GitLab.`,
+            ),
           );
         }
         if (!recovered)
@@ -152,7 +159,11 @@ export async function resumeReviewPosting(
         if (confirmedId === null) confirmedId = await reconcile(deps, row, part);
         if (confirmedId === null) {
           deps.store.updateReviewPostPart(lease, part.key, "uncertain", null, deps.now());
-          return hold(warning(`Posting part ${safeKey(part.key)} has no confirmed remote ID; inspect GitLab.`));
+          return hold(
+            warning(
+              `Posting part ${safeKey(part.key)} has no confirmed remote ID; inspect GitLab.`,
+            ),
+          );
         }
         if (!deps.store.updateReviewPostPart(lease, part.key, "confirmed", confirmedId, deps.now()))
           return hold("Posting ownership changed after remote write; inspect GitLab.");
@@ -167,12 +178,16 @@ export async function resumeReviewPosting(
         ) {
           deps.store.updateReviewPostPart(lease, part.key, "rejected", null, deps.now());
           return hold(
-            warning(`Posting part ${safeKey(part.key)} was rejected (HTTP ${status}); inspect GitLab before retrying.`),
+            warning(
+              `Posting part ${safeKey(part.key)} was rejected (HTTP ${status}); inspect GitLab before retrying.`,
+            ),
           );
         }
         deps.store.updateReviewPostPart(lease, part.key, "uncertain", null, deps.now());
         return hold(
-          warning(`Posting part ${safeKey(part.key)} outcome is uncertain (${failureCategory(error)}); inspect GitLab.`),
+          warning(
+            `Posting part ${safeKey(part.key)} outcome is uncertain (${failureCategory(error)}); inspect GitLab.`,
+          ),
         );
       }
     }
@@ -180,7 +195,11 @@ export async function resumeReviewPosting(
       ? "posted"
       : hold("Posting could not be fenced at completion; inspect GitLab.");
   } catch (error) {
-    return hold(warning(`Posting held for inspection (${failureCategory(error)}); inspect GitLab before retrying.`));
+    return hold(
+      warning(
+        `Posting held for inspection (${failureCategory(error)}); inspect GitLab before retrying.`,
+      ),
+    );
   }
 }
 
@@ -194,23 +213,12 @@ async function reconcile(
   for (let page = 1; page <= 100; page++) {
     const result: unknown = await deps.rest(`${path}?per_page=100&page=${page}`);
     if (!Array.isArray(result)) throw new Error("incomplete notes response");
-    const notes = result.flatMap((item) => {
-      if (
-        part.kind !== "inline" ||
-        typeof item !== "object" ||
-        item === null ||
-        !("notes" in item) ||
-        !Array.isArray(item.notes)
-      )
-        return [item];
-      return item.notes.flatMap((discussion) =>
-        typeof discussion === "object" &&
-        discussion !== null &&
-        "notes" in discussion &&
-        Array.isArray(discussion.notes)
-          ? discussion.notes
-          : [discussion],
-      );
+    const items: unknown[] = result;
+    const notes = items.flatMap((item): unknown[] => {
+      const top = part.kind === "inline" ? notesOf(item) : undefined;
+      return top === undefined
+        ? [item]
+        : top.flatMap((discussion) => notesOf(discussion) ?? [discussion]);
     });
     for (const item of notes) {
       if (
@@ -233,4 +241,14 @@ async function reconcile(
     if (result.length === 0) return null;
   }
   throw new Error("note pagination incomplete");
+}
+
+/** The `notes` array of a discussion object, if it has one. */
+function notesOf(value: unknown): unknown[] | undefined {
+  return typeof value === "object" &&
+    value !== null &&
+    "notes" in value &&
+    Array.isArray(value.notes)
+    ? (value.notes as unknown[])
+    : undefined;
 }

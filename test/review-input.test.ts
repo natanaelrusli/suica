@@ -138,12 +138,13 @@ describe("loadReviewInput", () => {
         diff: "x".repeat(length),
       }));
     const accepted = await loadReviewInput(
-      runner([[version(1)], response(makeDiffs(Array(8).fill(187_500)))]).rest,
+      runner([[version(1)], response(makeDiffs(Array<number>(8).fill(187_500)))]).rest,
       { ...detail, headSha: head },
     );
     expect(() => assertReviewCoverage(accepted)).not.toThrow();
     const rejected = await loadReviewInput(
-      runner([[version(1)], response(makeDiffs([187_501, ...Array(7).fill(187_500)]))]).rest,
+      runner([[version(1)], response(makeDiffs([187_501, ...Array<number>(7).fill(187_500)]))])
+        .rest,
       { ...detail, headSha: head },
     );
     expect(() => assertReviewCoverage(rejected)).toThrow(/coverage limits/);
@@ -191,7 +192,6 @@ describe("assertReviewCoverage", () => {
           renamedFile: false,
           deletedFile: false,
           diff: "@@ -0,0 +1 @@\n+x",
-          coverage: "text",
         },
       ],
       filesTruncated: false,
