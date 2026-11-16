@@ -136,4 +136,45 @@ describe("resumeReviewPosting", () => {
     expect(f.store.reviewPostParts(1)[0]?.remoteId).toBe("101");
     f.close();
   });
+  it("continues beyond short pages until it finds the matching marker", async () => {
+    const f = fixture();
+    f.deps.post = vi.fn(async () => { throw new Error("timeout"); });
+    expect(await resumeReviewPosting(f.deps, 1)).toBe("held");
+    f.advance(900101);
+    f.deps.rest = vi.fn(async (url) => url.endsWith("page=1") ? [note(1, "unrelated")] : [note(2)]);
+    expect(await resumeReviewPosting(f.deps, 1)).toBe("posted");
+    expect(f.deps.rest).toHaveBeenCalledTimes(2);
+    expect(f.store.reviewPostParts(1)[0]?.remoteId).toBe("2");
+    f.close();
+  });
+  it("holds on a later page failure without exposing thrown secrets or retrying", async () => {
+    const f = fixture();
+    const secret = "https://user:secret@example.test/private-body";
+    f.deps.post = vi.fn(async () => { throw new Error(secret); });
+    expect(await resumeReviewPosting(f.deps, 1)).toBe("held");
+    f.advance(900101);
+    f.deps.rest = vi.fn(async (url) => {
+      if (url.endsWith("page=1")) return [note(1, "unrelated")];
+      throw new Error(secret);
+    });
+    expect(await resumeReviewPosting(f.deps, 1)).toBe("held");
+    const detail = f.store.getAgentReview(1)?.detail ?? "";
+    const logs = f.deps.log.mock.calls.map(([message]) => message).join("\n");
+    expect(detail + logs).not.toContain(secret);
+    expect(detail.length).toBeLessThanOrEqual(500);
+    expect(f.deps.post).toHaveBeenCalledTimes(1);
+    f.close();
+  });
+  it("holds when 100 nonempty pages are exhausted", async () => {
+    const f = fixture();
+    f.deps.post = vi.fn(async () => { throw new Error("timeout"); });
+    expect(await resumeReviewPosting(f.deps, 1)).toBe("held");
+    f.advance(900101);
+    f.deps.rest = vi.fn(async () => [note(1, "unrelated")]);
+    expect(await resumeReviewPosting(f.deps, 1)).toBe("held");
+    expect(f.deps.rest).toHaveBeenCalledTimes(100);
+    expect(f.deps.post).toHaveBeenCalledTimes(1);
+    f.close();
+  });
+
 });

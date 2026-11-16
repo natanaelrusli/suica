@@ -32,6 +32,15 @@ export interface ReviewPostDeps {
 }
 
 const MAX_NOTE_CHARS = 100_000;
+const MAX_WARNING_CHARS = 500;
+const safeKey = (key: string) => /^[a-zA-Z0-9_-]{1,64}$/.test(key) ? key : "part";
+function failureCategory(error: unknown): string {
+  const status = error instanceof FetchFailure ? error.httpStatus : undefined;
+  if (status !== undefined && Number.isInteger(status) && status >= 100 && status <= 599) return `HTTP ${status}`;
+  if (error instanceof FetchFailure) return error.kind;
+  return "unexpected error";
+}
+function warning(message: string): string { return message.slice(0, MAX_WARNING_CHARS); }
 const marker = (id: number, sha: string, key: string) =>
   `<!-- suica-review:${id}:${sha}:${key} -->`;
 function bodyFrom(payload: string): string {
@@ -72,7 +81,13 @@ export async function resumeReviewPosting(
     !deps.store.reviewPostParts(id).length
   )
     return "held";
-  if (!(await deps.preflight())) return "held";
+  try {
+    if (!(await deps.preflight())) return "held";
+  } catch {
+    const message = warning("Posting preflight failed; inspect GitLab before retrying.");
+    deps.log(message);
+    return "held";
+  }
   const token = deps.token?.() ?? `${id}-${deps.now()}-${Math.random()}`;
   const lease = deps.store.claimReviewPosting(id, token, deps.now());
   if (!lease) return "held";
@@ -98,14 +113,14 @@ export async function resumeReviewPosting(
     for (const part of parts) {
       if (part.state === "confirmed") continue;
       if (part.state === "rejected")
-        return hold(`Posting part ${part.key} is rejected; inspect GitLab before retrying.`);
+        return hold(warning(`Posting part ${safeKey(part.key)} is rejected; inspect GitLab before retrying.`));
       if (part.state === "sending" || part.state === "uncertain") {
         let recovered: string | null;
         try {
           recovered = await reconcile(deps, row, part);
         } catch (error) {
           return hold(
-            `Could not reconcile posting part ${part.key}: ${String(error)}; inspect GitLab.`,
+            warning(`Could not reconcile posting part ${safeKey(part.key)} (${failureCategory(error)}); inspect GitLab.`),
           );
         }
         if (!recovered)
@@ -137,7 +152,7 @@ export async function resumeReviewPosting(
         if (confirmedId === null) confirmedId = await reconcile(deps, row, part);
         if (confirmedId === null) {
           deps.store.updateReviewPostPart(lease, part.key, "uncertain", null, deps.now());
-          return hold(`Posting part ${part.key} has no confirmed remote ID; inspect GitLab.`);
+          return hold(warning(`Posting part ${safeKey(part.key)} has no confirmed remote ID; inspect GitLab.`));
         }
         if (!deps.store.updateReviewPostPart(lease, part.key, "confirmed", confirmedId, deps.now()))
           return hold("Posting ownership changed after remote write; inspect GitLab.");
@@ -152,12 +167,12 @@ export async function resumeReviewPosting(
         ) {
           deps.store.updateReviewPostPart(lease, part.key, "rejected", null, deps.now());
           return hold(
-            `Posting part ${part.key} was rejected (HTTP ${status}); inspect GitLab before retrying.`,
+            warning(`Posting part ${safeKey(part.key)} was rejected (HTTP ${status}); inspect GitLab before retrying.`),
           );
         }
         deps.store.updateReviewPostPart(lease, part.key, "uncertain", null, deps.now());
         return hold(
-          `Posting part ${part.key} outcome is uncertain: ${String(error)}; inspect GitLab.`,
+          warning(`Posting part ${safeKey(part.key)} outcome is uncertain (${failureCategory(error)}); inspect GitLab.`),
         );
       }
     }
@@ -165,7 +180,7 @@ export async function resumeReviewPosting(
       ? "posted"
       : hold("Posting could not be fenced at completion; inspect GitLab.");
   } catch (error) {
-    return hold(`Posting held for inspection: ${String(error)}`);
+    return hold(warning(`Posting held for inspection (${failureCategory(error)}); inspect GitLab before retrying.`));
   }
 }
 
@@ -215,7 +230,7 @@ async function reconcile(
         return String(item.id);
       throw new Error("matching note has no remote ID");
     }
-    if (result.length < 100) return null;
+    if (result.length === 0) return null;
   }
   throw new Error("note pagination incomplete");
 }
