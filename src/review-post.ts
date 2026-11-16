@@ -2,7 +2,7 @@ import type { Store } from "./store.ts";
 import { FetchFailure } from "./gitlab.ts";
 import type { PostRunner, PostJsonRunner, RestRunner } from "./gitlab.ts";
 import type { AgentReviewRow } from "./store.ts";
-import { sanitizeForGitLab } from "./agent-review.ts";
+import { sanitizeForGitLab } from "./review-sanitize.ts";
 
 export interface PostPart {
   key: string;
@@ -66,7 +66,12 @@ export async function resumeReviewPosting(
 ): Promise<"posted" | "held" | "nothing"> {
   const row = deps.store.getAgentReview(id);
   if (!row || (row.status !== "ready" && row.status !== "posting")) return "nothing";
-  if (row.status === "ready" && row.detail?.includes("Posting was interrupted") && !deps.store.reviewPostParts(id).length) return "held";
+  if (
+    row.status === "ready" &&
+    row.detail?.includes("Posting was interrupted") &&
+    !deps.store.reviewPostParts(id).length
+  )
+    return "held";
   if (!(await deps.preflight())) return "held";
   const token = deps.token?.() ?? `${id}-${deps.now()}-${Math.random()}`;
   const lease = deps.store.claimReviewPosting(id, token, deps.now());
@@ -179,17 +184,17 @@ async function reconcile(
         part.kind !== "inline" ||
         typeof item !== "object" ||
         item === null ||
-        !("discussions" in item) ||
-        !Array.isArray(item.discussions)
+        !("notes" in item) ||
+        !Array.isArray(item.notes)
       )
         return [item];
-      return item.discussions.flatMap((discussion) =>
+      return item.notes.flatMap((discussion) =>
         typeof discussion === "object" &&
         discussion !== null &&
         "notes" in discussion &&
         Array.isArray(discussion.notes)
           ? discussion.notes
-          : [],
+          : [discussion],
       );
     });
     for (const item of notes) {

@@ -114,7 +114,7 @@ describe("resumeReviewPosting", () => {
     ];
     f.deps.rest = vi.fn(async () => [
       { id: 3, body: marker, author: { username: "someone" } },
-      { discussions: [{ notes: [note(55)] }] },
+      { id: 4, notes: [note(55)] },
     ]);
     expect(await resumeReviewPosting(f.deps, 1)).toBe("posted");
     f.close();

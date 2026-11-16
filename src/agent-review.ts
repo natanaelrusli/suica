@@ -56,6 +56,8 @@ import { approveMergeRequest, fetchMrDetail, parseMrKey, resolveOwnThreads } fro
 import type { ApproveOutcome, DiffFileJson, MrDetailJson, ResolveOutcome } from "./reviews.ts";
 import type { AgentReviewRow, Store, TokenPurpose } from "./store.ts";
 import { resumeReviewPosting } from "./review-post.ts";
+import { sanitizeForGitLab } from "./review-sanitize.ts";
+export { sanitizeForGitLab } from "./review-sanitize.ts";
 
 /** Agent Review: an MR reviewed by a coding agent CLI with a skill, posted only after approval. */
 
@@ -67,50 +69,6 @@ const MAX_NOTE_CHARS = 100_000;
 const MAX_SKILL_CHARS = 120_000;
 /** How often a running review checks whether the Owner cancelled it from another process. */
 const CANCEL_CHECK_MS = 2_000;
-
-// MARK: - Sanitising for GitLab
-
-/** Applies `change` to the parts of a line outside inline code spans. */
-function outsideInlineCode(line: string, change: (text: string) => string): string {
-  return line
-    .split("`")
-    .map((part, index) => (index % 2 === 0 ? change(part) : part))
-    .join("`");
-}
-
-function stripMentionsAndLinks(text: string): string {
-  return (
-    text
-      // [label](url) keeps its label; <url> and bare URLs go.
-      .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
-      .replace(/<https?:\/\/[^>\s]*>/g, "(link removed)")
-      .replace(/\bhttps?:\/\/[^\s)>\]]+/g, "(link removed)")
-      // @user and @group/sub notify people; an email address (word before @) is left alone.
-      .replace(/(^|[^\w@])@(?=[\w.-]*\w)/g, "$1")
-  );
-}
-
-/**
- * Makes model output safe to post as the Owner: outside code, a line starting with `/` is escaped
- * so GitLab does not run it as a quick action, @mentions are removed so nobody is notified, and
- * links are removed. GitLab ignores quick actions and mentions inside code, so code stays as written.
- */
-export function sanitizeForGitLab(markdown: string): string {
-  let inFence = false;
-  return markdown
-    .replace(/\r\n/g, "\n")
-    .split("\n")
-    .map((line) => {
-      if (/^\s*(```|~~~)/.test(line)) {
-        inFence = !inFence;
-        return line;
-      }
-      if (inFence) return line;
-      const escaped = line.replace(/^(\s*)\//, "$1\\/");
-      return outsideInlineCode(escaped, stripMentionsAndLinks);
-    })
-    .join("\n");
-}
 
 const CLI_NAMES: Readonly<Record<string, string>> = {
   claude: "Claude Code",
@@ -1149,7 +1107,8 @@ export async function postAgentReview(
     current = await fetchMrDetail(deps.graphql, deps.rest, row.mrKey);
   } catch (error) {
     const detail = `Could not verify the MR is still the reviewed version (${errorName(error)}). Review the MR again before posting.`;
-    if (row.status === "ready") store.transitionAgentReview(id, ["ready"], "ready", { detail }, deps.now());
+    if (row.status === "ready")
+      store.transitionAgentReview(id, ["ready"], "ready", { detail }, deps.now());
     log.warn("agent review freshness lookup failed", { id, reason: errorName(error) });
     return "failed";
   }
@@ -1160,7 +1119,8 @@ export async function postAgentReview(
     descriptionSha(current.description) !== row.descriptionSha
   ) {
     const detail = "The MR changed since this review. Review the MR again before posting.";
-    if (row.status === "ready") store.transitionAgentReview(id, ["ready"], "ready", { detail }, deps.now());
+    if (row.status === "ready")
+      store.transitionAgentReview(id, ["ready"], "ready", { detail }, deps.now());
     log.info("agent review posting refused for stale input", { id });
     return "nothing";
   }
@@ -1169,7 +1129,8 @@ export async function postAgentReview(
     ownerUsername = await fetchCurrentUsername(deps.rest);
   } catch (error) {
     const detail = `Could not verify the authenticated GitLab user (${errorName(error)}). Review was not posted.`;
-    if (row.status === "ready") store.transitionAgentReview(id, ["ready"], "ready", { detail }, deps.now());
+    if (row.status === "ready")
+      store.transitionAgentReview(id, ["ready"], "ready", { detail }, deps.now());
     log.warn("agent review owner lookup failed", { id, reason: errorName(error) });
     return "failed";
   }
