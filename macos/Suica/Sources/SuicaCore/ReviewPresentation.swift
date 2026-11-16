@@ -37,25 +37,28 @@ public actor ReviewPresentationCache {
 
     public init(byteLimit: Int = 8 * 1024 * 1024) { self.byteLimit = max(0, byteLimit) }
 
-    public func diffs(key: String, headSha: String?, files: [DiffFile]) async -> PreparedReviewDiff {
+    /// Actor-isolated parsing serializes misses and reuses completed identical content.
+    public func diffs(key: String, headSha: String?, files: [DiffFile]) async throws -> PreparedReviewDiff {
+        try Task.checkCancellation()
         let id = ReviewContentID(key: key, headSha: headSha, files: files)
         if var hit = diffsByID[id] { tick &+= 1; hit.access = tick; diffsByID[id] = hit; return hit.value }
-        let prepared = await Task.detached(priority: .userInitiated) {
-            var result: [String: [DiffLine]] = [:]
-            for file in files {
-                if Task.isCancelled { break }
-                result[file.newPath] = file.diff.map(parseDiffLines) ?? []
-            }
-            return PreparedReviewDiff(id: id, linesByFile: result)
-        }.value
+        var result: [String: [DiffLine]] = [:]
+        for file in files {
+            try Task.checkCancellation()
+            result[file.newPath] = file.diff.map(parseDiffLines) ?? []
+        }
+        try Task.checkCancellation()
+        let prepared = PreparedReviewDiff(id: id, linesByFile: result)
         let cost = files.reduce(0) { $0 + ($1.diff?.utf8.count ?? 0) + $1.oldPath.utf8.count + $1.newPath.utf8.count }
         insertDiff(prepared, cost: cost)
         return prepared
     }
 
-    public func blocks(source: String) async -> [MarkdownBlock] {
+    public func blocks(source: String) async throws -> [MarkdownBlock] {
+        try Task.checkCancellation()
         if var hit = blocksBySource[source] { tick &+= 1; hit.access = tick; blocksBySource[source] = hit; return hit.value }
-        let result = await Task.detached(priority: .userInitiated) { parseMarkdownBlocks(source) }.value
+        let result = parseMarkdownBlocks(source)
+        try Task.checkCancellation()
         insertBlocks(result, source: source)
         return result
     }
@@ -65,14 +68,14 @@ public actor ReviewPresentationCache {
 
     private func insertDiff(_ value: PreparedReviewDiff, cost: Int) {
         guard cost <= byteLimit else { return }
-        diffsByID.removeValue(forKey: value.id)
+        if let old = diffsByID.removeValue(forKey: value.id) { totalCost -= old.cost }
         makeRoom(for: cost)
         tick &+= 1; diffsByID[value.id] = Entry(value: value, cost: cost, access: tick); totalCost += cost
     }
     private func insertBlocks(_ value: [MarkdownBlock], source: String) {
         let cost = source.utf8.count
         guard cost <= byteLimit else { return }
-        blocksBySource.removeValue(forKey: source)
+        if let old = blocksBySource.removeValue(forKey: source) { totalCost -= old.cost }
         makeRoom(for: cost)
         tick &+= 1; blocksBySource[source] = Entry(value: value, cost: cost, access: tick); totalCost += cost
     }
