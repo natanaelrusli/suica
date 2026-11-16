@@ -960,3 +960,30 @@ private func options() throws -> ReviewOptions {
     for key in keys.dropFirst() { await model.select(key) }
     #expect(model.details.count <= 8)
 }
+
+
+@MainActor @Test func aDelayedPreviousSelectionCannotReplaceTheCurrentSelection() async throws {
+    let client = FakeReviewsClient(lists: [.success(list("g/p!1", "g/p!2"))])
+    await client.setDetail("g/p!1", .success(try detail("g/p!1")))
+    await client.setDetail("g/p!2", .success(try detail("g/p!2")))
+    let model = ReviewsModel(client: client)
+    await model.refresh()
+
+    let gate = Gate()
+    await client.setDetail("g/p!1", .success(try detail("g/p!1")), gate: gate)
+    let delayedA = Task { await model.loadDetail("g/p!1") }
+    while await client.detailCalls.count < 2 { await Task.yield() }
+
+    await model.select("g/p!2")
+    #expect(model.selectedKey == "g/p!2")
+    #expect(model.selectedDetail?.key == "g/p!2")
+    #expect(model.loadingKeys == ["g/p!1"])
+
+    await gate.open()
+    await delayedA.value
+    #expect(model.selectedKey == "g/p!2")
+    #expect(model.selectedDetail?.key == "g/p!2")
+    #expect(model.details["g/p!1"] != nil)
+    #expect(model.details.count <= 8)
+    #expect(model.loadingKeys.isEmpty)
+}
