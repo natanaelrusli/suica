@@ -29,7 +29,7 @@ import { execFailure } from "./exec.ts";
 import { DEFAULT_ALERTS } from "./alerts.ts";
 import type { AlertName, AlertTemplates } from "./alerts.ts";
 import { clean, renderAlert } from "./format.ts";
-import { descriptionSha } from "./gitlab.ts";
+import { descriptionSha, fetchCurrentUsername } from "./gitlab.ts";
 import { assertReviewCoverage, loadReviewInput, versionSchema, versionsSchema } from "./review-input.ts";
 import type { GraphqlRunner, PostJsonRunner, PostRunner, RestRunner } from "./gitlab.ts";
 import { extractFindings, placeFinding, summaryWithout } from "./inline-review.ts";
@@ -50,6 +50,7 @@ import type { InvocationMode, ReviewEffort, RunResult } from "./review-runner.ts
 import { approveMergeRequest, fetchMrDetail, parseMrKey, resolveOwnThreads } from "./reviews.ts";
 import type { ApproveOutcome, DiffFileJson, MrDetailJson, ResolveOutcome } from "./reviews.ts";
 import type { AgentReviewRow, Store, TokenPurpose } from "./store.ts";
+import { resumeReviewPosting } from "./review-post.ts";
 
 /** Agent Review: an MR reviewed by a coding agent CLI with a skill, posted only after approval. */
 
@@ -1141,46 +1142,61 @@ export async function postAgentReview(
     log.info("agent review posting refused for stale input", { id });
     return "nothing";
   }
-  if (!store.transitionAgentReview(id, ["ready"], "posting", {}, deps.now())) return "nothing";
-
-  let plan: { findings: Finding[]; threads: Thread[] } = { findings: [], threads: [] };
-  if (mode === "inline") {
-    try {
-      plan = await planThreads(deps.rest, mrPath, row);
-    } catch (error) {
-      plan = { findings: extractFindings(row.body), threads: [] };
-      log.warn("agent review diff lookup failed", { id, reason: errorName(error) });
-    }
-  }
-  const posted: Finding[] = [];
-  for (const thread of plan.threads) {
-    try {
-      await deps.postJson(`${mrPath}/discussions`, {
-        body: renderThread(thread.finding, row.previousSha !== null),
-        position: thread.position,
-      });
-      posted.push(thread.finding);
-    } catch (error) {
-      log.warn("agent review thread refused", { id, reason: errorName(error) });
-    }
-  }
-
+  let ownerUsername: string;
   try {
-    const body = posted.length === 0 ? row.body : summaryWithout(row.body, posted);
-    await deps.post(`${mrPath}/notes`, {
-      body: renderNote(row, row.skill ?? deps.config.review.skill, body),
-    });
+    ownerUsername = await fetchCurrentUsername(deps.rest);
   } catch (error) {
-    const detail =
-      posted.length === 0
-        ? "Posting failed. Check the MR in GitLab before posting again: it may have arrived."
-        : `${posted.length} inline comments were posted, but the summary comment was not. Check the MR in GitLab before posting again: posting again repeats them.`;
-    store.transitionAgentReview(id, ["posting"], "ready", { detail }, deps.now());
-    log.warn("agent review post failed", { id, reason: errorName(error) });
+    const detail = `Could not verify the authenticated GitLab user (${errorName(error)}). Review was not posted.`;
+    store.transitionAgentReview(id, ["ready"], "ready", { detail }, deps.now());
+    log.warn("agent review owner lookup failed", { id, reason: errorName(error) });
     return "failed";
   }
-  const detail = mode === "inline" ? inlineDetail(posted.length, plan.findings.length) : "";
-  store.transitionAgentReview(id, ["posting"], "posted", { detail }, deps.now());
+
+  const result = await resumeReviewPosting({
+    store,
+    post: deps.post,
+    postJson: deps.postJson,
+    rest: deps.rest,
+    log: (message) => log.warn("agent review posting held", { id, reason: message }),
+    now: deps.now,
+    ownerUsername,
+    preflight: async () => {
+      try {
+        const latest = await fetchMrDetail(deps.graphql, deps.rest, row.mrKey);
+        return row.headSha !== null && row.descriptionSha !== null &&
+          latest.headSha === row.headSha && descriptionSha(latest.description) === row.descriptionSha;
+      } catch (error) {
+        log.warn("agent review freshness lookup failed", { id, reason: errorName(error) });
+        return false;
+      }
+    },
+    buildPlan: async () => {
+      let plan: { findings: Finding[]; threads: Thread[] } = { findings: [], threads: [] };
+      if (mode === "inline") {
+        try { plan = await planThreads(deps.rest, mrPath, row); }
+        catch (error) { plan = { findings: extractFindings(row.body ?? ""), threads: [] }; }
+      }
+      const planned = new Set(plan.threads.map((thread) => thread.finding.number));
+      const summary = summaryWithout(row.body ?? "", plan.findings.filter((finding) => planned.has(finding.number)));
+      const inline = plan.threads.map((thread, index) => ({
+        key: `inline-${index + 1}`, kind: "inline" as const,
+        endpoint: `${mrPath}/discussions`,
+        payload: JSON.stringify({ body: renderThread(thread.finding, row.previousSha !== null), position: thread.position }),
+        state: "pending" as const, remoteId: null,
+      }));
+      return [...inline, {
+        key: "summary", kind: "summary" as const, endpoint: `${mrPath}/notes`,
+        payload: JSON.stringify({ body: renderNote(row, row.skill ?? deps.config.review.skill, summary) }),
+        state: "pending" as const, remoteId: null,
+      }];
+    },
+  }, id);
+  if (result === "nothing") return "nothing";
+  if (result === "held") {
+    store.transitionAgentReview(id, ["ready", "posting"], "failed", { detail: "Posting is held for inspection. Check GitLab before retrying." }, deps.now());
+    return "failed";
+  }
+  const detail = mode === "inline" ? "Inline review findings were posted with a summary comment." : "";
   await approveAfterPost(deps, row, detail);
   return "posted";
 }
