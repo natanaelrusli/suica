@@ -476,14 +476,24 @@ export async function cloneSourceBranch(
       timeoutMs: GIT_TIMEOUT_MS,
     });
     const clonedHead = stdout.trim();
-    if (expectedHeadSha !== undefined && clonedHead !== expectedHeadSha) {
-      await deps.exec("git", ["-C", repoDir, "fetch", "--no-tags", "origin", expectedHeadSha], { timeoutMs: GIT_TIMEOUT_MS });
-      await deps.exec("git", ["-C", repoDir, "checkout", "--detach", expectedHeadSha], { timeoutMs: GIT_TIMEOUT_MS });
-      const { stdout: verified } = await deps.exec("git", ["-C", repoDir, "rev-parse", "HEAD"], { timeoutMs: GIT_TIMEOUT_MS });
+    if (expectedHeadSha !== undefined) {
+      if (clonedHead !== expectedHeadSha) {
+        await deps.exec("git", ["-C", repoDir, "fetch", "--depth=1", "--no-tags", "origin", expectedHeadSha], {
+          timeoutMs: GIT_TIMEOUT_MS,
+          ...(deps.signal === undefined ? {} : { signal: deps.signal }),
+        });
+      }
+      await deps.exec("git", ["-C", repoDir, "checkout", "--detach", expectedHeadSha], {
+        timeoutMs: GIT_TIMEOUT_MS,
+        ...(deps.signal === undefined ? {} : { signal: deps.signal }),
+      });
+      const { stdout: verified } = await deps.exec("git", ["-C", repoDir, "rev-parse", "HEAD"], {
+        timeoutMs: GIT_TIMEOUT_MS,
+        ...(deps.signal === undefined ? {} : { signal: deps.signal }),
+      });
       if (verified.trim() !== expectedHeadSha) throw new RunFailure("exact reviewed commit is unavailable");
       return verified.trim();
     }
-    if (expectedHeadSha !== undefined && clonedHead !== expectedHeadSha) throw new RunFailure("exact reviewed commit is unavailable");
     return clonedHead;
   } catch (error) {
     const failure = execFailure(error);

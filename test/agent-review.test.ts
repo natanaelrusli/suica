@@ -596,7 +596,8 @@ describe("runAgentReview", () => {
     });
     const clone = h.calls.find((call) => call.args.includes("clone"));
     expect(clone?.file).toBe("git");
-    expect(clone?.args).toContain("--branch=feat/thing");
+    expect(clone?.args).not.toContain("--branch=feat/thing");
+    expect(h.calls.some((call) => call.args.includes("--detach") && call.args.includes(SHA))).toBe(true);
     expect(clone?.args).toContain("--depth=1");
     expect(clone?.args).toContain("filter.lfs.smudge=");
     // The URL comes after --, so git never reads it as an option.
