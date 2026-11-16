@@ -582,6 +582,30 @@ function harness(
 }
 
 describe("runAgentReview", () => {
+  it("fails an incomplete collected diff before invoking a model CLI", async () => {
+    const h = harness();
+    const originalRest = h.deps.rest;
+    h.deps.rest = (path) =>
+      path.endsWith("/versions/1")
+        ? Promise.resolve({
+            diffs: DIFFS,
+            state: "collected",
+            real_size: String(DIFFS.length),
+            overflow: true,
+          })
+        : originalRest(path);
+    const queued = h.queue();
+
+    await runAgentReview(h.deps, queued);
+
+    expect(h.db.getAgentReview(queued.id)).toMatchObject({
+      status: "failed",
+      detail: expect.stringContaining("diff version coverage is incomplete"),
+    });
+    expect(h.calls.filter((call) => call.file === "/bin/claude" || call.file === "/bin/codex")).toHaveLength(0);
+    expect(h.calls.some((call) => call.args.includes("clone"))).toBe(false);
+  });
+
   it("checks out the source branch, runs claude read-only in a temporary folder and stores a ready review", async () => {
     const h = harness();
     const queued = h.queue();
