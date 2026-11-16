@@ -866,11 +866,13 @@ public final class ReviewsModel {
         guard !stopped else { return }
         if !force, detailCache.isFresh(key, now: now(), lifetime: details[key]?.pipeline?.isActive == true ? 10 : 30) { return }
         if let existing = detailTasks[key] {
-            if force { detailForcePending.insert(key); latestDetail[key, default: 0] += 1 }
+            // The in-flight read owns the pending force bit. Joining callers only
+            // request the same trailing read; they must not invalidate that read.
+            if force { detailForcePending.insert(key) }
             await existing.value
-            if detailForcePending.remove(key) != nil && !stopped {
-                await loadDetail(key, keepingNotice: keepingNotice, force: true)
-            }
+            // Completion may install a single trailing operation. All joined
+            // callers remain suspended until that owner has finished it.
+            while detailTasks[key] != nil { await Task.yield() }
             return
         }
         if activeDetailReads >= 2 {
@@ -917,6 +919,15 @@ public final class ReviewsModel {
         if latestDetail[key] == mine { loadingKeys.remove(key) }
         detailTasks[key] = nil
         activeDetailReads = max(0, activeDetailReads - 1)
+        if detailForcePending.remove(key) != nil, !stopped {
+            // Completion, rather than any waiter, consumes force ownership.
+            let (operation, trailingMine) = startDetailRequest(key, keepingNotice: true)
+            Task { @MainActor in
+                await operation.value
+                completeDetailRequest(key, mine: trailingMine)
+            }
+            return
+        }
         guard !stopped, let queued = queuedDetailRequest else { return }
         queuedDetailRequest = nil
         let (operation, queuedMine) = startDetailRequest(queued.key, keepingNotice: queued.keepingNotice)

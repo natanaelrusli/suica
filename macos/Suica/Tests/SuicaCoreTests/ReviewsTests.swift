@@ -35,6 +35,8 @@ actor FakeReviewsClient: ReviewsClient {
     var detailResults: [String: Result<MergeRequestDetail, AgentError>] = [:]
     var gates: [String: Gate] = [:]
     private(set) var detailCalls: [String] = []
+    private(set) var activeDetailCalls = 0
+    private(set) var maxActiveDetailCalls = 0
     private(set) var listCalls = 0
     var listGate: Gate?
 
@@ -107,6 +109,9 @@ actor FakeReviewsClient: ReviewsClient {
 
     func mergeRequest(key: String) async throws(AgentError) -> MergeRequestDetail {
         detailCalls.append(key)
+        activeDetailCalls += 1
+        maxActiveDetailCalls = max(maxActiveDetailCalls, activeDetailCalls)
+        defer { activeDetailCalls -= 1 }
         let gate = gates.removeValue(forKey: key)
         let result = detailResults[key] ?? .failure(.launchFailed)
         if let gate { await gate.wait() }
@@ -978,6 +983,29 @@ private func options() throws -> ReviewOptions {
     await model.refresh()
     for key in keys.dropFirst() { await model.select(key) }
     #expect(model.details.count <= 8)
+}
+
+@MainActor @Test func threeForcedSameKeyJoinsProduceOneTrailingRead() async throws {
+    let client = FakeReviewsClient(lists: [.success(list("g/p!1"))])
+    let old = try detail("g/p!1")
+    let replacement = try detail("g/p!1", ["title": "trailing"])
+    await client.setDetail("g/p!1", .success(old))
+    let model = ReviewsModel(client: client)
+    await model.refresh()
+
+    let gate = Gate()
+    await client.setDetail("g/p!1", .success(replacement), gate: gate)
+    let first = Task { await model.loadDetail("g/p!1") }
+    while await client.detailCalls.count < 2 { await Task.yield() }
+    let second = Task { await model.loadDetail("g/p!1") }
+    let third = Task { await model.loadDetail("g/p!1") }
+    await Task.yield()
+    await gate.open()
+    _ = await (first.value, second.value, third.value)
+
+    #expect(await client.detailCalls.count == 3)
+    #expect(model.details["g/p!1"]?.title == "trailing")
+    #expect(model.loadingKeys.isEmpty)
 }
 
 
