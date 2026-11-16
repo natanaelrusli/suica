@@ -7,6 +7,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
@@ -57,6 +58,7 @@ import type { ApproveOutcome, DiffFileJson, MrDetailJson, ResolveOutcome } from 
 import type { AgentReviewRow, Store, TokenPurpose } from "./store.ts";
 import { resumeReviewPosting } from "./review-post.ts";
 import { sanitizeForGitLab } from "./review-sanitize.ts";
+import { measureReviewStage } from "./review-timing.ts";
 export { sanitizeForGitLab } from "./review-sanitize.ts";
 
 /** Agent Review: an MR reviewed by a coding agent CLI with a skill, posted only after approval. */
@@ -284,6 +286,7 @@ export interface ReviewDeps {
   /** Post with `review.post: auto`; without them a ready review always waits for the Owner. */
   readonly post?: PostRunner;
   readonly postJson?: PostJsonRunner;
+  readonly removeReviewDirectory?: (path: string) => Promise<void>;
   /** The Owner's notification texts; the built-in ones when absent. */
   readonly alerts?: AlertTemplates;
 }
@@ -583,12 +586,16 @@ export async function runAgentReview(baseDeps: ReviewDeps, row: AgentReviewRow):
     const chosenModel = row.modelChoice ?? deps.config.review.model;
     store.transitionAgentReview(row.id, ["running"], "running", { cli: cliId, skill }, deps.now());
 
-    const detail = await fetchMrDetail(deps.graphql, deps.rest, row.mrKey);
+    const stage = (name: "input" | "checkout" | "model" | "judge" | "posting", run: () => Promise<any>) => measureReviewStage(row.id, name, deps.now, (record) => log.info("agent review stage", { review_id: record.reviewId, stage: record.stage, duration_ms: record.durationMs, outcome: record.outcome }), run);
+    const { detail, reviewInput } = await stage("input", async () => {
+      const detail = await fetchMrDetail(deps.graphql, deps.rest, row.mrKey);
+      if (detail.draft) throw new Skip("the MR is a draft");
+      const reviewInput = await loadReviewInput(deps.rest, detail);
+      assertReviewCoverage(reviewInput);
+      return { detail, reviewInput };
+    });
     mrTitle = detail.title;
     store.transitionAgentReview(row.id, ["running"], "running", { mrTitle }, deps.now());
-    if (detail.draft) throw new Skip("the MR is a draft");
-    const reviewInput = await loadReviewInput(deps.rest, detail);
-    assertReviewCoverage(reviewInput);
     const reviewDetail = reviewInput.detail;
     const lines = changedLines(reviewDetail);
     if (lines > deps.config.review.maxChangedLines) {
@@ -605,13 +612,13 @@ export async function runAgentReview(baseDeps: ReviewDeps, row: AgentReviewRow):
 
     workDir = mkdtempSync(join(tmpdir(), "suica-review-"));
     store.appendAgentReviewActivity(row.id, deps.now(), "Cloning the source branch");
-    const headSha = await cloneSourceBranch(
+    const headSha = await stage("checkout", () => cloneSourceBranch(
       deps,
       reviewDetail,
       join(workDir, "repo"),
       undefined,
       reviewInput.headSha,
-    );
+    ));
     if (headSha !== reviewInput.headSha)
       throw new RunFailure("checked out commit does not match reviewed diff version");
     const descriptionHash = descriptionSha(detail.description);
@@ -641,9 +648,10 @@ export async function runAgentReview(baseDeps: ReviewDeps, row: AgentReviewRow):
       changed_lines: lines,
       rereview: rereview !== undefined,
       incremental: rereview?.incremental ?? false,
+      queue_wait_ms: Math.max(0, started - row.createdAt),
     });
     store.appendAgentReviewActivity(row.id, deps.now(), `Starting ${CLI_NAMES[cliId] ?? cliId}`);
-    const result = await runCli(
+    const result = await stage("model", () => runCli(
       deps,
       cliId,
       path,
@@ -658,13 +666,13 @@ export async function runAgentReview(baseDeps: ReviewDeps, row: AgentReviewRow):
         timeoutMinutes: deps.config.review.timeoutMinutes,
         mode: "review",
       },
-    );
+    ));
     if (result.tokens !== null) {
       store.recordTokenUsage({ at: deps.now(), purpose: "review", ...result.tokens });
     }
     const approval =
       deps.config.review.approveBy === "agent"
-        ? await judgeApproval(deps, row.id, cliId, path, chosenModel, result.body, workDir)
+        ? await stage("judge", () => judgeApproval(deps, row.id, cliId, path, chosenModel, result.body, workDir!))
         : undefined;
     const model = result.model ?? chosenModel;
     const ready = store.transitionAgentReview(
@@ -706,10 +714,10 @@ export async function runAgentReview(baseDeps: ReviewDeps, row: AgentReviewRow):
       deps.post !== undefined &&
       deps.postJson !== undefined
     ) {
-      const outcome = await postAgentReview(
+      const outcome = await stage("posting", () => postAgentReview(
         { ...deps, post: deps.post, postJson: deps.postJson },
         row.id,
-      );
+      ));
       log.info("agent review posted automatically", { id: row.id, mr_key: row.mrKey, outcome });
       const approved = store.getAgentReview(row.id)?.approved === true;
       await notifyQuietly(
@@ -765,7 +773,16 @@ export async function runAgentReview(baseDeps: ReviewDeps, row: AgentReviewRow):
     );
   } finally {
     clearInterval(watch);
-    if (workDir !== undefined) rmSync(workDir, { recursive: true, force: true });
+    if (workDir !== undefined) {
+      const cleanupStarted = deps.now();
+      try {
+        await (deps.removeReviewDirectory ?? ((path) => rm(path, { recursive: true, force: true })))(workDir);
+        log.info("agent review stage", { review_id: row.id, stage: "cleanup", duration_ms: Math.max(0, deps.now() - cleanupStarted), outcome: "ok" });
+      } catch (error) {
+        log.warn("agent review cleanup failed", { review_id: row.id, category: error instanceof Error ? error.name : "unknown" });
+        log.info("agent review stage", { review_id: row.id, stage: "cleanup", duration_ms: Math.max(0, deps.now() - cleanupStarted), outcome: "failed" });
+      }
+    }
   }
 }
 

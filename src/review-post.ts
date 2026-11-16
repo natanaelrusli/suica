@@ -125,7 +125,7 @@ export async function resumeReviewPosting(
         }
         if (!recovered)
           return hold(
-            `Posting part ${part.key} remains uncertain; inspect GitLab before retrying.`,
+            `Posting part ${safeKey(part.key)} remains uncertain; inspect GitLab before retrying.`,
           );
         if (!deps.store.updateReviewPostPart(lease, part.key, "confirmed", recovered, deps.now()))
           return hold("Posting ownership changed during recovery; inspect GitLab.");

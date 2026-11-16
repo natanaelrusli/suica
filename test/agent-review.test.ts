@@ -1161,6 +1161,21 @@ describe("runAgentReview", () => {
     expect(existsSync(cwd)).toBe(false);
   });
 
+  it("keeps a ready review when workspace cleanup fails and records bounded stage timings", async () => {
+    const h = harness();
+    const queued = h.queue();
+    await runAgentReview({
+      ...h.deps,
+      removeReviewDirectory: async () => { throw new Error("private path detail"); },
+    }, queued);
+    expect(h.db.getAgentReview(queued.id)?.status).toBe("ready");
+    const records = h.logs.map((line) => JSON.parse(line) as Record<string, unknown>)
+      .filter((event) => event.message === "agent review stage").map((event) => event.attributes as Record<string, unknown>);
+    expect(records.map((event) => event.stage)).toEqual(["input", "checkout", "model", "cleanup"]);
+    expect(records.every((event) => typeof event.duration_ms === "number" && event.duration_ms >= 0)).toBe(true);
+    expect(records.some((event) => JSON.stringify(event).includes("private path detail"))).toBe(false);
+  });
+
   it("drops a review the Owner cancelled just as the CLI finished, without notifying", async () => {
     const h = harness();
     const queued = h.queue();
@@ -2111,6 +2126,7 @@ describe("Agent Review logs", () => {
       cli: "claude",
       skill: "madhani:madhani-code-review",
       changed_lines: 4,
+      queue_wait_ms: 0,
       rereview: false,
       incremental: false,
     });
