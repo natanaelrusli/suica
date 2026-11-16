@@ -473,6 +473,15 @@ function harness(
     rest: (path: string) => {
       restPaths.push(path);
       if (path === "user") return Promise.resolve({ username: "me" });
+      if (/\/notes\?per_page=100&page=\d+$/.test(path)) {
+        return Promise.resolve(
+          posts.flatMap((postedPath, index) =>
+            postedPath.endsWith("/notes")
+              ? [{ id: index + 1, body: (postBodies[index] as { fields?: { body?: unknown } })?.fields?.body, author: { username: "me" } }]
+              : [],
+          ),
+        );
+      }
       if (path.endsWith("/versions?per_page=100")) {
         return Promise.resolve([
           {
@@ -522,7 +531,7 @@ function harness(
       if (options.postFails === true) return Promise.reject(new Error("glab"));
       posts.push(path);
       postBodies.push(body);
-      return Promise.resolve({});
+      return Promise.resolve({ id: posts.length });
     },
     postJson: (path: string) => {
       posts.push(path);
