@@ -558,6 +558,8 @@ public protocol ReviewsClient: Sendable {
 
 // MARK: - Model
 
+public enum ReviewRefreshReason: Sendable, Equatable { case automatic, manual, action }
+
 /// The Review requests page: the list, the selected MR and its details. Each refresh reads the
 /// selected MR again, so new comments and pushes show up, and forgets the other MRs' details.
 @MainActor @Observable
@@ -589,9 +591,15 @@ public final class ReviewsModel {
     @ObservationIgnored private let client: any ReviewsClient
     @ObservationIgnored private var latestRefresh = 0
     @ObservationIgnored private var latestDetail: [String: Int] = [:]
+    @ObservationIgnored private let now: @Sendable () -> Date
+    @ObservationIgnored private var detailCache = ReviewDetailCache()
+    @ObservationIgnored private var detailTasks: [String: Task<Void, Never>] = [:]
+    @ObservationIgnored private var listTask: Task<Void, Never>?
+    @ObservationIgnored private var stopped = false
 
-    public init(client: any ReviewsClient) {
+    public init(client: any ReviewsClient, now: @escaping @Sendable () -> Date = Date.init) {
         self.client = client
+        self.now = now
     }
 
     /// The Owner closed the outcome of the last Agent Review action.
@@ -766,14 +774,27 @@ public final class ReviewsModel {
         await refresh()
     }
 
-    public func refresh() async {
+    public func refresh(reason: ReviewRefreshReason = .automatic) async {
+        if reason == .automatic, stopped { return }
+        if let listTask { await listTask.value; return }
+        stopped = false
+        let operation = Task { await self.performRefresh(reason: reason) }
+        listTask = operation
+        await operation.value
+        listTask = nil
+    }
+
+    public func stopRefreshing() { stopped = true }
+
+    private func performRefresh(reason: ReviewRefreshReason) async {
         latestRefresh += 1
         let mine = latestRefresh
         loadingList = true
         defer { if mine == latestRefresh { loadingList = false } }
         // The selected MR is read while the list loads, not after it: each is its own GitLab round trip.
         let early = selectedKey
-        let earlyLoad = early.map { key in Task { await loadDetail(key, keepingNotice: true) } }
+        if reason == .manual || reason == .action, let early { detailCache.invalidate(early) }
+        let earlyLoad = early.map { key in Task { await loadDetail(key, keepingNotice: true, force: reason != .automatic) } }
         do {
             let fresh = try await client.reviews()
             guard mine == latestRefresh else { return }
@@ -781,6 +802,9 @@ public final class ReviewsModel {
             if list != fresh { list = fresh }
             if errorText != nil { errorText = nil }
             let keys = Set(fresh.mergeRequests.map(\.key) + fresh.yourMergeRequests.map(\.key))
+            let removed = Set(detailCacheKeys()).subtracting(keys)
+            detailCache.remove(keys: removed)
+            for key in removed { details[key] = nil; detailErrors[key] = nil }
             if let selected = selectedKey, !keys.contains(selected) { selectedKey = nil }
             // The page's first row, so on Merge requests one that waits for the Owner when there is one.
             if selectedKey == nil { selectedKey = fresh.keys(in: scope).first }
@@ -792,32 +816,47 @@ public final class ReviewsModel {
         if let key = selectedKey, key != early { await loadDetail(key, keepingNotice: true) }
         await earlyLoad?.value
         // After the early load, so the detail of an MR that left the list is not stored again.
-        if details.keys.contains(where: { $0 != selectedKey }) { details = details.filter { $0.key == selectedKey } }
+        // Keep recently viewed details in the bounded cache.
     }
+
+    private func detailCacheKeys() -> [String] { Array(details.keys) }
 
     public func select(_ key: String?) async {
         selectedKey = key
-        guard let key, details[key] == nil, !loadingKeys.contains(key) else { return }
+        guard let key else { return }
+        if details[key] == nil, let cached = detailCache.value(for: key, now: now()) { details[key] = cached }
+        let lifetime: TimeInterval = selectedDetail?.pipeline?.isActive == true ? 10 : 30
+        guard !detailCache.isFresh(key, now: now(), lifetime: lifetime) else { return }
         await loadDetail(key)
     }
 
     /// Fetches the MR again even when it is cached; the latest load per MR is the one stored.
     /// A reload of your own drops the last approval's outcome; a refresh keeps it.
-    public func loadDetail(_ key: String, keepingNotice: Bool = false) async {
+    public func loadDetail(_ key: String, keepingNotice: Bool = false) async { await loadDetail(key, keepingNotice: keepingNotice, force: true) }
+
+    private func loadDetail(_ key: String, keepingNotice: Bool, force: Bool) async {
+        if !force, detailCache.isFresh(key, now: now(), lifetime: details[key]?.pipeline?.isActive == true ? 10 : 30) { return }
+        if let existing = detailTasks[key] { await existing.value; return }
         if !keepingNotice && !approvingKeys.contains(key) { approvalNotices[key] = nil }
         let mine = (latestDetail[key] ?? 0) + 1
         latestDetail[key] = mine
         loadingKeys.insert(key)
-        defer { if latestDetail[key] == mine { loadingKeys.remove(key) } }
+        let operation = Task { @MainActor in
         do {
             let fresh = try await client.mergeRequest(key: key)
             guard latestDetail[key] == mine else { return }
+            detailCache.store(fresh, now: now(), protecting: selectedKey)
             if details[key] != fresh { details[key] = fresh }
             if detailErrors[key] != nil { detailErrors[key] = nil }
         } catch {
             guard latestDetail[key] == mine else { return }
-            let message = MenuModel.message(for: error)
+            let message = MenuModel.message(for: (error as? AgentError) ?? .failed(exitCode: 1))
             if detailErrors[key] != message { detailErrors[key] = message }
         }
+        }
+        detailTasks[key] = operation
+        await operation.value
+        if latestDetail[key] == mine { loadingKeys.remove(key) }
+        detailTasks[key] = nil
     }
 }
