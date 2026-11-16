@@ -1677,8 +1677,18 @@ describe("postAgentReview and discardAgentReview", () => {
 
   it.each(["headSha", "descriptionSha"] as const)("refuses to post when stored %s is missing", async (field) => {
     const { h, id } = await ready();
-    h.db.transitionAgentReview(id, ["ready"], "ready", { [field]: null }, NOW);
+    const realRow = h.db.getAgentReview(id);
+    expect(realRow).toMatchObject({ status: "ready" });
+    if (!realRow) throw new Error("Expected the ready review to be stored");
+    const missingRow = { ...realRow, [field]: null };
     const { deps, notes, threads } = postDeps(h);
+    deps.store = {
+      ...h.db,
+      getAgentReview: (requestedId) =>
+        requestedId === id ? missingRow : h.db.getAgentReview(requestedId),
+    };
+    expect(deps.store.getAgentReview(id)?.[field]).toBeNull();
+
     expect(await postAgentReview(deps, id)).toBe("nothing");
     expect(h.db.getAgentReview(id)).toMatchObject({ status: "ready" });
     expect(h.db.getAgentReview(id)?.detail).toBeTruthy();
