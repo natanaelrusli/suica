@@ -197,6 +197,17 @@ private struct OpenWindowOnLink: ViewModifier {
 }
 
 @main
+@MainActor
+enum SuicaEntry {
+    static func main() {
+        if CommandLine.arguments.contains("--review-ui-fixture") {
+            ReviewFixtureApp.main()
+        } else {
+            SuicaApp.main()
+        }
+    }
+}
+
 struct SuicaApp: App {
     @NSApplicationDelegateAdaptor(LinkDelegate.self) private var linkDelegate
     @State private var model: MenuModel

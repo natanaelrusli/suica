@@ -43,7 +43,15 @@ Before/after comparison requires running the identical committed harness and fix
 
 ## Manual UI procedure (outstanding)
 
-There is no local fake UI fixture or supported injection point in this slice. Consequently the requested manual UI procedure is **not feasible yet** and no manual checks are claimed as passed. A future runnable fake UI fixture should document how it is launched, then check 760 × 480 and 1280 × 800 sizes, resize with detail selected across the 900-point breakpoint, keyboard Back and focus restoration, VoiceOver action names, Reduce Motion, and scrolling during refresh. Never use real post/approve actions.
+Launch the real ReviewsView with offline clients using:
+
+```sh
+swift run --package-path macos/Suica Suica --review-ui-fixture
+```
+
+This separate entry point bypasses normal SuicaApp initialization, CLI clients, and startup services. It supplies 200 MRs, two-second detail reads, 100 files totaling 1,500,000 ASCII diff characters, and 100,000 Markdown bytes. Every mutation fails locally. The window starts at 1280 × 800 with a 760 × 480 minimum. Quit the fixture after checking it; no installed app is replaced.
+
+The fixture compiled and launched at 1280 × 800 on the reference Mac. Automated native accessibility inspection failed with `process-identity-unavailable: Selected application does not expose a launch time; stable PID reuse checks are unavailable`. Thus no keyboard/VoiceOver/manual visual pass is claimed. Check 760 × 480 and 1280 × 800 sizes, resize with detail selected across the 900-point breakpoint, keyboard Back and focus restoration, VoiceOver action names, Reduce Motion, and scrolling during refresh. Never use real post/approve actions.
 
 ## Reference environment and broader results (outstanding)
 
