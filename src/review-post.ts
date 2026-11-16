@@ -46,18 +46,25 @@ export async function resumeReviewPosting(deps: ReviewPostDeps, id: number): Pro
     }
     for (const part of parts) {
       if (part.state === "confirmed") continue;
-      if (part.state === "sending" || part.state === "uncertain" || part.state === "rejected") return hold(`Posting part ${part.key} is ${part.state}; inspect GitLab before retrying.`);
+      if (part.state === "rejected") return hold(`Posting part ${part.key} is rejected; inspect GitLab before retrying.`);
+      if (part.state === "sending" || part.state === "uncertain") {
+        let recovered: string | null;
+        try { recovered = await reconcile(deps, row, part); }
+        catch (error) { return hold(`Could not reconcile posting part ${part.key}: ${String(error)}; inspect GitLab.`); }
+        if (!recovered) return hold(`Posting part ${part.key} remains uncertain; inspect GitLab before retrying.`);
+        if (!deps.store.updateReviewPostPart(lease, part.key, "confirmed", recovered, deps.now())) return hold("Posting ownership changed during recovery; inspect GitLab.");
+        continue;
+      }
       if (!deps.store.renewReviewPosting(lease, deps.now())) return hold("Posting lease expired; inspect GitLab before retrying.");
       if (!deps.store.updateReviewPostPart(lease, part.key, "sending", null, deps.now())) return hold("Posting ownership changed; inspect GitLab before retrying.");
       try {
         const payload: unknown = JSON.parse(part.payload);
         const result = part.kind === "inline" ? await deps.postJson(part.endpoint, payload) : await deps.post(part.endpoint, { body: bodyFrom(part.payload) });
         const remoteId = typeof result === "object" && result !== null && "id" in result && (typeof result.id === "string" || typeof result.id === "number") ? String(result.id) : null;
-        if (remoteId === null) {
-          const found = await reconcile(deps, row, part);
-          if (!found) { deps.store.updateReviewPostPart(lease, part.key, "uncertain", null, deps.now()); return hold(`Posting part ${part.key} has no confirmed remote ID; inspect GitLab.`); }
-        }
-        if (!deps.store.updateReviewPostPart(lease, part.key, "confirmed", remoteId, deps.now())) return hold("Posting ownership changed after remote write; inspect GitLab.");
+        let confirmedId = remoteId;
+        if (confirmedId === null) confirmedId = await reconcile(deps, row, part);
+        if (confirmedId === null) { deps.store.updateReviewPostPart(lease, part.key, "uncertain", null, deps.now()); return hold(`Posting part ${part.key} has no confirmed remote ID; inspect GitLab.`); }
+        if (!deps.store.updateReviewPostPart(lease, part.key, "confirmed", confirmedId, deps.now())) return hold("Posting ownership changed after remote write; inspect GitLab.");
       } catch (error) {
         deps.store.updateReviewPostPart(lease, part.key, "uncertain", null, deps.now());
         return hold(`Posting part ${part.key} outcome is uncertain: ${String(error)}; inspect GitLab.`);
@@ -67,15 +74,22 @@ export async function resumeReviewPosting(deps: ReviewPostDeps, id: number): Pro
   } catch (error) { return hold(`Posting held for inspection: ${String(error)}`); }
 }
 
-async function reconcile(deps: ReviewPostDeps, row: AgentReviewRow, part: PostPart): Promise<boolean> {
-  const path = part.endpoint.replace(/\/notes$/, "/notes?per_page=100");
-  let url = path;
-  for (let page = 0; page < 100; page++) {
-    const result: unknown = await deps.rest(url);
+async function reconcile(deps: ReviewPostDeps, row: AgentReviewRow, part: PostPart): Promise<string | null> {
+  const path = part.endpoint.replace(/\/notes$/, "/notes");
+  const expected = marker(row.id, row.headSha ?? "unknown", part.key);
+  for (let page = 1; page <= 100; page++) {
+    const result: unknown = await deps.rest(`${path}?per_page=100&page=${page}`);
     if (!Array.isArray(result)) throw new Error("incomplete notes response");
-    if (result.some((item) => typeof item === "object" && item !== null && "body" in item && typeof item.body === "string" && item.body.includes(marker(row.id, row.headSha ?? "unknown", part.key)) && "author" in item && typeof item.author === "object" && item.author !== null && "username" in item.author && item.author.username === deps.ownerUsername)) return true;
-    if (result.length < 100) return false;
-    url = `${path}&page=${page + 2}`;
+    const notes = result.flatMap((item) => {
+      if (part.kind !== "inline" || typeof item !== "object" || item === null || !("discussions" in item) || !Array.isArray(item.discussions)) return [item];
+      return item.discussions.flatMap((discussion) => typeof discussion === "object" && discussion !== null && "notes" in discussion && Array.isArray(discussion.notes) ? discussion.notes : []);
+    });
+    for (const item of notes) {
+      if (typeof item !== "object" || item === null || !("body" in item) || typeof item.body !== "string" || !item.body.includes(expected) || !("author" in item) || typeof item.author !== "object" || item.author === null || !("username" in item.author) || item.author.username !== deps.ownerUsername) continue;
+      if ("id" in item && (typeof item.id === "string" || typeof item.id === "number")) return String(item.id);
+      throw new Error("matching note has no remote ID");
+    }
+    if (result.length < 100) return null;
   }
   throw new Error("note pagination incomplete");
 }

@@ -1,40 +1,58 @@
 import { describe, expect, it, vi } from "vitest";
 import { resumeReviewPosting, type ReviewPostDeps } from "../src/review-post.ts";
+import { openStore } from "../src/store.ts";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
-function fixture(state: "ready" | "posting" = "ready") {
-  const row = { id: 1, status: state, headSha: "abc", mrKey: "group/project!1" } as never;
-  const store = {
-    getAgentReview: () => row,
-    claimReviewPosting: (_id: number, token: string, now: number) => ({ reviewId: 1, token, expiresAt: now + 900000 }),
-    saveReviewPostPlan: vi.fn((_lease, parts) => { persisted = parts; return true; }),
-    reviewPostParts: () => persisted,
-    renewReviewPosting: () => true,
-    updateReviewPostPart: vi.fn((_lease, key, next, remoteId) => { persisted = persisted.map((p) => p.key === key ? { ...p, state: next, remoteId } : p); return true; }),
-    finishReviewPosting: () => persisted.every((p) => p.state === "confirmed"),
-    transitionAgentReview: vi.fn(() => true),
-  } as never;
-  let persisted: any[] = [];
-  const deps: ReviewPostDeps = { store, post: vi.fn(async () => ({ id: 7 })), postJson: vi.fn(async () => ({ id: 8 })), rest: vi.fn(async () => []), log: vi.fn(), now: () => 100, ownerUsername: "owner", preflight: async () => true, buildPlan: async () => [{ key: "summary", kind: "summary", endpoint: "/notes", payload: JSON.stringify({ body: "review" }), state: "pending", remoteId: null }], token: () => "token" };
-  return { deps, store, get parts() { return persisted; } };
+const marker = "<!-- suica-review:1:abc:summary -->";
+function fixture() {
+  const dir = mkdtempSync(join(tmpdir(), "review-post-run-"));
+  const store = openStore(join(dir, "state.db"));
+  const id = store.queueAgentReview("g/p!1", "manual", 1)!;
+  store.transitionAgentReview(id, ["queued"], "running", {}, 1);
+  store.transitionAgentReview(id, ["running"], "ready", { body: "review", headSha: "abc" }, 1);
+  let now = 100;
+  const row = store.getAgentReview(id)!;
+  const deps: ReviewPostDeps = {
+    store, post: vi.fn(async () => ({ id: 7 })), postJson: vi.fn(async () => ({ id: 8 })), rest: vi.fn(async () => []),
+    log: vi.fn(), now: () => now, ownerUsername: "owner", preflight: async () => true,
+    buildPlan: async () => [{ key: "summary", kind: "summary", endpoint: "/notes", payload: JSON.stringify({ body: "review" }), state: "pending", remoteId: null }], token: () => `t${now}`,
+  };
+  return { deps, store, row, advance: (n: number) => { now = n; }, close: () => { store.close(); rmSync(dir, { recursive: true, force: true }); } };
 }
-
+const note = (id: number, body = marker, username = "owner") => ({ id, body, author: { username } });
 describe("resumeReviewPosting", () => {
-  it("freezes a sanitized marked payload and confirms a successful write", async () => {
+  it("freezes payload and persists acknowledged IDs", async () => {
     const f = fixture();
     expect(await resumeReviewPosting(f.deps, 1)).toBe("posted");
-    expect(f.parts[0].payload).toContain("<!-- suica-review:1:abc:summary -->");
-    expect(f.deps.post).toHaveBeenCalledTimes(1);
+    expect(f.store.reviewPostParts(1)[0]).toMatchObject({ state: "confirmed", remoteId: "7" });
+    expect(f.store.reviewPostParts(1)[0]?.payload).toContain(marker); f.close();
   });
-  it("holds an ambiguous transport failure and does not resend", async () => {
-    const f = fixture();
-    f.deps.post = vi.fn(async () => { throw new Error("timeout"); });
+  it("recovers a lost response after lease expiry without duplicate writes", async () => {
+    const f = fixture(); f.deps.post = vi.fn(async () => { throw new Error("timeout"); });
     expect(await resumeReviewPosting(f.deps, 1)).toBe("held");
-    expect(await resumeReviewPosting(f.deps, 1)).toBe("held");
-    expect(f.deps.post).toHaveBeenCalledTimes(1);
+    f.advance(900101); f.deps.rest = vi.fn(async () => [note(44)]);
+    expect(await resumeReviewPosting(f.deps, 1)).toBe("posted");
+    expect(f.store.reviewPostParts(1)[0]).toMatchObject({ state: "confirmed", remoteId: "44" });
+    expect(f.deps.post).toHaveBeenCalledTimes(1); f.close();
   });
-  it("holds when preflight fails before writes", async () => {
-    const f = fixture(); f.deps.preflight = async () => false;
-    expect(await resumeReviewPosting(f.deps, 1)).toBe("held");
-    expect(f.deps.post).not.toHaveBeenCalled();
+  it("holds an absent uncertain marker without another write", async () => {
+    const f = fixture(); f.deps.post = vi.fn(async () => { throw new Error("timeout"); });
+    expect(await resumeReviewPosting(f.deps, 1)).toBe("held"); f.advance(900101);
+    expect(await resumeReviewPosting(f.deps, 1)).toBe("held"); expect(f.deps.post).toHaveBeenCalledTimes(1); f.close();
+  });
+  it("reconciles inline discussion notes and ignores foreign authors", async () => {
+    const f = fixture(); f.deps.postJson = vi.fn(async () => ({}));
+    f.deps.buildPlan = async () => [{ key: "summary", kind: "inline", endpoint: "/notes", payload: JSON.stringify({ body: "review" }), state: "pending", remoteId: null }];
+    f.deps.rest = vi.fn(async () => [{ id: 3, body: marker, author: { username: "someone" } }, { discussions: [{ notes: [note(55)] }] }]);
+    expect(await resumeReviewPosting(f.deps, 1)).toBe("posted"); f.close();
+  });
+  it("paginates and holds when later page fails", async () => {
+    const f = fixture(); f.deps.post = vi.fn(async () => { throw new Error("timeout"); });
+    const full = Array.from({ length: 100 }, (_, i) => note(i + 1, "unrelated"));
+    f.deps.rest = vi.fn(async (url) => { if (url.endsWith("page=1")) return full; return [note(101)]; });
+    expect(await resumeReviewPosting(f.deps, 1)).toBe("held"); f.advance(900101);
+    const result = await resumeReviewPosting(f.deps, 1); expect(result, f.deps.log.mock.calls.map((c) => c[0]).join("\n")).toBe("posted"); expect(f.store.reviewPostParts(1)[0]?.remoteId).toBe("101"); f.close();
   });
 });
