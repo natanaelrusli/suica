@@ -26,15 +26,20 @@ export const versionSchema = z.object({
     }),
   ),
   overflow: z.boolean().optional(),
+  state: z.string().optional(),
+  real_size: z.string().optional(),
 });
 const MAX_FILE_DIFF_CHARS = 200_000;
 const MAX_TOTAL_DIFF_CHARS = 1_500_000;
+type ReviewFile = MrDetailJson["files"][number] & { readonly coverageUnsupportedReason?: string };
+
 export interface ReviewInput {
   readonly detail: MrDetailJson;
   readonly headSha: string;
   readonly baseSha: string;
   readonly startSha: string;
   readonly versionId: number;
+  readonly files: readonly ReviewFile[];
 }
 
 export async function loadReviewInput(
@@ -51,16 +56,31 @@ export async function loadReviewInput(
     throw new RunFailure("immutable diff version for fetched head is missing or ambiguous");
   const version = matching[0]!;
   const raw = versionSchema.parse(await rest(`${mrPath}/versions/${version.id}`));
-  const files = raw.diffs.map((file) => ({
+  const files: ReviewFile[] = raw.diffs.map((file) => ({
     oldPath: file.old_path,
     newPath: file.new_path,
     newFile: file.new_file ?? false,
     renamedFile: file.renamed_file ?? file.old_path !== file.new_path,
     deletedFile: file.deleted_file ?? false,
     diff: file.diff ?? null,
+    ...(file.too_large || file.collapsed
+      ? {
+          coverageUnsupportedReason: `GitLab marks this file ${file.too_large ? "too_large" : "collapsed"}`,
+        }
+      : {}),
   }));
   return {
-    detail: { ...detail, files, filesTruncated: raw.overflow === true },
+    detail: {
+      ...detail,
+      files,
+      filesTruncated:
+        raw.overflow === true ||
+        raw.state !== "collected" ||
+        raw.real_size === undefined ||
+        !/^\d+$/.test(raw.real_size) ||
+        Number(raw.real_size) !== raw.diffs.length,
+    },
+    files,
     headSha: version.head_commit_sha,
     baseSha: version.base_commit_sha,
     startSha: version.start_commit_sha,
@@ -68,18 +88,23 @@ export async function loadReviewInput(
   };
 }
 export function assertReviewCoverage(input: ReviewInput): void {
-  const files = input.detail.files;
+  const files = input.files;
   if (!files.length || input.detail.filesTruncated)
     throw new RunFailure("diff version coverage is incomplete");
   let total = 0;
   for (const file of files) {
+    if ("coverageUnsupportedReason" in file && file.coverageUnsupportedReason)
+      throw new RunFailure(`${file.coverageUnsupportedReason}: ${file.newPath}`);
     if (file.diff === null) throw new RunFailure(`diff text unavailable for ${file.newPath}`);
     if (
       file.diff.length > MAX_FILE_DIFF_CHARS ||
       (total += file.diff.length) > MAX_TOTAL_DIFF_CHARS
     )
       throw new RunFailure("diff exceeds review text coverage limits");
-    if (!file.diff.length) throw new RunFailure(`diff coverage unsupported for ${file.newPath}`);
+    if (!file.diff.length)
+      throw new RunFailure(
+        `empty diff unsupported for ${file.newPath}; GitLab's version diff response cannot distinguish binary-only changes from missing textual diff`,
+      );
   }
   if (input.detail.additions === null || input.detail.deletions === null)
     throw new RunFailure("aggregate line counts unavailable to verify diff coverage");

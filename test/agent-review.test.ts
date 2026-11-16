@@ -293,7 +293,9 @@ const CLAUDE: DetectedCli = { id: "claude", name: "Claude Code", path: "/bin/cla
 const CODEX: DetectedCli = { id: "codex", name: "Codex", path: "/bin/codex" };
 const GEMINI: DetectedCli = { id: "gemini", name: "Gemini CLI", path: "/bin/gemini" };
 
-function detailRaw(overrides: { draft?: boolean; additions?: number; headSha?: string; description?: string } = {}): unknown {
+function detailRaw(
+  overrides: { draft?: boolean; additions?: number; headSha?: string; description?: string } = {},
+): unknown {
   return {
     data: {
       project: {
@@ -481,7 +483,12 @@ function harness(
         ]);
       }
       if (path.endsWith("/versions/1")) {
-        return Promise.resolve({ diffs: DIFFS, overflow: false });
+        return Promise.resolve({
+          diffs: DIFFS,
+          state: "collected",
+          real_size: String(DIFFS.length),
+          overflow: false,
+        });
       }
       if (path.endsWith("/diffs?per_page=100")) return Promise.resolve(DIFFS);
       if (path.includes("/repository/merge_base?")) {
@@ -597,7 +604,9 @@ describe("runAgentReview", () => {
     const clone = h.calls.find((call) => call.args.includes("clone"));
     expect(clone?.file).toBe("git");
     expect(clone?.args).not.toContain("--branch=feat/thing");
-    expect(h.calls.some((call) => call.args.includes("--detach") && call.args.includes(SHA))).toBe(true);
+    expect(h.calls.some((call) => call.args.includes("--detach") && call.args.includes(SHA))).toBe(
+      true,
+    );
     expect(clone?.args).toContain("--depth=1");
     expect(clone?.args).toContain("filter.lfs.smudge=");
     // The URL comes after --, so git never reads it as an option.
@@ -1587,23 +1596,23 @@ describe("postAgentReview and discardAgentReview", () => {
           path.endsWith("/diffs?per_page=100")
             ? DIFFS
             : path.endsWith("/versions?per_page=100")
-            ? [
-                {
-                  id: 3,
-                  head_commit_sha: options.noVersion === true ? "f".repeat(40) : SHA,
-                  base_commit_sha: "base",
-                  start_commit_sha: "start",
-                },
-              ]
-            : {
-                diffs: [
+              ? [
                   {
-                    old_path: "src/a.ts",
-                    new_path: "src/a.ts",
-                    diff: "@@ -1,2 +1,3 @@\n one\n+two\n+three",
+                    id: 3,
+                    head_commit_sha: options.noVersion === true ? "f".repeat(40) : SHA,
+                    base_commit_sha: "base",
+                    start_commit_sha: "start",
                   },
-                ],
-              },
+                ]
+              : {
+                  diffs: [
+                    {
+                      old_path: "src/a.ts",
+                      new_path: "src/a.ts",
+                      diff: "@@ -1,2 +1,3 @@\n one\n+two\n+three",
+                    },
+                  ],
+                },
         ),
       post: (path: string, fields: Readonly<Record<string, string>>) => {
         if (options.failNote === true) return Promise.reject(new Error("glab"));
@@ -1675,26 +1684,29 @@ describe("postAgentReview and discardAgentReview", () => {
     expect(threads).toEqual([]);
   });
 
-  it.each(["headSha", "descriptionSha"] as const)("refuses to post when stored %s is missing", async (field) => {
-    const { h, id } = await ready();
-    const realRow = h.db.getAgentReview(id);
-    expect(realRow).toMatchObject({ status: "ready" });
-    if (!realRow) throw new Error("Expected the ready review to be stored");
-    const missingRow = { ...realRow, [field]: null };
-    const { deps, notes, threads } = postDeps(h);
-    deps.store = {
-      ...h.db,
-      getAgentReview: (requestedId) =>
-        requestedId === id ? missingRow : h.db.getAgentReview(requestedId),
-    };
-    expect(deps.store.getAgentReview(id)?.[field]).toBeNull();
+  it.each(["headSha", "descriptionSha"] as const)(
+    "refuses to post when stored %s is missing",
+    async (field) => {
+      const { h, id } = await ready();
+      const realRow = h.db.getAgentReview(id);
+      expect(realRow).toMatchObject({ status: "ready" });
+      if (!realRow) throw new Error("Expected the ready review to be stored");
+      const missingRow = { ...realRow, [field]: null };
+      const { deps, notes, threads } = postDeps(h);
+      deps.store = {
+        ...h.db,
+        getAgentReview: (requestedId) =>
+          requestedId === id ? missingRow : h.db.getAgentReview(requestedId),
+      };
+      expect(deps.store.getAgentReview(id)?.[field]).toBeNull();
 
-    expect(await postAgentReview(deps, id)).toBe("nothing");
-    expect(h.db.getAgentReview(id)).toMatchObject({ status: "ready" });
-    expect(h.db.getAgentReview(id)?.detail).toBeTruthy();
-    expect(notes).toEqual([]);
-    expect(threads).toEqual([]);
-  });
+      expect(await postAgentReview(deps, id)).toBe("nothing");
+      expect(h.db.getAgentReview(id)).toMatchObject({ status: "ready" });
+      expect(h.db.getAgentReview(id)?.detail).toBeTruthy();
+      expect(notes).toEqual([]);
+      expect(threads).toEqual([]);
+    },
+  );
 
   it("returns failed when the GitLab detail query rejects", async () => {
     const { h, id } = await ready();

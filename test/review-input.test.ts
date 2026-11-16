@@ -16,6 +16,13 @@ const version = (id: number, sha = head) => ({
   start_commit_sha: "b".repeat(40),
 });
 const diff = { old_path: "src/a.ts", new_path: "src/a.ts", diff: "@@ -0,0 +1 @@\n+x" };
+const response = (diffs: unknown[], extra: Record<string, unknown> = {}) => ({
+  diffs,
+  state: "collected",
+  real_size: String(diffs.length),
+  overflow: false,
+  ...extra,
+});
 function runner(responses: unknown[]) {
   const calls: string[] = [];
   const rest = async (path: string) => {
@@ -28,7 +35,7 @@ function runner(responses: unknown[]) {
 }
 describe("loadReviewInput", () => {
   it("chooses the fetched head version and requests exact paths", async () => {
-    const fake = runner([[version(1, "c".repeat(40)), version(7)], { diffs: [diff] }]);
+    const fake = runner([[version(1, "c".repeat(40)), version(7)], response([diff])]);
     const input = await loadReviewInput(fake.rest, { ...detail, headSha: head });
     expect(input.versionId).toBe(7);
     expect(fake.calls).toEqual([
@@ -58,15 +65,57 @@ describe("loadReviewInput", () => {
     async (flag) => {
       const fake = runner([
         [version(1)],
-        { diffs: [{ old_path: "big.lock", new_path: "big.lock", ...flag }] },
+        response([{ old_path: "big.lock", new_path: "big.lock", diff: "binary", ...flag }]),
       ]);
       const input = await loadReviewInput(fake.rest, { ...detail, headSha: head });
-      expect(input.detail.files[0]?.diff).toBeNull();
+      expect(input.files[0]?.diff).toBe("binary");
       expect(() => assertReviewCoverage(input)).toThrow(RunFailure);
     },
   );
+  it.each([{ too_large: true }, { collapsed: true }])(
+    "refuses nonempty diffs marked unsupported",
+    async (flag) => {
+      const input = await loadReviewInput(
+        runner([[version(1)], response([{ ...diff, ...flag }])]).rest,
+        { ...detail, headSha: head },
+      );
+      expect(() => assertReviewCoverage(input)).toThrow(/GitLab marks this file/);
+    },
+  );
+  it.each([
+    { diffs: [diff] },
+    { diffs: [diff], state: "collected" },
+    response([diff], { real_size: "2" }),
+  ])("rejects incomplete or mismatched version metadata", async (payload) => {
+    const input = await loadReviewInput(runner([[version(1)], payload]).rest, {
+      ...detail,
+      headSha: head,
+    });
+    expect(input.detail.filesTruncated).toBe(true);
+    expect(() => assertReviewCoverage(input)).toThrow(RunFailure);
+  });
+  it("accepts complete coverage with more than 100 files", async () => {
+    const many = Array.from({ length: 101 }, (_, i) => ({
+      ...diff,
+      old_path: `${i}.ts`,
+      new_path: `${i}.ts`,
+    }));
+    const input = await loadReviewInput(runner([[version(1)], response(many)]).rest, {
+      ...detail,
+      headSha: head,
+    });
+    expect(input.detail.filesTruncated).toBe(false);
+    expect(() => assertReviewCoverage(input)).not.toThrow();
+  });
+  it("explains why an empty diff cannot be reviewed", async () => {
+    const input = await loadReviewInput(
+      runner([[version(1)], response([{ ...diff, diff: "" }])]).rest,
+      { ...detail, headSha: head },
+    );
+    expect(() => assertReviewCoverage(input)).toThrow(/binary-only changes/);
+  });
   it("rejects overflow coverage", async () => {
-    const fake = runner([[version(1)], { diffs: [diff], overflow: true }]);
+    const fake = runner([[version(1)], response([diff], { overflow: true })]);
     const input = await loadReviewInput(fake.rest, { ...detail, headSha: head });
     expect(input.detail.filesTruncated).toBe(true);
     expect(() => assertReviewCoverage(input)).toThrow(RunFailure);
@@ -74,13 +123,11 @@ describe("loadReviewInput", () => {
   it("preserves GitLab file flags", async () => {
     const fake = runner([
       [version(1)],
-      {
-        diffs: [
-          { ...diff, new_file: true },
-          { ...diff, old_path: "old.ts", new_path: "new.ts", renamed_file: true },
-          { ...diff, old_path: "gone.ts", new_path: "gone.ts", deleted_file: true },
-        ],
-      },
+      response([
+        { ...diff, new_file: true },
+        { ...diff, old_path: "old.ts", new_path: "new.ts", renamed_file: true },
+        { ...diff, old_path: "gone.ts", new_path: "gone.ts", deleted_file: true },
+      ]),
     ]);
     const input = await loadReviewInput(fake.rest, { ...detail, headSha: head });
     expect(
@@ -118,6 +165,16 @@ describe("assertReviewCoverage", () => {
     baseSha: "b".repeat(40),
     startSha: "b".repeat(40),
     versionId: 1,
+    files: [
+      {
+        oldPath: "a",
+        newPath: "a",
+        newFile: false,
+        renamedFile: false,
+        deletedFile: false,
+        diff: "@@ -0,0 +1 @@\n+x",
+      },
+    ],
   } satisfies ReviewInput;
   it("accepts complete textual diff input", () =>
     expect(() => assertReviewCoverage(input)).not.toThrow());
@@ -129,7 +186,7 @@ describe("assertReviewCoverage", () => {
     expect(() =>
       assertReviewCoverage({
         ...input,
-        detail: { ...input.detail, files: [{ ...input.detail.files[0]!, diff: null }] },
+        files: [{ ...input.files[0]!, diff: null }],
       }),
     ).toThrow(RunFailure));
   it("requires aggregate line counts", () =>
