@@ -14,6 +14,8 @@ struct ReviewDetailCache {
     private var entries: [String: Entry] = [:]
     private var nextOrder: UInt64 = 0
 
+    var keys: Set<String> { Set(entries.keys) }
+
     init(capacity: Int = 8) {
         precondition(capacity > 0, "ReviewDetailCache capacity must be positive")
         self.capacity = capacity
