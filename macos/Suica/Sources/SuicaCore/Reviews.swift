@@ -570,6 +570,8 @@ public final class ReviewsModel {
     public private(set) var loadingList = false
     public private(set) var selectedKey: String?
     public private(set) var details: [String: MergeRequestDetail] = [:]
+    /// Changes only when accepted diff inputs for an MR change.
+    public private(set) var detailRenderRevisions: [String: UInt64] = [:]
     public private(set) var detailErrors: [String: String] = [:]
     public private(set) var loadingKeys: Set<String> = []
     /// MRs with an Agent Review action in flight.
@@ -624,6 +626,8 @@ public final class ReviewsModel {
     public func dismissApprovalNotice(_ key: String) { approvalNotices[key] = nil }
 
     public var selectedDetail: MergeRequestDetail? { selectedKey.flatMap { details[$0] } }
+
+    public func detailRenderRevision(for key: String) -> UInt64 { detailRenderRevisions[key, default: 0] }
 
     /// True for one of your own MRs: its page offers Agent Fix, a comment and Merge.
     public func isYours(_ key: String) -> Bool {
@@ -904,6 +908,13 @@ public final class ReviewsModel {
             detailCache.store(fresh, now: now(), protecting: selectedKey)
             let cachedKeys = Set(detailCache.keys)
             for oldKey in details.keys where !cachedKeys.contains(oldKey) { details[oldKey] = nil }
+            if let previous = details[key] {
+                if previous.headSha != fresh.headSha || previous.files != fresh.files {
+                    detailRenderRevisions[key, default: 0] &+= 1
+                }
+            } else {
+                detailRenderRevisions[key, default: 0] &+= 1
+            }
             if details[key] != fresh { details[key] = fresh }
             if detailErrors[key] != nil { detailErrors[key] = nil }
         } catch {

@@ -363,6 +363,23 @@ actor FakeReviewsClient: ReviewsClient {
     #expect(model.selectedDetail != nil)
 }
 
+@MainActor @Test func detailRenderRevisionTracksAcceptedDiffInputsOnly() async throws {
+    let client = FakeReviewsClient(lists: [.success(list("g/p!1", "g/p!2"))])
+    let original = try detail("g/p!1", ["headSha": "same", "files": [["oldPath": "a", "newPath": "a", "diff": "+x", "newFile": false, "renamedFile": false, "deletedFile": false]]])
+    let changed = try detail("g/p!1", ["headSha": "same", "files": [["oldPath": "a", "newPath": "a", "diff": "+y", "newFile": false, "renamedFile": false, "deletedFile": false]]])
+    await client.setDetail("g/p!1", .success(original))
+    let model = ReviewsModel(client: client)
+    await model.loadDetail("g/p!1")
+    let first = model.detailRenderRevision(for: "g/p!1")
+    await client.setDetail("g/p!1", .success(original))
+    await model.loadDetail("g/p!1")
+    #expect(model.detailRenderRevision(for: "g/p!1") == first)
+    await client.setDetail("g/p!1", .success(changed))
+    await model.loadDetail("g/p!1")
+    #expect(model.detailRenderRevision(for: "g/p!1") != first)
+    #expect(model.detailRenderRevision(for: "g/p!2") == 0)
+}
+
 @MainActor @Test func anOlderDetailLoadDoesNotOverwriteANewerOne() async throws {
     let client = FakeReviewsClient(lists: [.success(list("g/p!1"))])
     let gate = Gate()

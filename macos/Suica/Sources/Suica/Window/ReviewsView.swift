@@ -13,6 +13,7 @@ struct ReviewsView: View {
     @State private var showingDetail = false
     @State private var viewStates = ReviewViewStateCache()
     @FocusState private var listFocused: Bool
+    @State private var restoreListFocus = false
 
     var body: some View {
         // The list runs up under the title bar and scrolls beneath it; the MR starts below it.
@@ -30,7 +31,7 @@ struct ReviewsView: View {
                 } else if showingDetail, model.selectedKey != nil {
                     // Narrow page: the MR fills it, with a Back control to the list.
                     VStack(alignment: .leading, spacing: 0) {
-                        Button { showingDetail = false; listFocused = true } label: { Label("Back to list", systemImage: "chevron.left") }
+                        Button { restoreListFocus = true; showingDetail = false } label: { Label("Back to list", systemImage: "chevron.left") }
                             .buttonStyle(.borderless)
                             .padding(.horizontal, 12)
                             .padding(.top, titleBar + 6)
@@ -107,6 +108,13 @@ struct ReviewsView: View {
         }
         .onChange(of: model.selectedKey) { syncTabToSelection() }
         .onAppear { syncTabToSelection() }
+        .task {
+            guard restoreListFocus else { return }
+            await Task.yield()
+            guard !Task.isCancelled else { return }
+            listFocused = true
+            restoreListFocus = false
+        }
     }
 
     /// The tab on screen: `tab`, unless this list has none of that name (no `me`, so one group).
@@ -183,7 +191,7 @@ struct ReviewsView: View {
         if let key = shownKey {
             if let detail = model.details[key] {
                 MergeRequestDetailView(
-                    detail: detail, error: model.detailErrors[key], model: model, fixes: fixes,
+                    detail: detail, renderRevision: model.detailRenderRevision(for: key), error: model.detailErrors[key], model: model, fixes: fixes,
                     onReload: { Task { await model.loadDetail(key) } },
                     tab: stateBinding(for: key, keyPath: \.tab),
                     collapsedFiles: stateBinding(for: key, keyPath: \.collapsedFiles)
@@ -499,6 +507,7 @@ private struct CollapsesHeader: ViewModifier {
 
 private struct MergeRequestDetailView: View {
     let detail: MergeRequestDetail
+    let renderRevision: UInt64
     let error: String?
     let model: ReviewsModel
     let fixes: FixesModel
@@ -537,7 +546,7 @@ private struct MergeRequestDetailView: View {
             ZStack {
                 switch tab {
                 case .description: DescriptionTab(detail: detail)
-                case .changes: ChangesTab(detail: detail, collapsed: $collapsedFiles)
+                case .changes: ChangesTab(detail: detail, renderRevision: renderRevision, collapsed: $collapsedFiles)
                 case .comments:
                     CommentsTab(detail: detail) {
                         if yours { CommentComposer(key: detail.key, fixes: fixes, onPosted: onReload) }
@@ -1002,6 +1011,7 @@ enum ReviewPresentation {
 
 private struct ChangesTab: View {
     let detail: MergeRequestDetail
+    let renderRevision: UInt64
     @Binding var collapsed: Set<String>
     @State private var prepared: PreparedReviewDiff?
     @Environment(\.motionLevel) private var motion
@@ -1024,7 +1034,7 @@ private struct ChangesTab: View {
         .collapsesHeader()
         // Prepared off the main thread by the shared cache, keyed by what the diff actually contains,
         // so a newer or different MR can never show lines parsed for another one.
-        .task(id: request) {
+        .task(id: renderRevision) {
             prepared = nil
             let files = detail.files
             guard let fresh = try? await ReviewPresentation.cache.diffs(
@@ -1034,9 +1044,6 @@ private struct ChangesTab: View {
         }
     }
 
-    /// Cheap identity of the diff inputs for `.task(id:)` (utf8 counts are O(1)); the cache computes
-    /// the exact content digest off the main thread.
-    private var request: DiffRequest { DiffRequest(key: detail.key, headSha: detail.headSha, files: detail.files) }
 
     private func fileHeader(_ file: DiffFile) -> some View {
         let open = !collapsed.contains(file.id)
@@ -1090,11 +1097,6 @@ private struct ChangesTab: View {
     }
 }
 
-private struct DiffRequest: Equatable {
-    let key: String
-    let headSha: String?
-    let files: [DiffFile]
-}
 
 struct DiffLineRow: View {
     let line: DiffLine
