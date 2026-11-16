@@ -1579,7 +1579,7 @@ describe("postAgentReview and discardAgentReview", () => {
       store: h.db,
       config: CONFIG,
       now: () => NOW,
-      graphql: threadsGitLab().graphql,
+      graphql: () => Promise.resolve(detailRaw()),
       log: silent,
       rest: (path: string) =>
         Promise.resolve(
