@@ -313,7 +313,7 @@ function detailRaw(overrides: { draft?: boolean; additions?: number } = {}): unk
           reviewers: { nodes: [] },
           approvedBy: { nodes: [] },
           squashOnMerge: false,
-          diffHeadSha: null,
+          diffHeadSha: SHA,
           userPermissions: { canApprove: false },
           discussions: { pageInfo: { hasNextPage: false }, nodes: [] },
         },
@@ -470,6 +470,19 @@ function harness(
     graphql: () => Promise.resolve(options.raw ?? detailRaw()),
     rest: (path: string) => {
       restPaths.push(path);
+      if (path.endsWith("/versions?per_page=100")) {
+        return Promise.resolve([
+          {
+            id: 1,
+            head_commit_sha: SHA,
+            base_commit_sha: PREV,
+            start_commit_sha: PREV,
+          },
+        ]);
+      }
+      if (path.endsWith("/versions/1")) {
+        return Promise.resolve({ diffs: DIFFS, overflow: false });
+      }
       if (path.endsWith("/diffs?per_page=100")) return Promise.resolve(DIFFS);
       if (path.includes("/repository/merge_base?")) {
         return Promise.resolve({ id: options.mergeBase ?? PREV });
