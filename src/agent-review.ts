@@ -440,9 +440,19 @@ export async function cloneSourceBranch(
 ): Promise<string> {
   const parts = parseMrKey(detail.key);
   if (parts === undefined) throw new RunFailure("malformed merge request key");
-  const project = projectSchema.safeParse(
-    await deps.rest(`projects/${encodeURIComponent(parts.projectPath)}`),
-  );
+  let projectPath = `projects/${encodeURIComponent(parts.projectPath)}`;
+  if (expectedHeadSha !== undefined) {
+    const mergeRequest = await deps.rest(`${projectPath}/merge_requests/${parts.iid}`);
+    const sourceProjectId =
+      typeof mergeRequest === "object" && mergeRequest !== null && "source_project_id" in mergeRequest
+        ? mergeRequest.source_project_id
+        : undefined;
+    if (typeof sourceProjectId !== "number" || !Number.isInteger(sourceProjectId) || sourceProjectId <= 0) {
+      throw new RunFailure("GitLab gave no usable source project for the merge request");
+    }
+    projectPath = `projects/${sourceProjectId}`;
+  }
+  const project = projectSchema.safeParse(await deps.rest(projectPath));
   if (!project.success || !SSH_URL.test(project.data.ssh_url_to_repo)) {
     throw new RunFailure("GitLab gave no usable SSH clone URL for the project");
   }

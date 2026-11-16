@@ -500,8 +500,11 @@ function harness(
           ...(options.compareTimeout === true ? { compare_timeout: true } : {}),
         });
       }
+      if (/\/merge_requests\/\d+$/.test(path)) return Promise.resolve({ source_project_id: 123 });
       return Promise.resolve({
-        ssh_url_to_repo: options.sshUrl ?? "ssh://git@gitlab.example:2222/g/p.git",
+        ssh_url_to_repo: path === "projects/123"
+          ? options.sshUrl ?? "ssh://git@gitlab.example:2222/fork/p.git"
+          : options.sshUrl ?? "ssh://git@gitlab.example:2222/g/p.git",
       });
     },
     notifier: {
@@ -610,7 +613,7 @@ describe("runAgentReview", () => {
     expect(clone?.args).toContain("--depth=1");
     expect(clone?.args).toContain("filter.lfs.smudge=");
     // The URL comes after --, so git never reads it as an option.
-    expect(clone?.args.slice(-3, -1)).toEqual(["--", "ssh://git@gitlab.example:2222/g/p.git"]);
+    expect(clone?.args.slice(-3, -1)).toEqual(["--", "ssh://git@gitlab.example:2222/fork/p.git"]);
     const run = h.calls.find((call) => call.file === "/bin/claude");
     expect(run?.args[1]?.startsWith("/madhani:madhani-code-review")).toBe(true);
     expect(run?.options.timeoutMs).toBe(20 * 60_000);

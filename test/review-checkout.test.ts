@@ -23,7 +23,11 @@ function harness(initialHead: string, finalHead = expected) {
     }
     return { stdout: "", stderr: "" };
   };
-  const rest: RestRunner = async () => ({ ssh_url_to_repo: "git@gitlab.example:g/p.git" });
+  const rest: RestRunner = async (path) => {
+    if (/\/merge_requests\/\d+$/.test(path)) return { source_project_id: 123 };
+    if (path === "projects/123") return { ssh_url_to_repo: "git@gitlab.example:fork/p.git" };
+    return { ssh_url_to_repo: "git@gitlab.example:g/p.git" };
+  };
   return { calls, deps: { exec, rest, signal } };
 }
 
@@ -34,7 +38,7 @@ describe("cloneSourceBranch reviewed commit checkout", () => {
     const h = harness(expected);
     await expect(cloneSourceBranch(h.deps, detail, "/repo", undefined, expected)).resolves.toBe(expected);
     expect(h.calls.map((call) => (call.args.includes("clone") ? call.args.slice(6) : call.args.slice(2)))).toEqual([
-      ["clone", "--depth=1", "--single-branch", "--no-tags", "--", "git@gitlab.example:g/p.git", "/repo"],
+      ["clone", "--depth=1", "--single-branch", "--no-tags", "--", "git@gitlab.example:fork/p.git", "/repo"],
       ["rev-parse", "HEAD"], ["checkout", "--detach", expected], ["rev-parse", "HEAD"],
     ]);
     expect(h.calls[0]?.options.signal).toBe(signal);
@@ -78,5 +82,21 @@ describe("cloneSourceBranch reviewed commit checkout", () => {
     expect(h.calls.some((call) => call.args.includes("checkout"))).toBe(false);
     expect(h.calls.some((call) => call.args.includes("fetch"))).toBe(false);
     expect(h.calls[0]?.options.signal).toBe(signal);
+  });
+
+  it("uses the fork URL for exact SHA checkout even when branch names match", async () => {
+    const h = harness(expected);
+    const forkDetail = { ...detail, sourceBranch: detail.targetBranch };
+    await expect(cloneSourceBranch(h.deps, forkDetail, "/repo", undefined, expected)).resolves.toBe(expected);
+    expect(h.calls[0]?.args).toContain("git@gitlab.example:fork/p.git");
+  });
+
+  it.each([undefined, null])("refuses an MR without a valid source_project_id (%s)", async (sourceProjectId) => {
+    const h = harness(expected);
+    const rest: RestRunner = async (path) => /\/merge_requests\/\d+$/.test(path)
+      ? { source_project_id: sourceProjectId }
+      : { ssh_url_to_repo: "git@gitlab.example:g/p.git" };
+    await expect(cloneSourceBranch({ ...h.deps, rest }, detail, "/repo", undefined, expected))
+      .rejects.toThrow("no usable source project");
   });
 });
