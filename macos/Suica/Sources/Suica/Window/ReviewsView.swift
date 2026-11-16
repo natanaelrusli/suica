@@ -33,18 +33,19 @@ struct ReviewsView: View {
         .task(id: refreshSeconds) {
             while true {
                 do { try await Task.sleep(for: .seconds(refreshSeconds)) } catch { return }
-                await refreshAll()
+                await refreshAll(reason: .automatic)
             }
         }
+        .onDisappear { model.stopRefreshing() }
         .toolbar {
-            ListRefreshButton(model: model) { await refreshAll() }
+            ListRefreshButton(model: model) { await refreshAll(reason: .manual) }
         }
     }
 
     private var refreshSeconds: Int { fixes.hasActiveFix ? 3 : model.refreshSeconds }
 
-    private func refreshAll() async {
-        async let list: Void = model.refresh()
+    private func refreshAll(reason: ReviewRefreshReason = .automatic) async {
+        async let list: Void = model.refresh(reason: reason)
         async let fixList: Void = fixes.refresh()
         _ = await (list, fixList)
     }

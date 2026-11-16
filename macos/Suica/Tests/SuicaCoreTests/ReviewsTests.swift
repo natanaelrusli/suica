@@ -930,6 +930,25 @@ private func options() throws -> ReviewOptions {
 }
 
 
+
+@MainActor @Test func idleAutomaticRefreshesReuseDetailsUntilThirtySeconds() async throws {
+    let client = FakeReviewsClient(lists: Array(repeating: .success(list("g/p!1")), count: 11))
+    await client.setDetail("g/p!1", .success(try detail("g/p!1", ["pipeline": NSNull()])))
+    let clock = Mutex(Date(timeIntervalSince1970: 0))
+    let model = ReviewsModel(client: client, now: { clock.withLock { $0 } })
+
+    await model.refresh(reason: .automatic)
+    for second in stride(from: 3, through: 27, by: 3) {
+        clock.withLock { $0 = Date(timeIntervalSince1970: TimeInterval(second)) }
+        await model.refresh(reason: .automatic)
+    }
+    #expect(await client.detailCalls == ["g/p!1"])
+
+    clock.withLock { $0 = Date(timeIntervalSince1970: 30) }
+    await model.refresh(reason: .automatic)
+    #expect(await client.detailCalls == ["g/p!1", "g/p!1"])
+}
+
 @MainActor @Test func overlappingRefreshesShareReads() async throws {
     let client = FakeReviewsClient(lists: [.success(list("g/p!1"))])
     await client.setDetail("g/p!1", .success(try detail("g/p!1")))
