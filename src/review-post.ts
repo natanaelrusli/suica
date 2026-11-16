@@ -66,12 +66,13 @@ export async function resumeReviewPosting(
 ): Promise<"posted" | "held" | "nothing"> {
   const row = deps.store.getAgentReview(id);
   if (!row || (row.status !== "ready" && row.status !== "posting")) return "nothing";
+  if (row.status === "ready" && row.detail?.includes("Posting was interrupted") && !deps.store.reviewPostParts(id).length) return "held";
   if (!(await deps.preflight())) return "held";
   const token = deps.token?.() ?? `${id}-${deps.now()}-${Math.random()}`;
   const lease = deps.store.claimReviewPosting(id, token, deps.now());
   if (!lease) return "held";
   const hold = (message: string): "held" => {
-    deps.store.transitionAgentReview(id, ["posting"], "posting", { detail: message }, deps.now());
+    deps.store.holdReviewPosting(lease, message, deps.now());
     deps.log(message);
     return "held";
   };
@@ -85,7 +86,7 @@ export async function resumeReviewPosting(
         state: "pending" as const,
         remoteId: null,
       }));
-      if (!deps.store.saveReviewPostPlan(lease, frozen))
+      if (!deps.store.saveReviewPostPlan(lease, frozen, deps.now()))
         return hold("Could not save frozen posting plan; inspect before retrying.");
       parts = deps.store.reviewPostParts(id);
     }

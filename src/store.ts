@@ -303,8 +303,9 @@ export interface Store {
     fields: AgentReviewFields,
     now: number,
   ): boolean;
+  holdReviewPosting(lease: PostingLease, detail: string, now: number): boolean;
   claimReviewPosting(id: number, token: string, now: number): PostingLease | undefined;
-  saveReviewPostPlan(lease: PostingLease, parts: readonly PostPart[]): boolean;
+  saveReviewPostPlan(lease: PostingLease, parts: readonly PostPart[], now?: number): boolean;
   reviewPostParts(id: number): PostPart[];
   updateReviewPostPart(
     lease: PostingLease,
@@ -1277,14 +1278,19 @@ export function openStore(path: string): Store {
         throw e;
       }
     },
-    saveReviewPostPlan(lease, parts) {
+    holdReviewPosting(lease, detail, now) {
+      const r = db.prepare("UPDATE agent_review SET detail=?,updated_at=? WHERE id=? AND status='posting' AND EXISTS(SELECT 1 FROM review_posting WHERE review_id=? AND token=? AND expires_at>?)")
+        .run(detail, now, lease.reviewId, lease.reviewId, lease.token, now);
+      return Number(r.changes) === 1;
+    },
+    saveReviewPostPlan(lease, parts, now = Date.now()) {
       db.exec("BEGIN IMMEDIATE");
       try {
         const ok = db
           .prepare(
-            "SELECT 1 FROM review_posting WHERE review_id=? AND token=? AND expires_at=? AND EXISTS (SELECT 1 FROM agent_review WHERE id=? AND status='posting')",
+            "SELECT 1 FROM review_posting WHERE review_id=? AND token=? AND expires_at>? AND EXISTS (SELECT 1 FROM agent_review WHERE id=? AND status='posting')",
           )
-          .get(lease.reviewId, lease.token, lease.expiresAt, lease.reviewId);
+          .get(lease.reviewId, lease.token, now, lease.reviewId);
         if (!ok) {
           db.exec("ROLLBACK");
           return false;
@@ -1307,7 +1313,7 @@ export function openStore(path: string): Store {
               p.payload,
               p.state,
               p.remoteId,
-              Date.now(),
+              now,
             );
         }
         db.exec("COMMIT");
@@ -1336,18 +1342,18 @@ export function openStore(path: string): Store {
     updateReviewPostPart(lease, key, state, remoteId, now) {
       const r = db
         .prepare(
-          "UPDATE review_post_part SET state=?,remote_id=?,updated_at=? WHERE review_id=? AND part_key=? AND EXISTS(SELECT 1 FROM review_posting WHERE review_id=? AND token=? AND expires_at>?)",
+          "UPDATE review_post_part SET state=?,remote_id=?,updated_at=? WHERE review_id=? AND part_key=? AND EXISTS(SELECT 1 FROM review_posting WHERE review_id=? AND token=? AND expires_at>?) AND EXISTS(SELECT 1 FROM agent_review WHERE id=? AND status='posting')",
         )
-        .run(state, remoteId, now, lease.reviewId, key, lease.reviewId, lease.token, now);
+        .run(state, remoteId, now, lease.reviewId, key, lease.reviewId, lease.token, now, lease.reviewId);
       return Number(r.changes) === 1;
     },
     renewReviewPosting(lease, now) {
       const expiresAt = now + POSTING_STALE_MS;
       const r = db
         .prepare(
-          "UPDATE review_posting SET expires_at=? WHERE review_id=? AND token=? AND expires_at>?",
+          "UPDATE review_posting SET expires_at=? WHERE review_id=? AND token=? AND expires_at>? AND EXISTS(SELECT 1 FROM agent_review WHERE id=? AND status='posting')",
         )
-        .run(expiresAt, lease.reviewId, lease.token, now);
+        .run(expiresAt, lease.reviewId, lease.token, now, lease.reviewId);
       return Number(r.changes) === 1;
     },
     finishReviewPosting(lease, now, detail) {
@@ -1390,17 +1396,21 @@ export function openStore(path: string): Store {
     },
 
     recoverStalePostings(now) {
-      // One guarded UPDATE: a post that finishes later finds the row no longer posting.
-      const result = db
-        .prepare(
-          "UPDATE agent_review SET status = 'ready', detail = ?, updated_at = ? WHERE status = 'posting' AND updated_at < ?",
-        )
-        .run(
-          "Posting was interrupted. Check the MR in GitLab before posting again: some comments may have arrived.",
-          now,
-          now - POSTING_STALE_MS,
-        );
-      return Number(result.changes);
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        const legacy = "Posting was interrupted. Check the MR in GitLab before posting again: some comments may have arrived.";
+        const ids = db.prepare("SELECT id FROM agent_review WHERE status='posting' AND updated_at < ? AND NOT EXISTS(SELECT 1 FROM review_posting WHERE review_id=agent_review.id)").all(now - POSTING_STALE_MS);
+        for (const r of ids) db.prepare("UPDATE agent_review SET status='ready',detail=?,updated_at=? WHERE id=? AND status='posting'").run(legacy, now, r["id"]);
+        const journal = "Posting lease expired with a durable journal. Inspect the MR in GitLab; uncertain writes remain held for inspection.";
+        const rows = db.prepare("SELECT review_id FROM review_posting WHERE expires_at <= ? AND EXISTS(SELECT 1 FROM agent_review WHERE id=review_id AND status='posting')").all(now);
+        for (const r of rows) {
+          const id = r["review_id"];
+          db.prepare("UPDATE review_post_part SET state='uncertain',updated_at=? WHERE review_id=? AND state='sending'").run(now,id);
+          db.prepare("UPDATE agent_review SET detail=?,updated_at=? WHERE id=? AND status='posting'").run(journal,now,id);
+        }
+        db.exec("COMMIT");
+        return ids.length;
+      } catch (e) { db.exec("ROLLBACK"); throw e; }
     },
 
     loadTokenUsage(since) {

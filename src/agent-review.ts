@@ -1149,7 +1149,7 @@ export async function postAgentReview(
     current = await fetchMrDetail(deps.graphql, deps.rest, row.mrKey);
   } catch (error) {
     const detail = `Could not verify the MR is still the reviewed version (${errorName(error)}). Review the MR again before posting.`;
-    store.transitionAgentReview(id, ["ready"], "ready", { detail }, deps.now());
+    if (row.status === "ready") store.transitionAgentReview(id, ["ready"], "ready", { detail }, deps.now());
     log.warn("agent review freshness lookup failed", { id, reason: errorName(error) });
     return "failed";
   }
@@ -1160,7 +1160,7 @@ export async function postAgentReview(
     descriptionSha(current.description) !== row.descriptionSha
   ) {
     const detail = "The MR changed since this review. Review the MR again before posting.";
-    store.transitionAgentReview(id, ["ready"], "ready", { detail }, deps.now());
+    if (row.status === "ready") store.transitionAgentReview(id, ["ready"], "ready", { detail }, deps.now());
     log.info("agent review posting refused for stale input", { id });
     return "nothing";
   }
@@ -1169,7 +1169,7 @@ export async function postAgentReview(
     ownerUsername = await fetchCurrentUsername(deps.rest);
   } catch (error) {
     const detail = `Could not verify the authenticated GitLab user (${errorName(error)}). Review was not posted.`;
-    store.transitionAgentReview(id, ["ready"], "ready", { detail }, deps.now());
+    if (row.status === "ready") store.transitionAgentReview(id, ["ready"], "ready", { detail }, deps.now());
     log.warn("agent review owner lookup failed", { id, reason: errorName(error) });
     return "failed";
   }
