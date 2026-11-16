@@ -278,6 +278,8 @@ function namesOnly(text: string, allowed: ReadonlySet<string>): boolean {
  */
 export function isReadyToApprove(markdown: string, when: ApproveWhen = "minor"): boolean {
   const allowed = LEFT_ALLOWED[when];
+  // A template review that says "no" is never ready, and one that says "yes" must match its findings.
+  if (/^\s*ready to approve:\s*no\s*$/im.test(markdown)) return false;
   return (
     countFindings(markdown).every((each) => allowed.has(each.severity)) &&
     openPreviousItems(markdown).every((text) => namesOnly(text, allowed))
