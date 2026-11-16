@@ -598,8 +598,15 @@ public final class ReviewsModel {
     @ObservationIgnored private var stopped = false
     @ObservationIgnored private var forcedRefreshPending = false
     @ObservationIgnored private var activeDetailReads = 0
-    @ObservationIgnored private var queuedDetailKey: String?
+    @ObservationIgnored private var queuedDetailRequest: QueuedDetailRequest?
     @ObservationIgnored private var detailForcePending: Set<String> = []
+
+    @MainActor private struct QueuedDetailRequest {
+        let key: String
+        let keepingNotice: Bool
+        let force: Bool
+        var waiters: [CheckedContinuation<Void, Never>]
+    }
 
     public init(client: any ReviewsClient, now: @escaping @Sendable () -> Date = Date.init) {
         self.client = client
@@ -797,7 +804,15 @@ public final class ReviewsModel {
         }
     }
 
-    public func stopRefreshing() { stopped = true }
+    public func stopRefreshing() {
+        stopped = true
+        let queued = queuedDetailRequest
+        queuedDetailRequest = nil
+        if let queued {
+            loadingKeys.remove(queued.key)
+            queued.waiters.forEach { $0.resume() }
+        }
+    }
 
     private func performRefresh(reason: ReviewRefreshReason) async {
         latestRefresh += 1
@@ -826,7 +841,7 @@ public final class ReviewsModel {
             let message = MenuModel.message(for: error)
             if errorText != message { errorText = message }
         }
-        if let key = selectedKey, key != early { await loadDetail(key, keepingNotice: true) }
+        if !stopped, let key = selectedKey, key != early { await loadDetail(key, keepingNotice: true) }
         await earlyLoad?.value
         // After the early load, so the detail of an MR that left the list is not stored again.
         // Keep recently viewed details in the bounded cache.
@@ -848,6 +863,7 @@ public final class ReviewsModel {
     public func loadDetail(_ key: String, keepingNotice: Bool = false) async { await loadDetail(key, keepingNotice: keepingNotice, force: true) }
 
     private func loadDetail(_ key: String, keepingNotice: Bool, force: Bool) async {
+        guard !stopped else { return }
         if !force, detailCache.isFresh(key, now: now(), lifetime: details[key]?.pipeline?.isActive == true ? 10 : 30) { return }
         if let existing = detailTasks[key] {
             if force { detailForcePending.insert(key); latestDetail[key, default: 0] += 1 }
@@ -857,15 +873,26 @@ public final class ReviewsModel {
             }
             return
         }
+        if activeDetailReads >= 2 {
+            await withCheckedContinuation { continuation in
+                if let displaced = queuedDetailRequest {
+                    loadingKeys.remove(displaced.key)
+                    displaced.waiters.forEach { $0.resume() }
+                }
+                queuedDetailRequest = QueuedDetailRequest(key: key, keepingNotice: keepingNotice, force: force, waiters: [continuation])
+            }
+            return
+        }
+        let (operation, mine) = startDetailRequest(key, keepingNotice: keepingNotice)
+        await operation.value
+        completeDetailRequest(key, mine: mine)
+    }
+
+    private func startDetailRequest(_ key: String, keepingNotice: Bool) -> (Task<Void, Never>, Int) {
         if !keepingNotice && !approvingKeys.contains(key) { approvalNotices[key] = nil }
         let mine = (latestDetail[key] ?? 0) + 1
         latestDetail[key] = mine
         loadingKeys.insert(key)
-        if activeDetailReads >= 2 {
-            queuedDetailKey = key
-            while activeDetailReads >= 2 { await Task.yield() }
-            if stopped { return }
-        }
         activeDetailReads += 1
         let operation = Task { @MainActor in
         do {
@@ -883,13 +910,20 @@ public final class ReviewsModel {
         }
         }
         detailTasks[key] = operation
-        await operation.value
+        return (operation, mine)
+    }
+
+    private func completeDetailRequest(_ key: String, mine: Int) {
         if latestDetail[key] == mine { loadingKeys.remove(key) }
         detailTasks[key] = nil
         activeDetailReads = max(0, activeDetailReads - 1)
-        if let queued = queuedDetailKey, queued != key {
-            queuedDetailKey = nil
-            Task { await self.loadDetail(queued, keepingNotice: true, force: false) }
+        guard !stopped, let queued = queuedDetailRequest else { return }
+        queuedDetailRequest = nil
+        let (operation, queuedMine) = startDetailRequest(queued.key, keepingNotice: queued.keepingNotice)
+        queued.waiters.forEach { $0.resume() }
+        Task { @MainActor in
+            await operation.value
+            completeDetailRequest(queued.key, mine: queuedMine)
         }
     }
 }
