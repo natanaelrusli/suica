@@ -1810,6 +1810,42 @@ describe("postAgentReview and discardAgentReview", () => {
     expect(h.db.getAgentReview(id)?.detail).toMatch(/^2 of 3 findings were posted as inline/);
   });
 
+  it("resumes a frozen plan after an accepted post loses its response", async () => {
+    const { h, id } = await ready();
+    expect(h.db.transitionAgentReview(id, ["ready"], "ready", { body: INLINE_REVIEW }, NOW)).toBe(true);
+    const fake = postDeps(h);
+    let clock = NOW;
+    const originalPost = fake.deps.post;
+    let loseResponse = true;
+    const post = async (path: string, fields: Readonly<Record<string, string>>) => {
+      await originalPost(path, fields);
+      if (loseResponse) {
+        loseResponse = false;
+        throw new Error("lost response");
+      }
+    };
+    const deps = { ...fake.deps, now: () => clock, post };
+
+    expect(await postAgentReview(deps, id, "inline")).toBe("failed");
+    expect(h.db.getAgentReview(id)).toMatchObject({ status: "posting" });
+    const threadCount = fake.threads.length;
+    const noteCount = fake.notes.length;
+    expect(threadCount).toBe(2);
+    expect(noteCount).toBe(1);
+    const priorParts = h.db.reviewPostParts(id);
+    expect(priorParts.some((part) => part.state === "uncertain")).toBe(true);
+
+    clock = NOW + 16 * 60_000;
+    const resumedDeps = { ...deps, post: originalPost };
+    expect(await postAgentReview(resumedDeps, id, "comment")).toBe("posted");
+    expect(fake.threads).toHaveLength(threadCount);
+    expect(fake.notes).toHaveLength(noteCount);
+    const finalParts = h.db.reviewPostParts(id);
+    expect(finalParts.every((part) => part.state === "confirmed")).toBe(true);
+    expect(finalParts.map((part) => part.payload)).toEqual(priorParts.map((part) => part.payload));
+    expect(h.db.getAgentReview(id)).toMatchObject({ status: "posted", approved: false });
+  });
+
   it("labels a re-review note and its threads as Agent re-review with both commits", async () => {
     const note = renderNote(row({ previousSha: PREV }), "madhani:madhani-code-review");
     expect(note.split("\n")[0]).toBe(
