@@ -599,6 +599,7 @@ public final class ReviewsModel {
     @ObservationIgnored private var forcedRefreshPending = false
     @ObservationIgnored private var activeDetailReads = 0
     @ObservationIgnored private var queuedDetailRequest: QueuedDetailRequest?
+    var queuedDetailKeyForTesting: String? { queuedDetailRequest?.key }
     @ObservationIgnored private var detailForcePending: Set<String> = []
 
     @MainActor private struct QueuedDetailRequest {

@@ -214,6 +214,38 @@ actor FakeReviewsClient: ReviewsClient {
     #expect(model.selectedDetail?.key == "g/p!1")
 }
 
+@MainActor @Test func newestQueuedSelectionKeepsAtMostTwoDetailReads() async throws {
+    let client = FakeReviewsClient(lists: [.success(list("A", "B", "C", "D", "E"))])
+    let gateA = Gate()
+    let gateB = Gate()
+    await client.setDetail("A", .success(try detail("A")), gate: gateA)
+    await client.setDetail("B", .success(try detail("B")), gate: gateB)
+    let model = ReviewsModel(client: client)
+    let selectA = Task { await model.loadDetail("A") }
+    while await client.activeDetailCalls < 1 { await Task.yield() }
+    let selectB = Task { await model.select("B") }
+    while await client.activeDetailCalls < 2 { await Task.yield() }
+    let selectC = Task { await model.select("C") }
+    while model.queuedDetailKeyForTesting != "C" { await Task.yield() }
+    let selectD = Task { await model.select("D") }
+    while model.queuedDetailKeyForTesting != "D" { await Task.yield() }
+    let selectE = Task { await model.select("E") }
+    while model.queuedDetailKeyForTesting != "E" { await Task.yield() }
+
+    await gateA.open()
+    await gateB.open()
+    await selectA.value
+    await selectB.value
+    await selectC.value
+    await selectD.value
+    await selectE.value
+
+    #expect(await client.maxActiveDetailCalls <= 2)
+    #expect(await client.detailCalls == ["A", "B", "E"])
+    #expect(model.selectedKey == "E")
+    #expect(model.loadingKeys.isEmpty)
+}
+
 @MainActor @Test func refreshReusesFreshSelectedDetailAndRetainsRecentDetails() async throws {
     let client = FakeReviewsClient(lists: [.success(list("g/p!1", "g/p!2"))])
     await client.setDetail("g/p!1", .success(try detail("g/p!1")))
