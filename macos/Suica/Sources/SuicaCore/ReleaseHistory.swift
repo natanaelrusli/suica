@@ -13,6 +13,14 @@ public struct ReleaseNote: Identifiable, Sendable {
 
     public static let recent: [ReleaseNote] = [
         ReleaseNote(
+            version: "0.1.12", date: "16 Nov 2026", title: "Faster, steadier MR reviews",
+            changes: [
+                "MR pages open from cached details, and repeated reads of the same MR are shared instead of fetched again.",
+                "Large diffs and long Markdown are prepared off the main thread, so the page stays responsive while they open.",
+                "On a narrow window the MR list and the MR take turns, with a Back button.",
+                "Agent Reviews use a fixed Suica layout that ends in a ready-to-approve verdict, and a review that says no is never approved.",
+            ]),
+        ReleaseNote(
             version: "0.1.11", date: "12 Nov 2026", title: "Fairer approvals, quieter Teams",
             changes: [
                 "Reviews no longer stay unapproved over items that only wait on a CI run or a device check; a CI item is lifted once the head pipeline is green.",
