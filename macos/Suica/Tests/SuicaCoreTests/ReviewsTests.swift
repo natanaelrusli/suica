@@ -380,6 +380,24 @@ actor FakeReviewsClient: ReviewsClient {
     #expect(model.detailRenderRevision(for: "g/p!2") == 0)
 }
 
+@MainActor @Test func renderRevisionsFollowDetailEvictionAndRemoval() async throws {
+    let client = FakeReviewsClient(lists: [.success(list())])
+    let model = ReviewsModel(client: client)
+    for index in 1...12 {
+        let key = "g/p!\(index)"
+        await client.setDetail(key, .success(try detail(key)))
+        await model.select(key)
+        #expect(model.detailRenderRevisions.count <= 8)
+        #expect(Set(model.detailRenderRevisions.keys) == Set(model.details.keys))
+        #expect(model.detailRenderRevision(for: key) > 0)
+    }
+    #expect(model.detailRenderRevision(for: "g/p!1") == 0)
+    await model.select(nil)
+    await model.refresh()
+    #expect(model.details.isEmpty)
+    #expect(model.detailRenderRevisions.isEmpty)
+}
+
 @MainActor @Test func anOlderDetailLoadDoesNotOverwriteANewerOne() async throws {
     let client = FakeReviewsClient(lists: [.success(list("g/p!1"))])
     let gate = Gate()

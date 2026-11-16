@@ -837,7 +837,11 @@ public final class ReviewsModel {
             let keys = Set(fresh.mergeRequests.map(\.key) + fresh.yourMergeRequests.map(\.key))
             let removed = Set(detailCacheKeys()).subtracting(keys)
             detailCache.remove(keys: removed)
-            for key in removed { details[key] = nil; detailErrors[key] = nil }
+            for key in removed {
+                details[key] = nil
+                detailErrors[key] = nil
+                detailRenderRevisions[key] = nil
+            }
             if let selected = selectedKey, !keys.contains(selected) { selectedKey = nil }
             // The page's first row, so on Merge requests one that waits for the Owner when there is one.
             if selectedKey == nil { selectedKey = fresh.keys(in: scope).first }
@@ -907,7 +911,10 @@ public final class ReviewsModel {
             guard latestDetail[key] == mine else { return }
             detailCache.store(fresh, now: now(), protecting: selectedKey)
             let cachedKeys = Set(detailCache.keys)
-            for oldKey in details.keys where !cachedKeys.contains(oldKey) { details[oldKey] = nil }
+            for oldKey in details.keys where !cachedKeys.contains(oldKey) {
+                details[oldKey] = nil
+                detailRenderRevisions[oldKey] = nil
+            }
             if let previous = details[key] {
                 if previous.headSha != fresh.headSha || previous.files != fresh.files {
                     detailRenderRevisions[key, default: 0] &+= 1
