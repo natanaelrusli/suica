@@ -1529,6 +1529,7 @@ function threadsGitLab(
 ) {
   const resolved: string[] = [];
   const graphql: GraphqlRunner = (query, variables = {}) => {
+    if (query.includes("query SuicaMergeRequest(")) return Promise.resolve(detailRaw());
     if (query.includes("discussionToggleResolve")) {
       const id = variables["id"] ?? "";
       if (id === options.refuse) {
