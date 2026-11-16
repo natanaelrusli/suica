@@ -1583,7 +1583,9 @@ describe("postAgentReview and discardAgentReview", () => {
       log: silent,
       rest: (path: string) =>
         Promise.resolve(
-          path.endsWith("/versions?per_page=100")
+          path.endsWith("/diffs?per_page=100")
+            ? DIFFS
+            : path.endsWith("/versions?per_page=100")
             ? [
                 {
                   id: 3,
