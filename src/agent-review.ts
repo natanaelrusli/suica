@@ -1110,8 +1110,28 @@ export async function postAgentReview(
   if (row?.status !== "ready" || row.body === null) return "nothing";
   const parts = parseMrKey(row.mrKey);
   if (parts === undefined) return "nothing";
-  if (!store.transitionAgentReview(id, ["ready"], "posting", {}, deps.now())) return "nothing";
   const mrPath = `projects/${encodeURIComponent(parts.projectPath)}/merge_requests/${parts.iid}`;
+  let current: MrDetailJson;
+  try {
+    current = await fetchMrDetail(deps.graphql, deps.rest, row.mrKey);
+  } catch (error) {
+    const detail = `Could not verify the MR is still the reviewed version (${errorName(error)}). Review the MR again before posting.`;
+    store.transitionAgentReview(id, ["ready"], "ready", { detail }, deps.now());
+    log.warn("agent review freshness lookup failed", { id, reason: errorName(error) });
+    return "failed";
+  }
+  if (
+    row.headSha === null ||
+    row.descriptionSha === null ||
+    current.headSha !== row.headSha ||
+    descriptionSha(current.description) !== row.descriptionSha
+  ) {
+    const detail = "The MR changed since this review. Review the MR again before posting.";
+    store.transitionAgentReview(id, ["ready"], "ready", { detail }, deps.now());
+    log.info("agent review posting refused for stale input", { id });
+    return "nothing";
+  }
+  if (!store.transitionAgentReview(id, ["ready"], "posting", {}, deps.now())) return "nothing";
 
   let plan: { findings: Finding[]; threads: Thread[] } = { findings: [], threads: [] };
   if (mode === "inline") {
