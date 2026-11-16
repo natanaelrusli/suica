@@ -1041,6 +1041,28 @@ private func options() throws -> ReviewOptions {
 }
 
 
+@MainActor @Test func stoppedListRefreshDoesNotStartNewDetailRead() async throws {
+    let client = FakeReviewsClient(lists: [.success(list("g/p!1"))])
+    await client.setDetail("g/p!1", .success(try detail("g/p!1")))
+    let gate = Gate()
+    await client.setListGate(gate)
+    let model = ReviewsModel(client: client)
+
+    let refresh = Task { await model.refresh() }
+    while await client.listCalls < 1 { await Task.yield() }
+    model.stopRefreshing()
+    await gate.open()
+    await refresh.value
+
+    #expect(await client.detailCalls.isEmpty)
+    #expect(model.loadingKeys.isEmpty)
+    #expect(!model.loadingList)
+
+    await model.show(.reviewing)
+    await model.refresh()
+    #expect(await client.detailCalls == ["g/p!1"])
+}
+
 @MainActor @Test func aDelayedPreviousSelectionCannotReplaceTheCurrentSelection() async throws {
     let client = FakeReviewsClient(lists: [.success(list("g/p!1", "g/p!2"))])
     await client.setDetail("g/p!1", .success(try detail("g/p!1")))
