@@ -9,17 +9,38 @@ struct ReviewsView: View {
     let scope: ReviewScope
     @State private var query = ""
     @State private var tab: ReviewGroup = .waiting
+    /// Narrow pages only: whether the selected MR is open over the list.
+    @State private var showingDetail = false
+    @State private var viewStates = ReviewViewStateCache()
+    @FocusState private var listFocused: Bool
+    @State private var restoreListFocus = false
 
     var body: some View {
         // The list runs up under the title bar and scrolls beneath it; the MR starts below it.
         UnderTitleBar { titleBar in
-            HStack(spacing: 0) {
-                list(titleBar: titleBar)
-                    .frame(width: 300)
-                Divider()
-                detail
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .padding(.top, titleBar)
+            GeometryReader { proxy in
+                if reviewLayout(availableWidth: proxy.size.width) == .split {
+                    HStack(spacing: 0) {
+                        list(titleBar: titleBar)
+                            .frame(width: 300)
+                        Divider()
+                        detail
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .padding(.top, titleBar)
+                    }
+                } else if showingDetail, model.selectedKey != nil {
+                    // Narrow page: the MR fills it, with a Back control to the list.
+                    VStack(alignment: .leading, spacing: 0) {
+                        Button { restoreListFocus = true; showingDetail = false } label: { Label("Back to list", systemImage: "chevron.left") }
+                            .buttonStyle(.borderless)
+                            .padding(.horizontal, 12)
+                            .padding(.top, titleBar + 6)
+                            .accessibilityLabel("Back to list")
+                        detail.frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
+                } else {
+                    list(titleBar: titleBar)
+                }
             }
         }
         .searchable(text: $query, placement: .toolbar, prompt: scope == .mine ? Copy.searchMyMRs : Copy.searchReviews)
@@ -33,24 +54,28 @@ struct ReviewsView: View {
         .task(id: refreshSeconds) {
             while true {
                 do { try await Task.sleep(for: .seconds(refreshSeconds)) } catch { return }
-                await refreshAll()
+                await refreshAll(reason: .automatic)
             }
         }
+        .onDisappear { model.stopRefreshing() }
         .toolbar {
-            ListRefreshButton(model: model) { await refreshAll() }
+            ListRefreshButton(model: model) { await refreshAll(reason: .manual) }
         }
     }
 
     private var refreshSeconds: Int { fixes.hasActiveFix ? 3 : model.refreshSeconds }
 
-    private func refreshAll() async {
-        async let list: Void = model.refresh()
+    private func refreshAll(reason: ReviewRefreshReason = .automatic) async {
+        async let list: Void = model.refresh(reason: reason)
         async let fixList: Void = fixes.refresh()
         _ = await (list, fixList)
     }
 
     private var selection: Binding<String?> {
-        Binding(get: { model.selectedKey }, set: { key in Task { await model.select(key) } })
+        Binding(get: { model.selectedKey }, set: { key in
+            if key == model.selectedKey, key != nil { showingDetail = true }
+            else { showingDetail = key != nil; Task { await model.select(key) } }
+        })
     }
 
     private func list(titleBar: CGFloat) -> some View {
@@ -64,6 +89,7 @@ struct ReviewsView: View {
                 ProgressView(Copy.loading).frame(maxWidth: .infinity)
             }
         }
+        .focused($listFocused)
         .motion(value: model.list)
         .motion(value: model.errorText)
         .modifier(ListTopBar(titleBar: titleBar) {
@@ -82,6 +108,13 @@ struct ReviewsView: View {
         }
         .onChange(of: model.selectedKey) { syncTabToSelection() }
         .onAppear { syncTabToSelection() }
+        .task {
+            guard restoreListFocus else { return }
+            await Task.yield()
+            guard !Task.isCancelled else { return }
+            listFocused = true
+            restoreListFocus = false
+        }
     }
 
     /// The tab on screen: `tab`, unless this list has none of that name (no `me`, so one group).
@@ -158,10 +191,11 @@ struct ReviewsView: View {
         if let key = shownKey {
             if let detail = model.details[key] {
                 MergeRequestDetailView(
-                    detail: detail, error: model.detailErrors[key], model: model, fixes: fixes
-                ) {
-                    Task { await model.loadDetail(key) }
-                }
+                    detail: detail, renderRevision: model.detailRenderRevision(for: key), error: model.detailErrors[key], model: model, fixes: fixes,
+                    onReload: { Task { await model.loadDetail(key) } },
+                    tab: stateBinding(for: key, keyPath: \.tab),
+                    collapsedFiles: stateBinding(for: key, keyPath: \.collapsedFiles)
+                )
                 .id(key)
                 .transition(.opacity)
             } else if let error = model.detailErrors[key] {
@@ -181,6 +215,12 @@ struct ReviewsView: View {
             ContentUnavailableView(
                 Copy.selectMergeRequest, systemImage: "sidebar.left", description: Text(Copy.selectMergeRequestHint))
         }
+    }
+
+    private func stateBinding<Value>(for key: String, keyPath: WritableKeyPath<ReviewViewState, Value>) -> Binding<Value> {
+        Binding(get: { viewStates.state(for: key)[keyPath: keyPath] }, set: { value in
+            viewStates.update(key, selectedKey: model.selectedKey) { $0[keyPath: keyPath] = value }
+        })
     }
 }
 
@@ -370,13 +410,13 @@ private struct BadgeLabelStyle: LabelStyle {
 /// dot when something there waits for you.
 private struct DetailTabBar: View {
     struct Item {
-        let tab: DetailTab
+        let tab: ReviewDetailTab
         let title: String
         var count: Int?
         var waiting = false
     }
 
-    @Binding var selection: DetailTab
+    @Binding var selection: ReviewDetailTab
     let tabs: [Item]
     @Namespace private var underline
     @Environment(\.motionLevel) private var motion
@@ -465,17 +505,15 @@ private struct CollapsesHeader: ViewModifier {
 
 // MARK: - Detail
 
-private enum DetailTab: Hashable {
-    case description, changes, comments, agent, fix
-}
-
 private struct MergeRequestDetailView: View {
     let detail: MergeRequestDetail
+    let renderRevision: UInt64
     let error: String?
     let model: ReviewsModel
     let fixes: FixesModel
     let onReload: () -> Void
-    @State private var tab: DetailTab = .description
+    @Binding var tab: ReviewDetailTab
+    @Binding var collapsedFiles: Set<String>
     @State private var confirmingApprove = false
     @State private var merging = false
     @State private var confirmingClose = false
@@ -508,7 +546,7 @@ private struct MergeRequestDetailView: View {
             ZStack {
                 switch tab {
                 case .description: DescriptionTab(detail: detail)
-                case .changes: ChangesTab(detail: detail)
+                case .changes: ChangesTab(detail: detail, renderRevision: renderRevision, collapsed: $collapsedFiles)
                 case .comments:
                     CommentsTab(detail: detail) {
                         if yours { CommentComposer(key: detail.key, fixes: fixes, onPosted: onReload) }
@@ -966,10 +1004,16 @@ private struct DescriptionTab: View {
     }
 }
 
+/// One cache for diff lines and Markdown blocks, bounded by source bytes.
+enum ReviewPresentation {
+    static let cache = ReviewPresentationCache()
+}
+
 private struct ChangesTab: View {
     let detail: MergeRequestDetail
-    @State private var collapsed: Set<String> = []
-    @State private var parsed: [String: [DiffLine]] = [:]
+    let renderRevision: UInt64
+    @Binding var collapsed: Set<String>
+    @State private var prepared: PreparedReviewDiff?
     @Environment(\.motionLevel) private var motion
 
     var body: some View {
@@ -988,20 +1032,18 @@ private struct ChangesTab: View {
             }
         }
         .collapsesHeader()
-        // Parsed once per version of the MR, not on every redraw, and away from the main thread so a
-        // large diff does not stall the page while it opens.
-        .task(id: detail.updatedAt) {
+        // Prepared off the main thread by the shared cache, keyed by what the diff actually contains,
+        // so a newer or different MR can never show lines parsed for another one.
+        .task(id: renderRevision) {
+            prepared = nil
             let files = detail.files
-            let fresh = await Task.detached {
-                Dictionary(
-                    files.compactMap { file in file.diff.map { (file.id, parseDiffLines($0)) } },
-                    uniquingKeysWith: { first, _ in first })
-            }.value
-            // A newer version of the MR may have arrived while this one was parsed.
+            guard let fresh = try? await ReviewPresentation.cache.diffs(
+                key: detail.key, headSha: detail.headSha, files: files) else { return }
             guard !Task.isCancelled else { return }
-            parsed = fresh
+            prepared = fresh
         }
     }
+
 
     private func fileHeader(_ file: DiffFile) -> some View {
         let open = !collapsed.contains(file.id)
@@ -1047,11 +1089,14 @@ private struct ChangesTab: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .padding(12)
-        } else if let lines = parsed[file.id] {
+        } else if let lines = prepared?.linesByFile[file.newPath] {
             ForEach(lines.indices, id: \.self) { DiffLineRow(line: lines[$0]) }
+        } else {
+            ProgressView().controlSize(.small).padding(12)
         }
     }
 }
+
 
 struct DiffLineRow: View {
     let line: DiffLine
@@ -1328,14 +1373,21 @@ struct MarkdownText: View {
     let source: String
     /// Makes GitLab's `/uploads/…` links absolute; nil for text that is not from a project.
     var projectURL: String?
+    @State private var prepared: (source: String, blocks: [MarkdownBlock])?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            let blocks = MarkdownCache.blocks(source)
+            let blocks = prepared?.source == source ? prepared!.blocks : []
             ForEach(blocks.indices, id: \.self) { view(for: blocks[$0]) }
         }
         .lineSpacing(3)
         .textSelection(.enabled)
+        .task(id: source) {
+            prepared = nil
+            guard let blocks = try? await ReviewPresentation.cache.blocks(source: source),
+                  !Task.isCancelled else { return }
+            prepared = (source, blocks)
+        }
     }
 
     private func inline(_ text: String) -> Text { Self.inline(text, projectURL: projectURL) }
@@ -1394,20 +1446,11 @@ struct MarkdownText: View {
         init(_ value: Value) { self.value = value }
     }
 
-    private static let blockCache = limited(NSCache<NSString, Entry<[MarkdownBlock]>>())
     private static let inlineCache = limited(NSCache<NSString, Entry<AttributedString>>())
 
     private static func limited<Value>(_ cache: NSCache<NSString, Value>) -> NSCache<NSString, Value> {
         cache.countLimit = 2000
         return cache
-    }
-
-    static func blocks(_ source: String) -> [MarkdownBlock] {
-        let key = source as NSString
-        if let hit = blockCache.object(forKey: key) { return hit.value }
-        let blocks = parseMarkdownBlocks(source)
-        blockCache.setObject(Entry(blocks), forKey: key)
-        return blocks
     }
 
     static func inline(_ text: String, projectURL: String?, make: () -> AttributedString) -> AttributedString {

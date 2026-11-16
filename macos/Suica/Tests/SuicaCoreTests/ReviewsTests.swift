@@ -30,11 +30,18 @@ private func detail(_ key: String, _ overrides: [String: Any] = [:]) throws -> M
         MergeRequestDetail.self, from: JSONSerialization.data(withJSONObject: object))
 }
 
+private actor CompletionProbe {
+    private(set) var isFinished = false
+    func markFinished() { isFinished = true }
+}
+
 actor FakeReviewsClient: ReviewsClient {
     var lists: [Result<ReviewListDocument, AgentError>]
     var detailResults: [String: Result<MergeRequestDetail, AgentError>] = [:]
     var gates: [String: Gate] = [:]
     private(set) var detailCalls: [String] = []
+    private(set) var activeDetailCalls = 0
+    private(set) var maxActiveDetailCalls = 0
     private(set) var listCalls = 0
     var listGate: Gate?
 
@@ -107,6 +114,9 @@ actor FakeReviewsClient: ReviewsClient {
 
     func mergeRequest(key: String) async throws(AgentError) -> MergeRequestDetail {
         detailCalls.append(key)
+        activeDetailCalls += 1
+        maxActiveDetailCalls = max(maxActiveDetailCalls, activeDetailCalls)
+        defer { activeDetailCalls -= 1 }
         let gate = gates.removeValue(forKey: key)
         let result = detailResults[key] ?? .failure(.launchFailed)
         if let gate { await gate.wait() }
@@ -209,7 +219,88 @@ actor FakeReviewsClient: ReviewsClient {
     #expect(model.selectedDetail?.key == "g/p!1")
 }
 
-@MainActor @Test func refreshReadsTheSelectedMRAgainAndForgetsTheOthers() async throws {
+@MainActor @Test func eightFreshSelectionsCanBeReselectedWithoutDetailReads() async throws {
+    let keys = (1...8).map { "g/p!\($0)" }
+    let client = FakeReviewsClient(lists: [.success(list(keys[0]))])
+    for key in keys { await client.setDetail(key, .success(try detail(key))) }
+    let model = ReviewsModel(client: client)
+    await model.refresh()
+    for key in keys.dropFirst() { await model.select(key) }
+    for key in keys.reversed() { await model.select(key) }
+    #expect(await client.detailCalls == keys)
+    #expect(model.details.count == 8)
+    #expect(model.selectedDetail?.key == keys[0])
+}
+
+@MainActor @Test func newestQueuedSelectionKeepsAtMostTwoDetailReads() async throws {
+    let client = FakeReviewsClient(lists: [.success(list("A", "B", "C", "D", "E"))])
+    let gateA = Gate()
+    let gateB = Gate()
+    await client.setDetail("A", .success(try detail("A")), gate: gateA)
+    await client.setDetail("B", .success(try detail("B")), gate: gateB)
+    let model = ReviewsModel(client: client)
+    let selectA = Task { await model.loadDetail("A") }
+    while await client.activeDetailCalls < 1 { await Task.yield() }
+    let selectB = Task { await model.select("B") }
+    while await client.activeDetailCalls < 2 { await Task.yield() }
+    let selectC = Task { await model.select("C") }
+    while model.queuedDetailKeyForTesting != "C" { await Task.yield() }
+    let selectD = Task { await model.select("D") }
+    while model.queuedDetailKeyForTesting != "D" { await Task.yield() }
+    let selectE = Task { await model.select("E") }
+    while model.queuedDetailKeyForTesting != "E" { await Task.yield() }
+
+    await gateA.open()
+    await gateB.open()
+    await selectA.value
+    await selectB.value
+    await selectC.value
+    await selectD.value
+    await selectE.value
+
+    #expect(await client.maxActiveDetailCalls <= 2)
+    #expect(await client.detailCalls == ["A", "B", "E"])
+    #expect(model.selectedKey == "E")
+    #expect(model.loadingKeys.isEmpty)
+}
+
+@MainActor @Test func queuedSelectionAwaitsItsDetailRead() async throws {
+    let client = FakeReviewsClient(lists: [.success(list("A", "B", "C"))])
+    let gateA = Gate()
+    let gateB = Gate()
+    let gateC = Gate()
+    await client.setDetail("A", .success(try detail("A")), gate: gateA)
+    await client.setDetail("B", .success(try detail("B")), gate: gateB)
+    await client.setDetail("C", .success(try detail("C")), gate: gateC)
+    let model = ReviewsModel(client: client)
+    let selectA = Task { await model.loadDetail("A") }
+    while await client.activeDetailCalls < 1 { await Task.yield() }
+    let selectB = Task { await model.select("B") }
+    while await client.activeDetailCalls < 2 { await Task.yield() }
+    let finished = CompletionProbe()
+    let selectC = Task {
+        await model.select("C")
+        await finished.markFinished()
+    }
+    while model.queuedDetailKeyForTesting != "C" { await Task.yield() }
+
+    await gateA.open()
+    while !(await client.detailCalls.contains("C")) { await Task.yield() }
+    #expect(!(await finished.isFinished))
+    #expect(model.loadingKeys.contains("C"))
+
+    await gateC.open()
+    await selectC.value
+    await gateB.open()
+    await selectA.value
+    await selectB.value
+
+    #expect(await finished.isFinished)
+    #expect(model.selectedDetail?.key == "C")
+    #expect(model.loadingKeys.isEmpty)
+}
+
+@MainActor @Test func refreshReusesFreshSelectedDetailAndRetainsRecentDetails() async throws {
     let client = FakeReviewsClient(lists: [.success(list("g/p!1", "g/p!2"))])
     await client.setDetail("g/p!1", .success(try detail("g/p!1")))
     await client.setDetail("g/p!2", .success(try detail("g/p!2")))
@@ -217,8 +308,8 @@ actor FakeReviewsClient: ReviewsClient {
     await model.refresh()
     await model.select("g/p!2")
     await model.refresh()
-    #expect(await client.detailCalls == ["g/p!1", "g/p!2", "g/p!2"])
-    #expect(model.details["g/p!1"] == nil)
+    #expect(await client.detailCalls == ["g/p!1", "g/p!2"])
+    #expect(model.details["g/p!1"] != nil)
     #expect(model.selectedDetail?.key == "g/p!2")
 }
 
@@ -234,12 +325,12 @@ actor FakeReviewsClient: ReviewsClient {
     let refresh = Task { await model.refresh() }
     while await client.listCalls < 2 { await Task.yield() }
     // Bounded, so a refresh that waits for the list fails here instead of hanging.
-    for _ in 0..<1_000 where await client.detailCalls.count < 3 { await Task.yield() }
-    #expect(await client.detailCalls.count == 3)
+    for _ in 0..<1_000 where await client.detailCalls.count < 2 { await Task.yield() }
+    #expect(await client.detailCalls.count == 2)
     #expect(model.loadingList)
     await gate.open()
     await refresh.value
-    #expect(await client.detailCalls == ["g/p!1", "g/p!2", "g/p!2"])
+    #expect(await client.detailCalls == ["g/p!1", "g/p!2"])
     #expect(model.selectedDetail?.key == "g/p!2")
 }
 
@@ -285,6 +376,41 @@ actor FakeReviewsClient: ReviewsClient {
     #expect(model.selectedDetail != nil)
 }
 
+@MainActor @Test func detailRenderRevisionTracksAcceptedDiffInputsOnly() async throws {
+    let client = FakeReviewsClient(lists: [.success(list("g/p!1", "g/p!2"))])
+    let original = try detail("g/p!1", ["headSha": "same", "files": [["oldPath": "a", "newPath": "a", "diff": "+x", "newFile": false, "renamedFile": false, "deletedFile": false]]])
+    let changed = try detail("g/p!1", ["headSha": "same", "files": [["oldPath": "a", "newPath": "a", "diff": "+y", "newFile": false, "renamedFile": false, "deletedFile": false]]])
+    await client.setDetail("g/p!1", .success(original))
+    let model = ReviewsModel(client: client)
+    await model.loadDetail("g/p!1")
+    let first = model.detailRenderRevision(for: "g/p!1")
+    await client.setDetail("g/p!1", .success(original))
+    await model.loadDetail("g/p!1")
+    #expect(model.detailRenderRevision(for: "g/p!1") == first)
+    await client.setDetail("g/p!1", .success(changed))
+    await model.loadDetail("g/p!1")
+    #expect(model.detailRenderRevision(for: "g/p!1") != first)
+    #expect(model.detailRenderRevision(for: "g/p!2") == 0)
+}
+
+@MainActor @Test func renderRevisionsFollowDetailEvictionAndRemoval() async throws {
+    let client = FakeReviewsClient(lists: [.success(list())])
+    let model = ReviewsModel(client: client)
+    for index in 1...12 {
+        let key = "g/p!\(index)"
+        await client.setDetail(key, .success(try detail(key)))
+        await model.select(key)
+        #expect(model.detailRenderRevisions.count <= 8)
+        #expect(Set(model.detailRenderRevisions.keys) == Set(model.details.keys))
+        #expect(model.detailRenderRevision(for: key) > 0)
+    }
+    #expect(model.detailRenderRevision(for: "g/p!1") == 0)
+    await model.select(nil)
+    await model.refresh()
+    #expect(model.details.isEmpty)
+    #expect(model.detailRenderRevisions.isEmpty)
+}
+
 @MainActor @Test func anOlderDetailLoadDoesNotOverwriteANewerOne() async throws {
     let client = FakeReviewsClient(lists: [.success(list("g/p!1"))])
     let gate = Gate()
@@ -293,12 +419,15 @@ actor FakeReviewsClient: ReviewsClient {
     let first = Task { await model.loadDetail("g/p!1") }
     while await client.detailCalls.isEmpty { await Task.yield() }
     await client.setDetail("g/p!1", .success(try detail("g/p!1")))
-    await model.loadDetail("g/p!1")
+    let second = Task { await model.loadDetail("g/p!1") }
+    // Same-key callers join the active read and request one trailing read.
     await gate.open()
     await first.value
+    await second.value
     #expect(model.details["g/p!1"] != nil)
     #expect(model.detailErrors["g/p!1"] == nil)
     #expect(model.loadingKeys.isEmpty)
+    #expect(await client.detailCalls == ["g/p!1", "g/p!1"])
 }
 
 // MARK: - Grouping
@@ -927,4 +1056,157 @@ private func options() throws -> ReviewOptions {
         {"key": "g/p!2", "title": "t", "url": "https://x", "draft": false, "author": {"username": "a", "name": "A"}, "reviewers": []}
         """.utf8)
     #expect(try JSONDecoder().decode(ReviewSummary.self, from: older).agentReviewPosted == false)
+}
+
+
+
+@MainActor @Test func idleAutomaticRefreshesReuseDetailsUntilThirtySeconds() async throws {
+    let client = FakeReviewsClient(lists: Array(repeating: .success(list("g/p!1")), count: 11))
+    await client.setDetail("g/p!1", .success(try detail("g/p!1", ["pipeline": NSNull()])))
+    let clock = Mutex(Date(timeIntervalSince1970: 0))
+    let model = ReviewsModel(client: client, now: { clock.withLock { $0 } })
+
+    await model.refresh(reason: .automatic)
+    for second in stride(from: 3, through: 27, by: 3) {
+        clock.withLock { $0 = Date(timeIntervalSince1970: TimeInterval(second)) }
+        await model.refresh(reason: .automatic)
+    }
+    #expect(await client.detailCalls == ["g/p!1"])
+
+    clock.withLock { $0 = Date(timeIntervalSince1970: 30) }
+    await model.refresh(reason: .automatic)
+    #expect(await client.detailCalls == ["g/p!1", "g/p!1"])
+}
+
+@MainActor @Test func activePipelineAutomaticRefreshesReuseDetailsUntilTenSeconds() async throws {
+    let client = FakeReviewsClient(lists: Array(repeating: .success(list("g/p!1")), count: 3))
+    await client.setDetail("g/p!1", .success(try detail("g/p!1")))
+    let clock = Mutex(Date(timeIntervalSince1970: 0))
+    let model = ReviewsModel(client: client, now: { clock.withLock { $0 } })
+
+    await model.refresh(reason: .automatic)
+    for second in [3, 6, 9] {
+        clock.withLock { $0 = Date(timeIntervalSince1970: TimeInterval(second)) }
+        await model.refresh(reason: .automatic)
+    }
+    #expect(await client.detailCalls == ["g/p!1"])
+
+    clock.withLock { $0 = Date(timeIntervalSince1970: 10) }
+    await model.refresh(reason: .automatic)
+    #expect(await client.detailCalls == ["g/p!1", "g/p!1"])
+}
+
+@MainActor @Test func manualRefreshBypassesDetailFreshness() async throws {
+    let client = FakeReviewsClient(lists: [.success(list("g/p!1")), .success(list("g/p!1"))])
+    await client.setDetail("g/p!1", .success(try detail("g/p!1", ["pipeline": NSNull()])))
+    let clock = Mutex(Date(timeIntervalSince1970: 0))
+    let model = ReviewsModel(client: client, now: { clock.withLock { $0 } })
+
+    await model.refresh(reason: .automatic)
+    clock.withLock { $0 = Date(timeIntervalSince1970: 1) }
+    await model.refresh(reason: .manual)
+    #expect(await client.detailCalls == ["g/p!1", "g/p!1"])
+}
+
+@MainActor @Test func overlappingRefreshesShareReads() async throws {
+    let client = FakeReviewsClient(lists: [.success(list("g/p!1"))])
+    await client.setDetail("g/p!1", .success(try detail("g/p!1")))
+    let model = ReviewsModel(client: client)
+    async let a: Void = model.refresh()
+    async let b: Void = model.refresh()
+    async let c: Void = model.refresh()
+    _ = await (a, b, c)
+    #expect(await client.listCalls == 1)
+    #expect(await client.detailCalls == ["g/p!1"])
+}
+
+@MainActor @Test func actionQueuesOneTrailingRead() async throws {
+    let client = FakeReviewsClient(lists: [.success(list("g/p!1"))])
+    await client.setDetail("g/p!1", .success(try detail("g/p!1")))
+    let model = ReviewsModel(client: client)
+    await model.refresh()
+    await model.refresh(reason: .action)
+    #expect(await client.detailCalls.count == 2)
+}
+
+@MainActor @Test func detailsCacheRemainsBounded() async throws {
+    let keys = (1...10).map { "g/p!\($0)" }
+    let client = FakeReviewsClient(lists: [.success(list(keys[0]))])
+    for key in keys { await client.setDetail(key, .success(try detail(key))) }
+    let model = ReviewsModel(client: client)
+    await model.refresh()
+    for key in keys.dropFirst() { await model.select(key) }
+    #expect(model.details.count <= 8)
+}
+
+@MainActor @Test func threeForcedSameKeyJoinsProduceOneTrailingRead() async throws {
+    let client = FakeReviewsClient(lists: [.success(list("g/p!1"))])
+    let old = try detail("g/p!1")
+    let replacement = try detail("g/p!1", ["title": "trailing"])
+    await client.setDetail("g/p!1", .success(old))
+    let model = ReviewsModel(client: client)
+    await model.refresh()
+
+    let gate = Gate()
+    await client.setDetail("g/p!1", .success(replacement), gate: gate)
+    let first = Task { await model.loadDetail("g/p!1") }
+    while await client.detailCalls.count < 2 { await Task.yield() }
+    let second = Task { await model.loadDetail("g/p!1") }
+    let third = Task { await model.loadDetail("g/p!1") }
+    await Task.yield()
+    await gate.open()
+    _ = await (first.value, second.value, third.value)
+
+    #expect(await client.detailCalls.count == 3)
+    #expect(model.details["g/p!1"]?.title == "trailing")
+    #expect(model.loadingKeys.isEmpty)
+}
+
+
+@MainActor @Test func stoppedListRefreshDoesNotStartNewDetailRead() async throws {
+    let client = FakeReviewsClient(lists: [.success(list("g/p!1"))])
+    await client.setDetail("g/p!1", .success(try detail("g/p!1")))
+    let gate = Gate()
+    await client.setListGate(gate)
+    let model = ReviewsModel(client: client)
+
+    let refresh = Task { await model.refresh() }
+    while await client.listCalls < 1 { await Task.yield() }
+    model.stopRefreshing()
+    await gate.open()
+    await refresh.value
+
+    #expect(await client.detailCalls.isEmpty)
+    #expect(model.loadingKeys.isEmpty)
+    #expect(!model.loadingList)
+
+    await model.show(.reviewing)
+    await model.refresh()
+    #expect(await client.detailCalls == ["g/p!1"])
+}
+
+@MainActor @Test func aDelayedPreviousSelectionCannotReplaceTheCurrentSelection() async throws {
+    let client = FakeReviewsClient(lists: [.success(list("g/p!1", "g/p!2"))])
+    await client.setDetail("g/p!1", .success(try detail("g/p!1")))
+    await client.setDetail("g/p!2", .success(try detail("g/p!2")))
+    let model = ReviewsModel(client: client)
+    await model.refresh()
+
+    let gate = Gate()
+    await client.setDetail("g/p!1", .success(try detail("g/p!1")), gate: gate)
+    let delayedA = Task { await model.loadDetail("g/p!1") }
+    while await client.detailCalls.count < 2 { await Task.yield() }
+
+    await model.select("g/p!2")
+    #expect(model.selectedKey == "g/p!2")
+    #expect(model.selectedDetail?.key == "g/p!2")
+    #expect(model.loadingKeys == ["g/p!1"])
+
+    await gate.open()
+    await delayedA.value
+    #expect(model.selectedKey == "g/p!2")
+    #expect(model.selectedDetail?.key == "g/p!2")
+    #expect(model.details["g/p!1"] != nil)
+    #expect(model.details.count <= 8)
+    #expect(model.loadingKeys.isEmpty)
 }

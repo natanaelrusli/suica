@@ -7,6 +7,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
@@ -30,7 +31,13 @@ import { execFailure } from "./exec.ts";
 import { DEFAULT_ALERTS } from "./alerts.ts";
 import type { AlertName, AlertTemplates } from "./alerts.ts";
 import { clean, renderAlert } from "./format.ts";
-import { descriptionSha } from "./gitlab.ts";
+import { descriptionSha, fetchCurrentUsername, FetchFailure } from "./gitlab.ts";
+import {
+  assertReviewCoverage,
+  loadReviewInput,
+  versionSchema,
+  versionsSchema,
+} from "./review-input.ts";
 import type { GraphqlRunner, PostJsonRunner, PostRunner, RestRunner } from "./gitlab.ts";
 import { extractFindings, placeFinding, summaryWithout } from "./inline-review.ts";
 import type { Finding, ThreadPosition } from "./inline-review.ts";
@@ -50,6 +57,10 @@ import type { InvocationMode, ReviewEffort, RunResult } from "./review-runner.ts
 import { approveMergeRequest, fetchMrDetail, parseMrKey, resolveOwnThreads } from "./reviews.ts";
 import type { ApproveOutcome, DiffFileJson, MrDetailJson, ResolveOutcome } from "./reviews.ts";
 import type { AgentReviewRow, Store, TokenPurpose } from "./store.ts";
+import { resumeReviewPosting } from "./review-post.ts";
+import { sanitizeForGitLab } from "./review-sanitize.ts";
+import { measureReviewStage } from "./review-timing.ts";
+export { sanitizeForGitLab } from "./review-sanitize.ts";
 
 /** Agent Review: an MR reviewed by a coding agent CLI with a skill, posted only after approval. */
 
@@ -61,50 +72,6 @@ const MAX_NOTE_CHARS = 100_000;
 const MAX_SKILL_CHARS = 120_000;
 /** How often a running review checks whether the Owner cancelled it from another process. */
 const CANCEL_CHECK_MS = 2_000;
-
-// MARK: - Sanitising for GitLab
-
-/** Applies `change` to the parts of a line outside inline code spans. */
-function outsideInlineCode(line: string, change: (text: string) => string): string {
-  return line
-    .split("`")
-    .map((part, index) => (index % 2 === 0 ? change(part) : part))
-    .join("`");
-}
-
-function stripMentionsAndLinks(text: string): string {
-  return (
-    text
-      // [label](url) keeps its label; <url> and bare URLs go.
-      .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
-      .replace(/<https?:\/\/[^>\s]*>/g, "(link removed)")
-      .replace(/\bhttps?:\/\/[^\s)>\]]+/g, "(link removed)")
-      // @user and @group/sub notify people; an email address (word before @) is left alone.
-      .replace(/(^|[^\w@])@(?=[\w.-]*\w)/g, "$1")
-  );
-}
-
-/**
- * Makes model output safe to post as the Owner: outside code, a line starting with `/` is escaped
- * so GitLab does not run it as a quick action, @mentions are removed so nobody is notified, and
- * links are removed. GitLab ignores quick actions and mentions inside code, so code stays as written.
- */
-export function sanitizeForGitLab(markdown: string): string {
-  let inFence = false;
-  return markdown
-    .replace(/\r\n/g, "\n")
-    .split("\n")
-    .map((line) => {
-      if (/^\s*(```|~~~)/.test(line)) {
-        inFence = !inFence;
-        return line;
-      }
-      if (inFence) return line;
-      const escaped = line.replace(/^(\s*)\//, "$1\\/");
-      return outsideInlineCode(escaped, stripMentionsAndLinks);
-    })
-    .join("\n");
-}
 
 const CLI_NAMES: Readonly<Record<string, string>> = {
   claude: "Claude Code",
@@ -322,6 +289,7 @@ export interface ReviewDeps {
   /** Post with `review.post: auto`; without them a ready review always waits for the Owner. */
   readonly post?: PostRunner;
   readonly postJson?: PostJsonRunner;
+  readonly removeReviewDirectory?: (path: string) => Promise<void>;
   /** The Owner's notification texts; the built-in ones when absent. */
   readonly alerts?: AlertTemplates;
 }
@@ -438,12 +406,29 @@ export async function cloneSourceBranch(
   repoDir: string,
   /** Keeps the git folder here instead of inside `repoDir`. */
   gitDir?: string,
+  expectedHeadSha?: string,
 ): Promise<string> {
   const parts = parseMrKey(detail.key);
   if (parts === undefined) throw new RunFailure("malformed merge request key");
-  const project = projectSchema.safeParse(
-    await deps.rest(`projects/${encodeURIComponent(parts.projectPath)}`),
-  );
+  let projectPath = `projects/${encodeURIComponent(parts.projectPath)}`;
+  if (expectedHeadSha !== undefined) {
+    const mergeRequest = await deps.rest(`${projectPath}/merge_requests/${parts.iid}`);
+    const sourceProjectId =
+      typeof mergeRequest === "object" &&
+      mergeRequest !== null &&
+      "source_project_id" in mergeRequest
+        ? mergeRequest.source_project_id
+        : undefined;
+    if (
+      typeof sourceProjectId !== "number" ||
+      !Number.isInteger(sourceProjectId) ||
+      sourceProjectId <= 0
+    ) {
+      throw new RunFailure("GitLab gave no usable source project for the merge request");
+    }
+    projectPath = `projects/${sourceProjectId}`;
+  }
+  const project = projectSchema.safeParse(await deps.rest(projectPath));
   if (!project.success || !SSH_URL.test(project.data.ssh_url_to_repo)) {
     throw new RunFailure("GitLab gave no usable SSH clone URL for the project");
   }
@@ -462,7 +447,7 @@ export async function cloneSourceBranch(
         "--depth=1",
         "--single-branch",
         "--no-tags",
-        `--branch=${detail.sourceBranch}`,
+        ...(expectedHeadSha === undefined ? [`--branch=${detail.sourceBranch}`] : []),
         ...(gitDir === undefined ? [] : [`--separate-git-dir=${gitDir}`]),
         "--",
         project.data.ssh_url_to_repo,
@@ -476,7 +461,31 @@ export async function cloneSourceBranch(
     const { stdout } = await deps.exec("git", ["-C", repoDir, "rev-parse", "HEAD"], {
       timeoutMs: GIT_TIMEOUT_MS,
     });
-    return stdout.trim();
+    const clonedHead = stdout.trim();
+    if (expectedHeadSha !== undefined) {
+      if (clonedHead !== expectedHeadSha) {
+        await deps.exec(
+          "git",
+          ["-C", repoDir, "fetch", "--depth=1", "--no-tags", "origin", expectedHeadSha],
+          {
+            timeoutMs: GIT_TIMEOUT_MS,
+            ...(deps.signal === undefined ? {} : { signal: deps.signal }),
+          },
+        );
+      }
+      await deps.exec("git", ["-C", repoDir, "checkout", "--detach", expectedHeadSha], {
+        timeoutMs: GIT_TIMEOUT_MS,
+        ...(deps.signal === undefined ? {} : { signal: deps.signal }),
+      });
+      const { stdout: verified } = await deps.exec("git", ["-C", repoDir, "rev-parse", "HEAD"], {
+        timeoutMs: GIT_TIMEOUT_MS,
+        ...(deps.signal === undefined ? {} : { signal: deps.signal }),
+      });
+      if (verified.trim() !== expectedHeadSha)
+        throw new RunFailure("exact reviewed commit is unavailable");
+      return verified.trim();
+    }
+    return clonedHead;
   } catch (error) {
     const failure = execFailure(error);
     const reason = (failure.stderr ?? "").includes("Permission denied")
@@ -580,11 +589,18 @@ export async function runAgentReview(baseDeps: ReviewDeps, row: AgentReviewRow):
     const chosenModel = row.modelChoice ?? deps.config.review.model;
     store.transitionAgentReview(row.id, ["running"], "running", { cli: cliId, skill }, deps.now());
 
-    const detail = await fetchMrDetail(deps.graphql, deps.rest, row.mrKey);
+    const stage = (name: "input" | "checkout" | "model" | "judge" | "posting", run: () => Promise<any>) => measureReviewStage(row.id, name, deps.now, (record) => log.info("agent review stage", { review_id: record.reviewId, stage: record.stage, duration_ms: record.durationMs, outcome: record.outcome }), run);
+    const { detail, reviewInput } = await stage("input", async () => {
+      const detail = await fetchMrDetail(deps.graphql, deps.rest, row.mrKey);
+      if (detail.draft) throw new Skip("the MR is a draft");
+      const reviewInput = await loadReviewInput(deps.rest, detail);
+      assertReviewCoverage(reviewInput);
+      return { detail, reviewInput };
+    });
     mrTitle = detail.title;
     store.transitionAgentReview(row.id, ["running"], "running", { mrTitle }, deps.now());
-    if (detail.draft) throw new Skip("the MR is a draft");
-    const lines = changedLines(detail);
+    const reviewDetail = reviewInput.detail;
+    const lines = changedLines(reviewDetail);
     if (lines > deps.config.review.maxChangedLines) {
       throw new Skip(
         `the MR changes ${lines} lines, more than review.maxChangedLines (${deps.config.review.maxChangedLines})`,
@@ -599,21 +615,29 @@ export async function runAgentReview(baseDeps: ReviewDeps, row: AgentReviewRow):
 
     workDir = mkdtempSync(join(tmpdir(), "suica-review-"));
     store.appendAgentReviewActivity(row.id, deps.now(), "Cloning the source branch");
-    const headSha = await cloneSourceBranch(deps, detail, join(workDir, "repo"));
+    const headSha = await stage("checkout", () => cloneSourceBranch(
+      deps,
+      reviewDetail,
+      join(workDir, "repo"),
+      undefined,
+      reviewInput.headSha,
+    ));
+    if (headSha !== reviewInput.headSha)
+      throw new RunFailure("checked out commit does not match reviewed diff version");
     const descriptionHash = descriptionSha(detail.description);
     if (
       store.hasAgentReviewAt(row.mrKey, headSha, descriptionHash, skill, deps.config.review.skill)
     )
       throw new Skip("this commit was already reviewed");
-    writeFileSync(join(workDir, "mr.diff"), renderDiff(detail.files));
-    writeFileSync(join(workDir, "mr.md"), renderMrFile(detail));
+    writeFileSync(join(workDir, "mr.diff"), renderDiff(reviewDetail.files));
+    writeFileSync(join(workDir, "mr.md"), renderMrFile(reviewDetail));
     const rereview = await prepareRereview(deps, row, headSha, descriptionHash, skill, workDir);
 
     const prompt = buildPrompt({
       cli: cliId,
       skill,
       skillText,
-      detail,
+      detail: reviewDetail,
       headSha,
       ...(rereview === undefined ? {} : { rereview }),
     });
@@ -627,9 +651,10 @@ export async function runAgentReview(baseDeps: ReviewDeps, row: AgentReviewRow):
       changed_lines: lines,
       rereview: rereview !== undefined,
       incremental: rereview?.incremental ?? false,
+      queue_wait_ms: Math.max(0, started - row.createdAt),
     });
     store.appendAgentReviewActivity(row.id, deps.now(), `Starting ${CLI_NAMES[cliId] ?? cliId}`);
-    const result = await runCli(
+    const result = await stage("model", () => runCli(
       deps,
       cliId,
       path,
@@ -644,13 +669,13 @@ export async function runAgentReview(baseDeps: ReviewDeps, row: AgentReviewRow):
         timeoutMinutes: deps.config.review.timeoutMinutes,
         mode: "review",
       },
-    );
+    ));
     if (result.tokens !== null) {
       store.recordTokenUsage({ at: deps.now(), purpose: "review", ...result.tokens });
     }
     const approval =
       deps.config.review.approveBy === "agent"
-        ? await judgeApproval(deps, row.id, cliId, path, chosenModel, result.body, workDir)
+        ? await stage("judge", () => judgeApproval(deps, row.id, cliId, path, chosenModel, result.body, workDir!))
         : undefined;
     const model = result.model ?? chosenModel;
     const ready = store.transitionAgentReview(
@@ -692,10 +717,10 @@ export async function runAgentReview(baseDeps: ReviewDeps, row: AgentReviewRow):
       deps.post !== undefined &&
       deps.postJson !== undefined
     ) {
-      const outcome = await postAgentReview(
+      const outcome = await stage("posting", () => postAgentReview(
         { ...deps, post: deps.post, postJson: deps.postJson },
         row.id,
-      );
+      ));
       log.info("agent review posted automatically", { id: row.id, mr_key: row.mrKey, outcome });
       const approved = store.getAgentReview(row.id)?.approved === true;
       await notifyQuietly(
@@ -751,7 +776,16 @@ export async function runAgentReview(baseDeps: ReviewDeps, row: AgentReviewRow):
     );
   } finally {
     clearInterval(watch);
-    if (workDir !== undefined) rmSync(workDir, { recursive: true, force: true });
+    if (workDir !== undefined) {
+      const cleanupStarted = deps.now();
+      try {
+        await (deps.removeReviewDirectory ?? ((path) => rm(path, { recursive: true, force: true })))(workDir);
+        log.info("agent review stage", { review_id: row.id, stage: "cleanup", duration_ms: Math.max(0, deps.now() - cleanupStarted), outcome: "ok" });
+      } catch (error) {
+        log.warn("agent review cleanup failed", { review_id: row.id, category: error instanceof Error ? error.name : "unknown" });
+        log.info("agent review stage", { review_id: row.id, stage: "cleanup", duration_ms: Math.max(0, deps.now() - cleanupStarted), outcome: "failed" });
+      }
+    }
   }
 }
 
@@ -1023,18 +1057,6 @@ export function tickEvery(worker: ReviewWorker, everyMs: number, signal: AbortSi
 export type PostOutcome = "posted" | "nothing" | "failed";
 export type PostMode = Config["review"]["postAs"];
 
-const versionsSchema = z.array(
-  z.object({
-    id: z.number(),
-    head_commit_sha: z.string(),
-    base_commit_sha: z.string(),
-    start_commit_sha: z.string(),
-  }),
-);
-const versionSchema = z.object({
-  diffs: z.array(z.object({ old_path: z.string(), new_path: z.string(), diff: z.string() })),
-});
-
 interface Thread {
   readonly finding: Finding;
   readonly position: ThreadPosition;
@@ -1096,51 +1118,118 @@ export async function postAgentReview(
 ): Promise<PostOutcome> {
   const { store, log } = deps;
   const row = store.getAgentReview(id);
-  if (row?.status !== "ready" || row.body === null) return "nothing";
+  if ((row?.status !== "ready" && row?.status !== "posting") || row.body === null) return "nothing";
   const parts = parseMrKey(row.mrKey);
   if (parts === undefined) return "nothing";
-  if (!store.transitionAgentReview(id, ["ready"], "posting", {}, deps.now())) return "nothing";
   const mrPath = `projects/${encodeURIComponent(parts.projectPath)}/merge_requests/${parts.iid}`;
-
-  let plan: { findings: Finding[]; threads: Thread[] } = { findings: [], threads: [] };
-  if (mode === "inline") {
-    try {
-      plan = await planThreads(deps.rest, mrPath, row);
-    } catch (error) {
-      plan = { findings: extractFindings(row.body), threads: [] };
-      log.warn("agent review diff lookup failed", { id, reason: errorName(error) });
-    }
-  }
-  const posted: Finding[] = [];
-  for (const thread of plan.threads) {
-    try {
-      await deps.postJson(`${mrPath}/discussions`, {
-        body: renderThread(thread.finding, row.previousSha !== null),
-        position: thread.position,
-      });
-      posted.push(thread.finding);
-    } catch (error) {
-      log.warn("agent review thread refused", { id, reason: errorName(error) });
-    }
-  }
-
+  let current: MrDetailJson;
   try {
-    const body = posted.length === 0 ? row.body : summaryWithout(row.body, posted);
-    await deps.post(`${mrPath}/notes`, {
-      body: renderNote(row, row.skill ?? deps.config.review.skill, body),
-    });
+    current = await fetchMrDetail(deps.graphql, deps.rest, row.mrKey);
   } catch (error) {
-    const detail =
-      posted.length === 0
-        ? "Posting failed. Check the MR in GitLab before posting again: it may have arrived."
-        : `${posted.length} inline comments were posted, but the summary comment was not. Check the MR in GitLab before posting again: posting again repeats them.`;
-    store.transitionAgentReview(id, ["posting"], "ready", { detail }, deps.now());
-    log.warn("agent review post failed", { id, reason: errorName(error) });
+    const detail = `Could not verify the MR is still the reviewed version (${errorName(error)}). Review the MR again before posting.`;
+    if (row.status === "ready")
+      store.transitionAgentReview(id, ["ready"], "ready", { detail }, deps.now());
+    log.warn("agent review freshness lookup failed", { id, reason: errorName(error) });
     return "failed";
   }
-  const detail = mode === "inline" ? inlineDetail(posted.length, plan.findings.length) : "";
-  store.transitionAgentReview(id, ["posting"], "posted", { detail }, deps.now());
-  await approveAfterPost(deps, row, detail);
+  if (
+    row.headSha === null ||
+    row.descriptionSha === null ||
+    current.headSha !== row.headSha ||
+    descriptionSha(current.description) !== row.descriptionSha
+  ) {
+    const detail = "The MR changed since this review. Review the MR again before posting.";
+    if (row.status === "ready")
+      store.transitionAgentReview(id, ["ready"], "ready", { detail }, deps.now());
+    log.info("agent review posting refused for stale input", { id });
+    return "nothing";
+  }
+  let ownerUsername: string;
+  try {
+    ownerUsername = await fetchCurrentUsername(deps.rest);
+  } catch (error) {
+    const detail = `Could not verify the authenticated GitLab user (${errorName(error)}). Review was not posted.`;
+    if (row.status === "ready")
+      store.transitionAgentReview(id, ["ready"], "ready", { detail }, deps.now());
+    log.warn("agent review owner lookup failed", { id, reason: errorName(error) });
+    return "failed";
+  }
+
+  const result = await resumeReviewPosting(
+    {
+      store,
+      post: deps.post,
+      postJson: deps.postJson,
+      rest: deps.rest,
+      log: (message) => log.warn("agent review posting held", { id, reason: message }),
+      now: deps.now,
+      ownerUsername,
+      preflight: async () => {
+        try {
+          const latest = await fetchMrDetail(deps.graphql, deps.rest, row.mrKey);
+          return (
+            row.headSha !== null &&
+            row.descriptionSha !== null &&
+            latest.headSha === row.headSha &&
+            descriptionSha(latest.description) === row.descriptionSha
+          );
+        } catch (error) {
+          log.warn("agent review freshness lookup failed", { id, reason: errorName(error) });
+          return false;
+        }
+      },
+      completionDetail: (frozenParts) => {
+        if (frozenParts.some((part) => part.kind === "inline")) {
+          const posted = frozenParts.filter((part) => part.kind === "inline").length;
+          return inlineDetail(posted, extractFindings(row.body ?? "").length);
+        }
+        return "";
+      },
+      buildPlan: async () => {
+        let plan: { findings: Finding[]; threads: Thread[] } = { findings: [], threads: [] };
+        if (mode === "inline") {
+          try {
+            plan = await planThreads(deps.rest, mrPath, row);
+          } catch (error) {
+            plan = { findings: extractFindings(row.body ?? ""), threads: [] };
+          }
+        }
+        const planned = new Set(plan.threads.map((thread) => thread.finding.number));
+        const summary = summaryWithout(
+          row.body ?? "",
+          plan.findings.filter((finding) => planned.has(finding.number)),
+        );
+        const inline = plan.threads.map((thread, index) => ({
+          key: `inline-${index + 1}`,
+          kind: "inline" as const,
+          endpoint: `${mrPath}/discussions`,
+          payload: JSON.stringify({
+            body: renderThread(thread.finding, row.previousSha !== null),
+            position: thread.position,
+          }),
+          state: "pending" as const,
+          remoteId: null,
+        }));
+        return [
+          ...inline,
+          {
+            key: "summary",
+            kind: "summary" as const,
+            endpoint: `${mrPath}/notes`,
+            payload: JSON.stringify({
+              body: renderNote(row, row.skill ?? deps.config.review.skill, summary),
+            }),
+            state: "pending" as const,
+            remoteId: null,
+          },
+        ];
+      },
+    },
+    id,
+  );
+  if (result === "nothing") return "nothing";
+  if (result === "held") return "failed";
+  await approveAfterPost(deps, row, store.getAgentReview(id)?.detail ?? "");
   return "posted";
 }
 

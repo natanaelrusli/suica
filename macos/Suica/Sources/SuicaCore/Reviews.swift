@@ -558,6 +558,8 @@ public protocol ReviewsClient: Sendable {
 
 // MARK: - Model
 
+public enum ReviewRefreshReason: Sendable, Equatable { case automatic, manual, action }
+
 /// The Review requests page: the list, the selected MR and its details. Each refresh reads the
 /// selected MR again, so new comments and pushes show up, and forgets the other MRs' details.
 @MainActor @Observable
@@ -568,6 +570,8 @@ public final class ReviewsModel {
     public private(set) var loadingList = false
     public private(set) var selectedKey: String?
     public private(set) var details: [String: MergeRequestDetail] = [:]
+    /// Changes only when accepted diff inputs for an MR change.
+    public private(set) var detailRenderRevisions: [String: UInt64] = [:]
     public private(set) var detailErrors: [String: String] = [:]
     public private(set) var loadingKeys: Set<String> = []
     /// MRs with an Agent Review action in flight.
@@ -589,9 +593,27 @@ public final class ReviewsModel {
     @ObservationIgnored private let client: any ReviewsClient
     @ObservationIgnored private var latestRefresh = 0
     @ObservationIgnored private var latestDetail: [String: Int] = [:]
+    @ObservationIgnored private let now: @Sendable () -> Date
+    @ObservationIgnored private var detailCache = ReviewDetailCache()
+    @ObservationIgnored private var detailTasks: [String: Task<Void, Never>] = [:]
+    @ObservationIgnored private var listTask: Task<Void, Never>?
+    @ObservationIgnored private var stopped = false
+    @ObservationIgnored private var forcedRefreshPending = false
+    @ObservationIgnored private var activeDetailReads = 0
+    @ObservationIgnored private var queuedDetailRequest: QueuedDetailRequest?
+    var queuedDetailKeyForTesting: String? { queuedDetailRequest?.key }
+    @ObservationIgnored private var detailForcePending: Set<String> = []
 
-    public init(client: any ReviewsClient) {
+    @MainActor private struct QueuedDetailRequest {
+        let key: String
+        let keepingNotice: Bool
+        let force: Bool
+        var waiters: [CheckedContinuation<Void, Never>]
+    }
+
+    public init(client: any ReviewsClient, now: @escaping @Sendable () -> Date = Date.init) {
         self.client = client
+        self.now = now
     }
 
     /// The Owner closed the outcome of the last Agent Review action.
@@ -604,6 +626,8 @@ public final class ReviewsModel {
     public func dismissApprovalNotice(_ key: String) { approvalNotices[key] = nil }
 
     public var selectedDetail: MergeRequestDetail? { selectedKey.flatMap { details[$0] } }
+
+    public func detailRenderRevision(for key: String) -> UInt64 { detailRenderRevisions[key, default: 0] }
 
     /// True for one of your own MRs: its page offers Agent Fix, a comment and Merge.
     public func isYours(_ key: String) -> Bool {
@@ -652,6 +676,7 @@ public final class ReviewsModel {
 
     /// Opens a page: keeps the selection when the page lists it, else selects the page's first MR.
     public func show(_ scope: ReviewScope) async {
+        stopped = false
         self.scope = scope
         guard let list else { return }
         let keys = list.keys(in: scope)
@@ -691,7 +716,7 @@ public final class ReviewsModel {
         guard !runningWaitingRereviews else { return }
         runningWaitingRereviews = true
         defer { runningWaitingRereviews = false }
-        await refresh()
+        await refresh(reason: .automatic)
         let due = list?.mergeRequests.filter { $0.rereviewWaiting?.reason == "waiting" }.map(\.key) ?? []
         for key in due { await queueAgentReview(key, choice: ReviewChoice(automatic: true)) }
     }
@@ -748,7 +773,7 @@ public final class ReviewsModel {
         }
         approvingKeys.remove(key)
         // The approved MR is the selected one, so the refresh reads it again too.
-        await refresh()
+        await refresh(reason: .action)
     }
 
     /// One action per MR at a time; the list is read again afterwards so the state is current.
@@ -763,17 +788,46 @@ public final class ReviewsModel {
             agentBanner = MenuModel.message(for: error)
         }
         agentBusyKeys.remove(key)
-        await refresh()
+        await refresh(reason: .action)
     }
 
-    public func refresh() async {
+    public func refresh(reason: ReviewRefreshReason = .automatic) async {
+        if reason == .automatic, stopped { return }
+        if let listTask {
+            if reason != .automatic { forcedRefreshPending = true }
+            await listTask.value
+            return
+        }
+        if reason != .automatic { forcedRefreshPending = false }
+        let operation = Task { await self.performRefresh(reason: reason) }
+        listTask = operation
+        await operation.value
+        listTask = nil
+        if forcedRefreshPending && !stopped {
+            forcedRefreshPending = false
+            await refresh(reason: .manual)
+        }
+    }
+
+    public func stopRefreshing() {
+        stopped = true
+        let queued = queuedDetailRequest
+        queuedDetailRequest = nil
+        if let queued {
+            loadingKeys.remove(queued.key)
+            queued.waiters.forEach { $0.resume() }
+        }
+    }
+
+    private func performRefresh(reason: ReviewRefreshReason) async {
         latestRefresh += 1
         let mine = latestRefresh
         loadingList = true
         defer { if mine == latestRefresh { loadingList = false } }
         // The selected MR is read while the list loads, not after it: each is its own GitLab round trip.
         let early = selectedKey
-        let earlyLoad = early.map { key in Task { await loadDetail(key, keepingNotice: true) } }
+        if reason == .manual || reason == .action, let early { detailCache.invalidate(early) }
+        let earlyLoad = early.map { key in Task { await loadDetail(key, keepingNotice: true, force: reason != .automatic) } }
         do {
             let fresh = try await client.reviews()
             guard mine == latestRefresh else { return }
@@ -781,6 +835,13 @@ public final class ReviewsModel {
             if list != fresh { list = fresh }
             if errorText != nil { errorText = nil }
             let keys = Set(fresh.mergeRequests.map(\.key) + fresh.yourMergeRequests.map(\.key))
+            let removed = Set(detailCacheKeys()).subtracting(keys)
+            detailCache.remove(keys: removed)
+            for key in removed {
+                details[key] = nil
+                detailErrors[key] = nil
+                detailRenderRevisions[key] = nil
+            }
             if let selected = selectedKey, !keys.contains(selected) { selectedKey = nil }
             // The page's first row, so on Merge requests one that waits for the Owner when there is one.
             if selectedKey == nil { selectedKey = fresh.keys(in: scope).first }
@@ -789,35 +850,113 @@ public final class ReviewsModel {
             let message = MenuModel.message(for: error)
             if errorText != message { errorText = message }
         }
-        if let key = selectedKey, key != early { await loadDetail(key, keepingNotice: true) }
+        if !stopped, let key = selectedKey, key != early { await loadDetail(key, keepingNotice: true) }
         await earlyLoad?.value
         // After the early load, so the detail of an MR that left the list is not stored again.
-        if details.keys.contains(where: { $0 != selectedKey }) { details = details.filter { $0.key == selectedKey } }
+        // Keep recently viewed details in the bounded cache.
     }
+
+    private func detailCacheKeys() -> [String] { Array(details.keys) }
 
     public func select(_ key: String?) async {
         selectedKey = key
-        guard let key, details[key] == nil, !loadingKeys.contains(key) else { return }
+        guard let key else { return }
+        if details[key] == nil, let cached = detailCache.value(for: key, now: now()) { details[key] = cached }
+        let lifetime: TimeInterval = selectedDetail?.pipeline?.isActive == true ? 10 : 30
+        guard !detailCache.isFresh(key, now: now(), lifetime: lifetime) else { return }
         await loadDetail(key)
     }
 
     /// Fetches the MR again even when it is cached; the latest load per MR is the one stored.
     /// A reload of your own drops the last approval's outcome; a refresh keeps it.
-    public func loadDetail(_ key: String, keepingNotice: Bool = false) async {
+    public func loadDetail(_ key: String, keepingNotice: Bool = false) async { await loadDetail(key, keepingNotice: keepingNotice, force: true) }
+
+    private func loadDetail(_ key: String, keepingNotice: Bool, force: Bool) async {
+        guard !stopped else { return }
+        if !force, detailCache.isFresh(key, now: now(), lifetime: details[key]?.pipeline?.isActive == true ? 10 : 30) { return }
+        if let existing = detailTasks[key] {
+            // The in-flight read owns the pending force bit. Joining callers only
+            // request the same trailing read; they must not invalidate that read.
+            if force { detailForcePending.insert(key) }
+            await existing.value
+            // Completion may install a single trailing operation. All joined
+            // callers remain suspended until that owner has finished it.
+            while detailTasks[key] != nil { await Task.yield() }
+            return
+        }
+        if activeDetailReads >= 2 {
+            await withCheckedContinuation { continuation in
+                if let displaced = queuedDetailRequest {
+                    loadingKeys.remove(displaced.key)
+                    displaced.waiters.forEach { $0.resume() }
+                }
+                queuedDetailRequest = QueuedDetailRequest(key: key, keepingNotice: keepingNotice, force: force, waiters: [continuation])
+            }
+            return
+        }
+        let (operation, mine) = startDetailRequest(key, keepingNotice: keepingNotice)
+        await operation.value
+        completeDetailRequest(key, mine: mine)
+    }
+
+    private func startDetailRequest(_ key: String, keepingNotice: Bool) -> (Task<Void, Never>, Int) {
         if !keepingNotice && !approvingKeys.contains(key) { approvalNotices[key] = nil }
         let mine = (latestDetail[key] ?? 0) + 1
         latestDetail[key] = mine
         loadingKeys.insert(key)
-        defer { if latestDetail[key] == mine { loadingKeys.remove(key) } }
+        activeDetailReads += 1
+        let operation = Task { @MainActor in
         do {
             let fresh = try await client.mergeRequest(key: key)
             guard latestDetail[key] == mine else { return }
+            detailCache.store(fresh, now: now(), protecting: selectedKey)
+            let cachedKeys = Set(detailCache.keys)
+            for oldKey in details.keys where !cachedKeys.contains(oldKey) {
+                details[oldKey] = nil
+                detailRenderRevisions[oldKey] = nil
+            }
+            if let previous = details[key] {
+                if previous.headSha != fresh.headSha || previous.files != fresh.files {
+                    detailRenderRevisions[key, default: 0] &+= 1
+                }
+            } else {
+                detailRenderRevisions[key, default: 0] &+= 1
+            }
             if details[key] != fresh { details[key] = fresh }
             if detailErrors[key] != nil { detailErrors[key] = nil }
         } catch {
             guard latestDetail[key] == mine else { return }
-            let message = MenuModel.message(for: error)
+            let message = MenuModel.message(for: (error as? AgentError) ?? .failed(exitCode: 1))
             if detailErrors[key] != message { detailErrors[key] = message }
         }
+        }
+        detailTasks[key] = operation
+        return (operation, mine)
+    }
+
+    private func completeDetailRequest(_ key: String, mine: Int, waiters: [CheckedContinuation<Void, Never>] = []) {
+        if latestDetail[key] == mine { loadingKeys.remove(key) }
+        detailTasks[key] = nil
+        activeDetailReads = max(0, activeDetailReads - 1)
+        if detailForcePending.remove(key) != nil, !stopped {
+            // Completion, rather than any waiter, consumes force ownership.
+            let (operation, trailingMine) = startDetailRequest(key, keepingNotice: true)
+            Task { @MainActor in
+                await operation.value
+                completeDetailRequest(key, mine: trailingMine, waiters: waiters)
+            }
+            return
+        }
+        guard !stopped, let queued = queuedDetailRequest else {
+            waiters.forEach { $0.resume() }
+            return
+        }
+        queuedDetailRequest = nil
+        let (operation, queuedMine) = startDetailRequest(queued.key, keepingNotice: queued.keepingNotice)
+        Task { @MainActor in
+            await operation.value
+            completeDetailRequest(queued.key, mine: queuedMine, waiters: queued.waiters)
+        }
+        waiters.forEach { $0.resume() }
     }
 }
