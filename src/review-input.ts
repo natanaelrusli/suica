@@ -31,7 +31,9 @@ export const versionSchema = z.object({
 });
 const MAX_FILE_DIFF_CHARS = 200_000;
 const MAX_TOTAL_DIFF_CHARS = 1_500_000;
-type ReviewFile = MrDetailJson["files"][number] & { readonly coverageUnsupportedReason?: string };
+type ReviewFile = MrDetailJson["files"][number] & {
+  readonly coverage: "text" | "unsupported-empty-or-binary" | "unavailable" | "truncated";
+};
 
 export interface ReviewInput {
   readonly detail: MrDetailJson;
@@ -63,16 +65,19 @@ export async function loadReviewInput(
     renamedFile: file.renamed_file ?? file.old_path !== file.new_path,
     deletedFile: file.deleted_file ?? false,
     diff: file.diff ?? null,
-    ...(file.too_large || file.collapsed
-      ? {
-          coverageUnsupportedReason: `GitLab marks this file ${file.too_large ? "too_large" : "collapsed"}`,
-        }
-      : {}),
+    coverage:
+      file.too_large || file.collapsed
+        ? "truncated"
+        : file.diff === undefined
+          ? "unavailable"
+          : file.diff.length === 0
+            ? "unsupported-empty-or-binary"
+            : "text",
   }));
   return {
     detail: {
       ...detail,
-      files,
+      files: files.map(({ coverage: _coverage, ...file }) => file),
       filesTruncated:
         raw.overflow === true ||
         raw.state !== "collected" ||
@@ -93,18 +98,20 @@ export function assertReviewCoverage(input: ReviewInput): void {
     throw new RunFailure("diff version coverage is incomplete");
   let total = 0;
   for (const file of files) {
-    if ("coverageUnsupportedReason" in file && file.coverageUnsupportedReason)
-      throw new RunFailure(`${file.coverageUnsupportedReason}: ${file.newPath}`);
+    if (file.coverage === "unsupported-empty-or-binary")
+      throw new RunFailure(
+        `empty diff unsupported for ${file.newPath}; GitLab's version diff response cannot distinguish binary-only changes from missing textual diff`,
+      );
+    if (file.coverage === "unavailable")
+      throw new RunFailure(`diff text unavailable for ${file.newPath}`);
+    if (file.coverage === "truncated")
+      throw new RunFailure(`GitLab marks this file too_large or collapsed: ${file.newPath}`);
     if (file.diff === null) throw new RunFailure(`diff text unavailable for ${file.newPath}`);
     if (
       file.diff.length > MAX_FILE_DIFF_CHARS ||
       (total += file.diff.length) > MAX_TOTAL_DIFF_CHARS
     )
       throw new RunFailure("diff exceeds review text coverage limits");
-    if (!file.diff.length)
-      throw new RunFailure(
-        `empty diff unsupported for ${file.newPath}; GitLab's version diff response cannot distinguish binary-only changes from missing textual diff`,
-      );
   }
   if (input.detail.additions === null || input.detail.deletions === null)
     throw new RunFailure("aggregate line counts unavailable to verify diff coverage");

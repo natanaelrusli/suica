@@ -112,7 +112,41 @@ describe("loadReviewInput", () => {
       runner([[version(1)], response([{ ...diff, diff: "" }])]).rest,
       { ...detail, headSha: head },
     );
+    expect(input.files[0]?.coverage).toBe("unsupported-empty-or-binary");
+    expect(input.detail.files[0]).not.toHaveProperty("coverage");
     expect(() => assertReviewCoverage(input)).toThrow(/binary-only changes/);
+  });
+  it("accepts the per-file diff budget and rejects one character over", async () => {
+    const makeDiff = (length: number) => ({ ...diff, diff: "x".repeat(length) });
+    const accepted = await loadReviewInput(
+      runner([[version(1)], response([makeDiff(200_000)])]).rest,
+      { ...detail, headSha: head },
+    );
+    expect(() => assertReviewCoverage(accepted)).not.toThrow();
+    const rejected = await loadReviewInput(
+      runner([[version(1)], response([makeDiff(200_001)])]).rest,
+      { ...detail, headSha: head },
+    );
+    expect(() => assertReviewCoverage(rejected)).toThrow(/coverage limits/);
+  });
+  it("accepts the total diff budget and rejects one character over", async () => {
+    const makeDiffs = (lengths: number[]) =>
+      lengths.map((length, i) => ({
+        ...diff,
+        old_path: `${i}.ts`,
+        new_path: `${i}.ts`,
+        diff: "x".repeat(length),
+      }));
+    const accepted = await loadReviewInput(
+      runner([[version(1)], response(makeDiffs(Array(8).fill(187_500)))]).rest,
+      { ...detail, headSha: head },
+    );
+    expect(() => assertReviewCoverage(accepted)).not.toThrow();
+    const rejected = await loadReviewInput(
+      runner([[version(1)], response(makeDiffs([187_501, ...Array(7).fill(187_500)]))]).rest,
+      { ...detail, headSha: head },
+    );
+    expect(() => assertReviewCoverage(rejected)).toThrow(/coverage limits/);
   });
   it("rejects overflow coverage", async () => {
     const fake = runner([[version(1)], response([diff], { overflow: true })]);
@@ -157,6 +191,7 @@ describe("assertReviewCoverage", () => {
           renamedFile: false,
           deletedFile: false,
           diff: "@@ -0,0 +1 @@\n+x",
+          coverage: "text",
         },
       ],
       filesTruncated: false,
@@ -173,6 +208,7 @@ describe("assertReviewCoverage", () => {
         renamedFile: false,
         deletedFile: false,
         diff: "@@ -0,0 +1 @@\n+x",
+        coverage: "text",
       },
     ],
   } satisfies ReviewInput;
