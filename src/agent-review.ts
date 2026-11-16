@@ -30,6 +30,7 @@ import { DEFAULT_ALERTS } from "./alerts.ts";
 import type { AlertName, AlertTemplates } from "./alerts.ts";
 import { clean, renderAlert } from "./format.ts";
 import { descriptionSha } from "./gitlab.ts";
+import { assertReviewCoverage, loadReviewInput, versionSchema, versionsSchema } from "./review-input.ts";
 import type { GraphqlRunner, PostJsonRunner, PostRunner, RestRunner } from "./gitlab.ts";
 import { extractFindings, placeFinding, summaryWithout } from "./inline-review.ts";
 import type { Finding, ThreadPosition } from "./inline-review.ts";
@@ -435,6 +436,7 @@ export async function cloneSourceBranch(
   repoDir: string,
   /** Keeps the git folder here instead of inside `repoDir`. */
   gitDir?: string,
+  expectedHeadSha?: string,
 ): Promise<string> {
   const parts = parseMrKey(detail.key);
   if (parts === undefined) throw new RunFailure("malformed merge request key");
@@ -459,7 +461,7 @@ export async function cloneSourceBranch(
         "--depth=1",
         "--single-branch",
         "--no-tags",
-        `--branch=${detail.sourceBranch}`,
+        ...(expectedHeadSha === undefined ? [`--branch=${detail.sourceBranch}`] : []),
         ...(gitDir === undefined ? [] : [`--separate-git-dir=${gitDir}`]),
         "--",
         project.data.ssh_url_to_repo,
@@ -473,7 +475,16 @@ export async function cloneSourceBranch(
     const { stdout } = await deps.exec("git", ["-C", repoDir, "rev-parse", "HEAD"], {
       timeoutMs: GIT_TIMEOUT_MS,
     });
-    return stdout.trim();
+    const clonedHead = stdout.trim();
+    if (expectedHeadSha !== undefined && clonedHead !== expectedHeadSha) {
+      await deps.exec("git", ["-C", repoDir, "fetch", "--no-tags", "origin", expectedHeadSha], { timeoutMs: GIT_TIMEOUT_MS });
+      await deps.exec("git", ["-C", repoDir, "checkout", "--detach", expectedHeadSha], { timeoutMs: GIT_TIMEOUT_MS });
+      const { stdout: verified } = await deps.exec("git", ["-C", repoDir, "rev-parse", "HEAD"], { timeoutMs: GIT_TIMEOUT_MS });
+      if (verified.trim() !== expectedHeadSha) throw new RunFailure("exact reviewed commit is unavailable");
+      return verified.trim();
+    }
+    if (expectedHeadSha !== undefined && clonedHead !== expectedHeadSha) throw new RunFailure("exact reviewed commit is unavailable");
+    return clonedHead;
   } catch (error) {
     const failure = execFailure(error);
     const reason = (failure.stderr ?? "").includes("Permission denied")
@@ -581,7 +592,10 @@ export async function runAgentReview(baseDeps: ReviewDeps, row: AgentReviewRow):
     mrTitle = detail.title;
     store.transitionAgentReview(row.id, ["running"], "running", { mrTitle }, deps.now());
     if (detail.draft) throw new Skip("the MR is a draft");
-    const lines = changedLines(detail);
+    const reviewInput = await loadReviewInput(deps.rest, detail);
+    assertReviewCoverage(reviewInput);
+    const reviewDetail = reviewInput.detail;
+    const lines = changedLines(reviewDetail);
     if (lines > deps.config.review.maxChangedLines) {
       throw new Skip(
         `the MR changes ${lines} lines, more than review.maxChangedLines (${deps.config.review.maxChangedLines})`,
@@ -596,21 +610,22 @@ export async function runAgentReview(baseDeps: ReviewDeps, row: AgentReviewRow):
 
     workDir = mkdtempSync(join(tmpdir(), "suica-review-"));
     store.appendAgentReviewActivity(row.id, deps.now(), "Cloning the source branch");
-    const headSha = await cloneSourceBranch(deps, detail, join(workDir, "repo"));
+    const headSha = await cloneSourceBranch(deps, reviewDetail, join(workDir, "repo"), undefined, reviewInput.headSha);
+    if (headSha !== reviewInput.headSha) throw new RunFailure("checked out commit does not match reviewed diff version");
     const descriptionHash = descriptionSha(detail.description);
     if (
       store.hasAgentReviewAt(row.mrKey, headSha, descriptionHash, skill, deps.config.review.skill)
     )
       throw new Skip("this commit was already reviewed");
-    writeFileSync(join(workDir, "mr.diff"), renderDiff(detail.files));
-    writeFileSync(join(workDir, "mr.md"), renderMrFile(detail));
+    writeFileSync(join(workDir, "mr.diff"), renderDiff(reviewDetail.files));
+    writeFileSync(join(workDir, "mr.md"), renderMrFile(reviewDetail));
     const rereview = await prepareRereview(deps, row, headSha, descriptionHash, skill, workDir);
 
     const prompt = buildPrompt({
       cli: cliId,
       skill,
       skillText,
-      detail,
+      detail: reviewDetail,
       headSha,
       ...(rereview === undefined ? {} : { rereview }),
     });
@@ -1020,17 +1035,6 @@ export function tickEvery(worker: ReviewWorker, everyMs: number, signal: AbortSi
 export type PostOutcome = "posted" | "nothing" | "failed";
 export type PostMode = Config["review"]["postAs"];
 
-const versionsSchema = z.array(
-  z.object({
-    id: z.number(),
-    head_commit_sha: z.string(),
-    base_commit_sha: z.string(),
-    start_commit_sha: z.string(),
-  }),
-);
-const versionSchema = z.object({
-  diffs: z.array(z.object({ old_path: z.string(), new_path: z.string(), diff: z.string() })),
-});
 
 interface Thread {
   readonly finding: Finding;
