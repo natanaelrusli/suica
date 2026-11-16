@@ -477,7 +477,13 @@ function harness(
         return Promise.resolve(
           posts.flatMap((postedPath, index) =>
             postedPath.endsWith("/notes")
-              ? [{ id: index + 1, body: (postBodies[index] as { fields?: { body?: unknown } })?.fields?.body, author: { username: "me" } }]
+              ? [
+                  {
+                    id: index + 1,
+                    body: (postBodies[index] as { fields?: { body?: unknown } })?.fields?.body,
+                    author: { username: "me" },
+                  },
+                ]
               : [],
           ),
         );
@@ -512,9 +518,10 @@ function harness(
       }
       if (/\/merge_requests\/\d+$/.test(path)) return Promise.resolve({ source_project_id: 123 });
       return Promise.resolve({
-        ssh_url_to_repo: path === "projects/123"
-          ? options.sshUrl ?? "ssh://git@gitlab.example:2222/fork/p.git"
-          : options.sshUrl ?? "ssh://git@gitlab.example:2222/g/p.git",
+        ssh_url_to_repo:
+          path === "projects/123"
+            ? (options.sshUrl ?? "ssh://git@gitlab.example:2222/fork/p.git")
+            : (options.sshUrl ?? "ssh://git@gitlab.example:2222/g/p.git"),
       });
     },
     notifier: {
@@ -612,7 +619,9 @@ describe("runAgentReview", () => {
       status: "failed",
       detail: expect.stringContaining("diff version coverage is incomplete"),
     });
-    expect(h.calls.filter((call) => call.file === "/bin/claude" || call.file === "/bin/codex")).toHaveLength(0);
+    expect(
+      h.calls.filter((call) => call.file === "/bin/claude" || call.file === "/bin/codex"),
+    ).toHaveLength(0);
     expect(h.calls.some((call) => call.args.includes("clone"))).toBe(false);
   });
 
@@ -951,12 +960,12 @@ describe("runAgentReview", () => {
     expect(silent.posts).toEqual([]);
   });
 
-  it("leaves a review whose automatic post failed waiting, with a note to check GitLab", async () => {
+  it("leaves an automatic post with an ambiguous outcome posting for inspection", async () => {
     const h = harness({ autoPost: true, postFails: true });
     const queued = h.queue();
     await runAgentReview(h.deps, queued);
-    expect(h.db.getAgentReview(queued.id)).toMatchObject({ status: "ready" });
-    expect(h.db.getAgentReview(queued.id)?.detail).toMatch(/Check the MR in GitLab/);
+    expect(h.db.getAgentReview(queued.id)).toMatchObject({ status: "posting" });
+    expect(h.db.getAgentReview(queued.id)?.detail).toMatch(/inspect GitLab/);
     expect(h.notifications.map((n) => n.title)).toEqual(["⚠️ Review agen gagal diposting"]);
   });
 
@@ -1633,27 +1642,31 @@ describe("postAgentReview and discardAgentReview", () => {
           path === "user"
             ? { username: "me" }
             : path.includes("/notes?per_page=100&page=")
-              ? notes.map((note, index) => ({ id: index + 1, body: note.body, author: { username: "me" } }))
+              ? notes.map((note, index) => ({
+                  id: index + 1,
+                  body: note.body,
+                  author: { username: "me" },
+                }))
               : path.endsWith("/diffs?per_page=100")
-            ? DIFFS
-            : path.endsWith("/versions?per_page=100")
-              ? [
-                  {
-                    id: 3,
-                    head_commit_sha: options.noVersion === true ? "f".repeat(40) : SHA,
-                    base_commit_sha: "base",
-                    start_commit_sha: "start",
-                  },
-                ]
-              : {
-                  diffs: [
-                    {
-                      old_path: "src/a.ts",
-                      new_path: "src/a.ts",
-                      diff: "@@ -1,2 +1,3 @@\n one\n+two\n+three",
+                ? DIFFS
+                : path.endsWith("/versions?per_page=100")
+                  ? [
+                      {
+                        id: 3,
+                        head_commit_sha: options.noVersion === true ? "f".repeat(40) : SHA,
+                        base_commit_sha: "base",
+                        start_commit_sha: "start",
+                      },
+                    ]
+                  : {
+                      diffs: [
+                        {
+                          old_path: "src/a.ts",
+                          new_path: "src/a.ts",
+                          diff: "@@ -1,2 +1,3 @@\n one\n+two\n+three",
+                        },
+                      ],
                     },
-                  ],
-                },
         ),
       post: (path: string, fields: Readonly<Record<string, string>>) => {
         if (options.failNote === true) return Promise.reject(new Error("glab"));
@@ -1663,7 +1676,7 @@ describe("postAgentReview and discardAgentReview", () => {
       postJson: (path: string, body: unknown) => {
         if (options.refuseThread === true && threads.length === 0 && notes.length === 0) {
           options.refuseThread = false;
-          return Promise.reject(new Error("400"));
+          return Promise.reject(new FetchFailure("gitlab-error", "refused", 400));
         }
         threads.push({ path, body });
         return Promise.resolve({ id: threads.length });
@@ -1760,12 +1773,12 @@ describe("postAgentReview and discardAgentReview", () => {
     expect(threads).toEqual([]);
   });
 
-  it("puts a failed post back as ready with a note to check GitLab first", async () => {
+  it("keeps an ambiguous failed post posting with inspection detail", async () => {
     const { h, id } = await ready();
     const { deps } = postDeps(h, { failNote: true });
     expect(await postAgentReview(deps, id)).toBe("failed");
-    expect(h.db.getAgentReview(id)).toMatchObject({ status: "ready" });
-    expect(h.db.getAgentReview(id)?.detail).toMatch(/Check the MR in GitLab before posting again/);
+    expect(h.db.getAgentReview(id)).toMatchObject({ status: "posting" });
+    expect(h.db.getAgentReview(id)?.detail).toMatch(/inspect GitLab/);
   });
 
   it("posts findings on a line of the reviewed diff as threads, and the rest as one note", async () => {
@@ -1828,14 +1841,19 @@ describe("postAgentReview and discardAgentReview", () => {
     expect(notes[0]?.body).toMatch(/^> \*\*Agent re-review\*\*: .* since the review of `fedcba98`/);
   });
 
-  it("keeps a refused thread in the note, and posts one note when GitLab lacks the commit", async () => {
+  it("keeps a definitively refused thread posting for inspection without a summary", async () => {
     const refused = await readyWith(INLINE_REVIEW);
     const first = postDeps(refused.h, { refuseThread: true });
-    expect(await postAgentReview(first.deps, refused.id, "inline")).toBe("posted");
-    expect(first.threads).toHaveLength(1);
-    expect(first.notes[0]?.body).toContain("1. `src/a.ts:2` — ping bob about this.");
-    expect(first.notes[0]?.body).toContain("2. `src/a.ts:3` — posted as an inline comment");
+    expect(await postAgentReview(first.deps, refused.id, "inline")).toBe("failed");
+    expect(refused.h.db.getAgentReview(refused.id)).toMatchObject({ status: "posting" });
+    expect(refused.h.db.reviewPostParts(refused.id).some((part) => part.state === "rejected")).toBe(
+      true,
+    );
+    expect(first.threads).toHaveLength(0);
+    expect(first.notes).toHaveLength(0);
+  });
 
+  it("posts a summary when GitLab lacks the immutable commit version", async () => {
     const moved = await readyWith(INLINE_REVIEW);
     const second = postDeps(moved.h, { noVersion: true });
     expect(await postAgentReview(second.deps, moved.id, "inline")).toBe("posted");
@@ -1843,16 +1861,14 @@ describe("postAgentReview and discardAgentReview", () => {
     expect(second.notes[0]?.body).toContain("2. `src/a.ts:3` — second.");
   });
 
-  it("uses review.postAs by default, and warns when threads went out but the note did not", async () => {
+  it("uses review.postAs by default, and holds an ambiguous summary outcome for inspection", async () => {
     const { h, id } = await readyWith(INLINE_REVIEW);
     const { deps, threads } = postDeps(h, { failNote: true });
     const inlineConfig = { ...CONFIG, review: { ...CONFIG.review, postAs: "inline" as const } };
     expect(await postAgentReview({ ...deps, config: inlineConfig }, id)).toBe("failed");
     expect(threads).toHaveLength(2);
-    expect(h.db.getAgentReview(id)).toMatchObject({ status: "ready" });
-    expect(h.db.getAgentReview(id)?.detail).toMatch(
-      /^2 inline comments were posted, but the summary comment was not\..*posting again repeats them/,
-    );
+    expect(h.db.getAgentReview(id)).toMatchObject({ status: "posting" });
+    expect(h.db.getAgentReview(id)?.detail).toMatch(/inspect GitLab/);
   });
 
   describe("approval after the post", () => {

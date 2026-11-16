@@ -29,8 +29,13 @@ import { execFailure } from "./exec.ts";
 import { DEFAULT_ALERTS } from "./alerts.ts";
 import type { AlertName, AlertTemplates } from "./alerts.ts";
 import { clean, renderAlert } from "./format.ts";
-import { descriptionSha, fetchCurrentUsername } from "./gitlab.ts";
-import { assertReviewCoverage, loadReviewInput, versionSchema, versionsSchema } from "./review-input.ts";
+import { descriptionSha, fetchCurrentUsername, FetchFailure } from "./gitlab.ts";
+import {
+  assertReviewCoverage,
+  loadReviewInput,
+  versionSchema,
+  versionsSchema,
+} from "./review-input.ts";
 import type { GraphqlRunner, PostJsonRunner, PostRunner, RestRunner } from "./gitlab.ts";
 import { extractFindings, placeFinding, summaryWithout } from "./inline-review.ts";
 import type { Finding, ThreadPosition } from "./inline-review.ts";
@@ -445,10 +450,16 @@ export async function cloneSourceBranch(
   if (expectedHeadSha !== undefined) {
     const mergeRequest = await deps.rest(`${projectPath}/merge_requests/${parts.iid}`);
     const sourceProjectId =
-      typeof mergeRequest === "object" && mergeRequest !== null && "source_project_id" in mergeRequest
+      typeof mergeRequest === "object" &&
+      mergeRequest !== null &&
+      "source_project_id" in mergeRequest
         ? mergeRequest.source_project_id
         : undefined;
-    if (typeof sourceProjectId !== "number" || !Number.isInteger(sourceProjectId) || sourceProjectId <= 0) {
+    if (
+      typeof sourceProjectId !== "number" ||
+      !Number.isInteger(sourceProjectId) ||
+      sourceProjectId <= 0
+    ) {
       throw new RunFailure("GitLab gave no usable source project for the merge request");
     }
     projectPath = `projects/${sourceProjectId}`;
@@ -489,10 +500,14 @@ export async function cloneSourceBranch(
     const clonedHead = stdout.trim();
     if (expectedHeadSha !== undefined) {
       if (clonedHead !== expectedHeadSha) {
-        await deps.exec("git", ["-C", repoDir, "fetch", "--depth=1", "--no-tags", "origin", expectedHeadSha], {
-          timeoutMs: GIT_TIMEOUT_MS,
-          ...(deps.signal === undefined ? {} : { signal: deps.signal }),
-        });
+        await deps.exec(
+          "git",
+          ["-C", repoDir, "fetch", "--depth=1", "--no-tags", "origin", expectedHeadSha],
+          {
+            timeoutMs: GIT_TIMEOUT_MS,
+            ...(deps.signal === undefined ? {} : { signal: deps.signal }),
+          },
+        );
       }
       await deps.exec("git", ["-C", repoDir, "checkout", "--detach", expectedHeadSha], {
         timeoutMs: GIT_TIMEOUT_MS,
@@ -502,7 +517,8 @@ export async function cloneSourceBranch(
         timeoutMs: GIT_TIMEOUT_MS,
         ...(deps.signal === undefined ? {} : { signal: deps.signal }),
       });
-      if (verified.trim() !== expectedHeadSha) throw new RunFailure("exact reviewed commit is unavailable");
+      if (verified.trim() !== expectedHeadSha)
+        throw new RunFailure("exact reviewed commit is unavailable");
       return verified.trim();
     }
     return clonedHead;
@@ -631,8 +647,15 @@ export async function runAgentReview(baseDeps: ReviewDeps, row: AgentReviewRow):
 
     workDir = mkdtempSync(join(tmpdir(), "suica-review-"));
     store.appendAgentReviewActivity(row.id, deps.now(), "Cloning the source branch");
-    const headSha = await cloneSourceBranch(deps, reviewDetail, join(workDir, "repo"), undefined, reviewInput.headSha);
-    if (headSha !== reviewInput.headSha) throw new RunFailure("checked out commit does not match reviewed diff version");
+    const headSha = await cloneSourceBranch(
+      deps,
+      reviewDetail,
+      join(workDir, "repo"),
+      undefined,
+      reviewInput.headSha,
+    );
+    if (headSha !== reviewInput.headSha)
+      throw new RunFailure("checked out commit does not match reviewed diff version");
     const descriptionHash = descriptionSha(detail.description);
     if (
       store.hasAgentReviewAt(row.mrKey, headSha, descriptionHash, skill, deps.config.review.skill)
@@ -1056,7 +1079,6 @@ export function tickEvery(worker: ReviewWorker, everyMs: number, signal: AbortSi
 export type PostOutcome = "posted" | "nothing" | "failed";
 export type PostMode = Config["review"]["postAs"];
 
-
 interface Thread {
   readonly finding: Finding;
   readonly position: ThreadPosition;
@@ -1118,7 +1140,7 @@ export async function postAgentReview(
 ): Promise<PostOutcome> {
   const { store, log } = deps;
   const row = store.getAgentReview(id);
-  if (row?.status !== "ready" || row.body === null) return "nothing";
+  if ((row?.status !== "ready" && row?.status !== "posting") || row.body === null) return "nothing";
   const parts = parseMrKey(row.mrKey);
   if (parts === undefined) return "nothing";
   const mrPath = `projects/${encodeURIComponent(parts.projectPath)}/merge_requests/${parts.iid}`;
@@ -1152,52 +1174,81 @@ export async function postAgentReview(
     return "failed";
   }
 
-  const result = await resumeReviewPosting({
-    store,
-    post: deps.post,
-    postJson: deps.postJson,
-    rest: deps.rest,
-    log: (message) => log.warn("agent review posting held", { id, reason: message }),
-    now: deps.now,
-    ownerUsername,
-    preflight: async () => {
-      try {
-        const latest = await fetchMrDetail(deps.graphql, deps.rest, row.mrKey);
-        return row.headSha !== null && row.descriptionSha !== null &&
-          latest.headSha === row.headSha && descriptionSha(latest.description) === row.descriptionSha;
-      } catch (error) {
-        log.warn("agent review freshness lookup failed", { id, reason: errorName(error) });
-        return false;
-      }
+  const result = await resumeReviewPosting(
+    {
+      store,
+      post: deps.post,
+      postJson: deps.postJson,
+      rest: deps.rest,
+      log: (message) => log.warn("agent review posting held", { id, reason: message }),
+      now: deps.now,
+      ownerUsername,
+      preflight: async () => {
+        try {
+          const latest = await fetchMrDetail(deps.graphql, deps.rest, row.mrKey);
+          return (
+            row.headSha !== null &&
+            row.descriptionSha !== null &&
+            latest.headSha === row.headSha &&
+            descriptionSha(latest.description) === row.descriptionSha
+          );
+        } catch (error) {
+          log.warn("agent review freshness lookup failed", { id, reason: errorName(error) });
+          return false;
+        }
+      },
+      completionDetail: (frozenParts) => {
+        if (frozenParts.some((part) => part.kind === "inline")) {
+          const posted = frozenParts.filter((part) => part.kind === "inline").length;
+          return inlineDetail(posted, extractFindings(row.body ?? "").length);
+        }
+        return "";
+      },
+      buildPlan: async () => {
+        let plan: { findings: Finding[]; threads: Thread[] } = { findings: [], threads: [] };
+        if (mode === "inline") {
+          try {
+            plan = await planThreads(deps.rest, mrPath, row);
+          } catch (error) {
+            plan = { findings: extractFindings(row.body ?? ""), threads: [] };
+          }
+        }
+        const planned = new Set(plan.threads.map((thread) => thread.finding.number));
+        const summary = summaryWithout(
+          row.body ?? "",
+          plan.findings.filter((finding) => planned.has(finding.number)),
+        );
+        const inline = plan.threads.map((thread, index) => ({
+          key: `inline-${index + 1}`,
+          kind: "inline" as const,
+          endpoint: `${mrPath}/discussions`,
+          payload: JSON.stringify({
+            body: renderThread(thread.finding, row.previousSha !== null),
+            position: thread.position,
+          }),
+          state: "pending" as const,
+          remoteId: null,
+        }));
+        return [
+          ...inline,
+          {
+            key: "summary",
+            kind: "summary" as const,
+            endpoint: `${mrPath}/notes`,
+            payload: JSON.stringify({
+              body: renderNote(row, row.skill ?? deps.config.review.skill, summary),
+            }),
+            state: "pending" as const,
+            remoteId: null,
+          },
+        ];
+      },
     },
-    buildPlan: async () => {
-      let plan: { findings: Finding[]; threads: Thread[] } = { findings: [], threads: [] };
-      if (mode === "inline") {
-        try { plan = await planThreads(deps.rest, mrPath, row); }
-        catch (error) { plan = { findings: extractFindings(row.body ?? ""), threads: [] }; }
-      }
-      const planned = new Set(plan.threads.map((thread) => thread.finding.number));
-      const summary = summaryWithout(row.body ?? "", plan.findings.filter((finding) => planned.has(finding.number)));
-      const inline = plan.threads.map((thread, index) => ({
-        key: `inline-${index + 1}`, kind: "inline" as const,
-        endpoint: `${mrPath}/discussions`,
-        payload: JSON.stringify({ body: renderThread(thread.finding, row.previousSha !== null), position: thread.position }),
-        state: "pending" as const, remoteId: null,
-      }));
-      return [...inline, {
-        key: "summary", kind: "summary" as const, endpoint: `${mrPath}/notes`,
-        payload: JSON.stringify({ body: renderNote(row, row.skill ?? deps.config.review.skill, summary) }),
-        state: "pending" as const, remoteId: null,
-      }];
-    },
-  }, id);
+    id,
+  );
   if (result === "nothing") return "nothing";
-  if (result === "held") {
-    store.transitionAgentReview(id, ["ready", "posting"], "failed", { detail: "Posting is held for inspection. Check GitLab before retrying." }, deps.now());
-    return "failed";
-  }
-  const detail = mode === "inline" ? "Inline review findings were posted with a summary comment." : "";
-  await approveAfterPost(deps, row, detail);
+  if (result === "held") return "failed";
+  await approveAfterPost(deps, row, store.getAgentReview(id)?.detail ?? "");
   return "posted";
 }
 

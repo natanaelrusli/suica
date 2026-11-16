@@ -306,9 +306,15 @@ export interface Store {
   claimReviewPosting(id: number, token: string, now: number): PostingLease | undefined;
   saveReviewPostPlan(lease: PostingLease, parts: readonly PostPart[]): boolean;
   reviewPostParts(id: number): PostPart[];
-  updateReviewPostPart(lease: PostingLease, key: string, state: PostPart["state"], remoteId: string | null, now: number): boolean;
+  updateReviewPostPart(
+    lease: PostingLease,
+    key: string,
+    state: PostPart["state"],
+    remoteId: string | null,
+    now: number,
+  ): boolean;
   renewReviewPosting(lease: PostingLease, now: number): boolean;
-  finishReviewPosting(lease: PostingLease, now: number): boolean;
+  finishReviewPosting(lease: PostingLease, now: number, detail?: string): boolean;
   /** Runs cut off by a stop or crash; returns how many were marked failed. */
   failInterruptedAgentReviews(now: number): number;
   /**
@@ -1241,28 +1247,138 @@ export function openStore(path: string): Store {
       db.exec("BEGIN IMMEDIATE");
       try {
         const review = db.prepare("SELECT status FROM agent_review WHERE id = ?").get(id);
-        const owner = db.prepare("SELECT token, expires_at FROM review_posting WHERE review_id = ?").get(id);
-        if (!review || (review["status"] !== "ready" && review["status"] !== "posting") || (owner && Number(owner["expires_at"]) > now)) { db.exec("ROLLBACK"); return undefined; }
-        if (owner) db.prepare("UPDATE review_post_part SET state = 'uncertain', updated_at = ? WHERE review_id = ? AND state = 'sending'").run(now, id);
+        const owner = db
+          .prepare("SELECT token, expires_at FROM review_posting WHERE review_id = ?")
+          .get(id);
+        if (
+          !review ||
+          (review["status"] !== "ready" && review["status"] !== "posting") ||
+          (owner && Number(owner["expires_at"]) > now)
+        ) {
+          db.exec("ROLLBACK");
+          return undefined;
+        }
+        if (owner)
+          db.prepare(
+            "UPDATE review_post_part SET state = 'uncertain', updated_at = ? WHERE review_id = ? AND state = 'sending'",
+          ).run(now, id);
         const expiresAt = now + POSTING_STALE_MS;
-        db.prepare("INSERT INTO review_posting(review_id,token,expires_at) VALUES(?,?,?) ON CONFLICT(review_id) DO UPDATE SET token=excluded.token, expires_at=excluded.expires_at").run(id, token, expiresAt);
-        db.prepare("UPDATE agent_review SET status='posting', updated_at=? WHERE id=?").run(now,id);
-        db.exec("COMMIT"); return { reviewId:id, token, expiresAt };
-      } catch (e) { db.exec("ROLLBACK"); throw e; }
+        db.prepare(
+          "INSERT INTO review_posting(review_id,token,expires_at) VALUES(?,?,?) ON CONFLICT(review_id) DO UPDATE SET token=excluded.token, expires_at=excluded.expires_at",
+        ).run(id, token, expiresAt);
+        db.prepare("UPDATE agent_review SET status='posting', updated_at=? WHERE id=?").run(
+          now,
+          id,
+        );
+        db.exec("COMMIT");
+        return { reviewId: id, token, expiresAt };
+      } catch (e) {
+        db.exec("ROLLBACK");
+        throw e;
+      }
     },
     saveReviewPostPlan(lease, parts) {
-      db.exec("BEGIN IMMEDIATE"); try {
-        const ok = db.prepare("SELECT 1 FROM review_posting WHERE review_id=? AND token=? AND expires_at=? AND EXISTS (SELECT 1 FROM agent_review WHERE id=? AND status='posting')").get(lease.reviewId,lease.token,lease.expiresAt,lease.reviewId);
-        if (!ok) { db.exec("ROLLBACK"); return false; }
-        const count = Number(db.prepare("SELECT COUNT(*) AS n FROM review_post_part WHERE review_id=?").get(lease.reviewId)?.["n"] ?? 0);
-        if (!count) { const ins=db.prepare("INSERT INTO review_post_part(review_id,part_key,kind,endpoint,payload,state,remote_id,updated_at) VALUES(?,?,?,?,?,?,?,?)"); for(const p of parts) ins.run(lease.reviewId,p.key,p.kind,p.endpoint,p.payload,p.state,p.remoteId,Date.now()); }
-        db.exec("COMMIT"); return true;
-      } catch(e) { db.exec("ROLLBACK"); throw e; }
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        const ok = db
+          .prepare(
+            "SELECT 1 FROM review_posting WHERE review_id=? AND token=? AND expires_at=? AND EXISTS (SELECT 1 FROM agent_review WHERE id=? AND status='posting')",
+          )
+          .get(lease.reviewId, lease.token, lease.expiresAt, lease.reviewId);
+        if (!ok) {
+          db.exec("ROLLBACK");
+          return false;
+        }
+        const count = Number(
+          db
+            .prepare("SELECT COUNT(*) AS n FROM review_post_part WHERE review_id=?")
+            .get(lease.reviewId)?.["n"] ?? 0,
+        );
+        if (!count) {
+          const ins = db.prepare(
+            "INSERT INTO review_post_part(review_id,part_key,kind,endpoint,payload,state,remote_id,updated_at) VALUES(?,?,?,?,?,?,?,?)",
+          );
+          for (const p of parts)
+            ins.run(
+              lease.reviewId,
+              p.key,
+              p.kind,
+              p.endpoint,
+              p.payload,
+              p.state,
+              p.remoteId,
+              Date.now(),
+            );
+        }
+        db.exec("COMMIT");
+        return true;
+      } catch (e) {
+        db.exec("ROLLBACK");
+        throw e;
+      }
     },
-    reviewPostParts(id) { return db.prepare("SELECT part_key AS key,kind,endpoint,payload,state,remote_id AS remoteId FROM review_post_part WHERE review_id=? ORDER BY rowid").all(id).map(r=>({...r, key:text(r,"key"),kind:text(r,"kind") as PostPart["kind"],endpoint:text(r,"endpoint"),payload:text(r,"payload"),state:text(r,"state") as PostPart["state"],remoteId:nullableText(r,"remoteId")})); },
-    updateReviewPostPart(lease,key,state,remoteId,now) { const r=db.prepare("UPDATE review_post_part SET state=?,remote_id=?,updated_at=? WHERE review_id=? AND part_key=? AND EXISTS(SELECT 1 FROM review_posting WHERE review_id=? AND token=? AND expires_at>?)").run(state,remoteId,now,lease.reviewId,key,lease.reviewId,lease.token,now); return Number(r.changes)===1; },
-    renewReviewPosting(lease,now) { const expiresAt=now+POSTING_STALE_MS; const r=db.prepare("UPDATE review_posting SET expires_at=? WHERE review_id=? AND token=? AND expires_at>?").run(expiresAt,lease.reviewId,lease.token,now); return Number(r.changes)===1; },
-    finishReviewPosting(lease,now) { db.exec("BEGIN IMMEDIATE"); try { const r=db.prepare("UPDATE agent_review SET status='posted', approved=0, updated_at=? WHERE id=? AND status='posting' AND EXISTS(SELECT 1 FROM review_posting WHERE review_id=? AND token=? AND expires_at>?) AND NOT EXISTS(SELECT 1 FROM review_post_part WHERE review_id=? AND state!='confirmed') AND EXISTS(SELECT 1 FROM review_post_part WHERE review_id=?)").run(now,lease.reviewId,lease.reviewId,lease.token,now,lease.reviewId,lease.reviewId); if(Number(r.changes)===1) db.prepare("DELETE FROM review_posting WHERE review_id=? AND token=?").run(lease.reviewId,lease.token); db.exec("COMMIT"); return Number(r.changes)===1; } catch(e) {db.exec("ROLLBACK");throw e;} },
+    reviewPostParts(id) {
+      return db
+        .prepare(
+          "SELECT part_key AS key,kind,endpoint,payload,state,remote_id AS remoteId FROM review_post_part WHERE review_id=? ORDER BY rowid",
+        )
+        .all(id)
+        .map((r) => ({
+          ...r,
+          key: text(r, "key"),
+          kind: text(r, "kind") as PostPart["kind"],
+          endpoint: text(r, "endpoint"),
+          payload: text(r, "payload"),
+          state: text(r, "state") as PostPart["state"],
+          remoteId: nullableText(r, "remoteId"),
+        }));
+    },
+    updateReviewPostPart(lease, key, state, remoteId, now) {
+      const r = db
+        .prepare(
+          "UPDATE review_post_part SET state=?,remote_id=?,updated_at=? WHERE review_id=? AND part_key=? AND EXISTS(SELECT 1 FROM review_posting WHERE review_id=? AND token=? AND expires_at>?)",
+        )
+        .run(state, remoteId, now, lease.reviewId, key, lease.reviewId, lease.token, now);
+      return Number(r.changes) === 1;
+    },
+    renewReviewPosting(lease, now) {
+      const expiresAt = now + POSTING_STALE_MS;
+      const r = db
+        .prepare(
+          "UPDATE review_posting SET expires_at=? WHERE review_id=? AND token=? AND expires_at>?",
+        )
+        .run(expiresAt, lease.reviewId, lease.token, now);
+      return Number(r.changes) === 1;
+    },
+    finishReviewPosting(lease, now, detail) {
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        const r = db
+          .prepare(
+            "UPDATE agent_review SET status='posted', approved=0, detail=COALESCE(?,detail), updated_at=? WHERE id=? AND status='posting' AND EXISTS(SELECT 1 FROM review_posting WHERE review_id=? AND token=? AND expires_at>?) AND NOT EXISTS(SELECT 1 FROM review_post_part WHERE review_id=? AND state!='confirmed') AND EXISTS(SELECT 1 FROM review_post_part WHERE review_id=?)",
+          )
+          .run(
+            detail ?? null,
+            now,
+            lease.reviewId,
+            lease.reviewId,
+            lease.token,
+            now,
+            lease.reviewId,
+            lease.reviewId,
+          );
+        if (Number(r.changes) === 1)
+          db.prepare("DELETE FROM review_posting WHERE review_id=? AND token=?").run(
+            lease.reviewId,
+            lease.token,
+          );
+        db.exec("COMMIT");
+        return Number(r.changes) === 1;
+      } catch (e) {
+        db.exec("ROLLBACK");
+        throw e;
+      }
+    },
 
     failInterruptedAgentReviews(now) {
       const result = db
