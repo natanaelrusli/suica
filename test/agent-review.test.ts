@@ -472,6 +472,7 @@ function harness(
     graphql: () => Promise.resolve(options.raw ?? detailRaw()),
     rest: (path: string) => {
       restPaths.push(path);
+      if (path === "user") return Promise.resolve({ username: "me" });
       if (path.endsWith("/versions?per_page=100")) {
         return Promise.resolve([
           {
@@ -1620,7 +1621,11 @@ describe("postAgentReview and discardAgentReview", () => {
       log: silent,
       rest: (path: string) =>
         Promise.resolve(
-          path.endsWith("/diffs?per_page=100")
+          path === "user"
+            ? { username: "me" }
+            : path.includes("/notes?per_page=100&page=")
+              ? notes.map((note, index) => ({ id: index + 1, body: note.body, author: { username: "me" } }))
+              : path.endsWith("/diffs?per_page=100")
             ? DIFFS
             : path.endsWith("/versions?per_page=100")
               ? [
@@ -1652,7 +1657,7 @@ describe("postAgentReview and discardAgentReview", () => {
           return Promise.reject(new Error("400"));
         }
         threads.push({ path, body });
-        return Promise.resolve();
+        return Promise.resolve({ id: threads.length });
       },
     };
     return { deps, notes, threads };
@@ -1774,7 +1779,7 @@ describe("postAgentReview and discardAgentReview", () => {
       },
     });
     expect(JSON.stringify(threads[0]?.body)).toMatch(
-      /^\{"body":"> \*\*Agent review\*\*, finding 1: [^"]*\\n\\nping bob about this\."/,
+      /^\{"body":"> \*\*Agent review\*\*, finding 1: [^"]*\\n\\nping bob about this\.\\n\\n<!-- suica-review:/,
     );
     expect(notes).toHaveLength(1);
     expect(notes[0]?.body).toContain("1. `src/a.ts:2` — posted as an inline comment on that line.");
