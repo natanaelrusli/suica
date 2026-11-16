@@ -293,13 +293,13 @@ const CLAUDE: DetectedCli = { id: "claude", name: "Claude Code", path: "/bin/cla
 const CODEX: DetectedCli = { id: "codex", name: "Codex", path: "/bin/codex" };
 const GEMINI: DetectedCli = { id: "gemini", name: "Gemini CLI", path: "/bin/gemini" };
 
-function detailRaw(overrides: { draft?: boolean; additions?: number } = {}): unknown {
+function detailRaw(overrides: { draft?: boolean; additions?: number; headSha?: string; description?: string } = {}): unknown {
   return {
     data: {
       project: {
         mergeRequest: {
           title: "Add thing",
-          description: "desc",
+          description: overrides.description ?? "desc",
           webUrl: "https://gitlab.example/g/p/-/merge_requests/7",
           draft: overrides.draft ?? false,
           sourceBranch: "feat/thing",
@@ -313,7 +313,7 @@ function detailRaw(overrides: { draft?: boolean; additions?: number } = {}): unk
           reviewers: { nodes: [] },
           approvedBy: { nodes: [] },
           squashOnMerge: false,
-          diffHeadSha: SHA,
+          diffHeadSha: overrides.headSha ?? SHA,
           userPermissions: { canApprove: false },
           discussions: { pageInfo: { hasNextPage: false }, nodes: [] },
         },
@@ -1651,6 +1651,50 @@ describe("postAgentReview and discardAgentReview", () => {
     expect(await postAgentReview(deps, id)).toBe("nothing");
     expect(notes).toHaveLength(1);
     expect(discardAgentReview(h.db, id, NOW)).toBe(false);
+  });
+
+  it("refuses to post when the source branch moved since the review", async () => {
+    const { h, id } = await ready();
+    const { deps, notes, threads } = postDeps(h);
+    deps.graphql = () => Promise.resolve(detailRaw({ headSha: "f".repeat(40) }));
+    expect(await postAgentReview(deps, id)).toBe("nothing");
+    expect(h.db.getAgentReview(id)).toMatchObject({ status: "ready" });
+    expect(h.db.getAgentReview(id)?.detail).toBeTruthy();
+    expect(notes).toEqual([]);
+    expect(threads).toEqual([]);
+  });
+
+  it("refuses to post when the MR description changed since the review", async () => {
+    const { h, id } = await ready();
+    const { deps, notes, threads } = postDeps(h);
+    deps.graphql = () => Promise.resolve(detailRaw({ description: "edited description" }));
+    expect(await postAgentReview(deps, id)).toBe("nothing");
+    expect(h.db.getAgentReview(id)).toMatchObject({ status: "ready" });
+    expect(h.db.getAgentReview(id)?.detail).toBeTruthy();
+    expect(notes).toEqual([]);
+    expect(threads).toEqual([]);
+  });
+
+  it.each(["headSha", "descriptionSha"] as const)("refuses to post when stored %s is missing", async (field) => {
+    const { h, id } = await ready();
+    h.db.transitionAgentReview(id, ["ready"], "ready", { [field]: null }, NOW);
+    const { deps, notes, threads } = postDeps(h);
+    expect(await postAgentReview(deps, id)).toBe("nothing");
+    expect(h.db.getAgentReview(id)).toMatchObject({ status: "ready" });
+    expect(h.db.getAgentReview(id)?.detail).toBeTruthy();
+    expect(notes).toEqual([]);
+    expect(threads).toEqual([]);
+  });
+
+  it("returns failed when the GitLab detail query rejects", async () => {
+    const { h, id } = await ready();
+    const { deps, notes, threads } = postDeps(h);
+    deps.graphql = () => Promise.reject(new Error("GitLab unavailable"));
+    expect(await postAgentReview(deps, id)).toBe("failed");
+    expect(h.db.getAgentReview(id)).toMatchObject({ status: "ready" });
+    expect(h.db.getAgentReview(id)?.detail).toBeTruthy();
+    expect(notes).toEqual([]);
+    expect(threads).toEqual([]);
   });
 
   it("puts a failed post back as ready with a note to check GitLab first", async () => {
