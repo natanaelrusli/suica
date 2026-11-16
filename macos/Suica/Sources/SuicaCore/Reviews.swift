@@ -916,7 +916,7 @@ public final class ReviewsModel {
         return (operation, mine)
     }
 
-    private func completeDetailRequest(_ key: String, mine: Int) {
+    private func completeDetailRequest(_ key: String, mine: Int, waiters: [CheckedContinuation<Void, Never>] = []) {
         if latestDetail[key] == mine { loadingKeys.remove(key) }
         detailTasks[key] = nil
         activeDetailReads = max(0, activeDetailReads - 1)
@@ -925,17 +925,20 @@ public final class ReviewsModel {
             let (operation, trailingMine) = startDetailRequest(key, keepingNotice: true)
             Task { @MainActor in
                 await operation.value
-                completeDetailRequest(key, mine: trailingMine)
+                completeDetailRequest(key, mine: trailingMine, waiters: waiters)
             }
             return
         }
-        guard !stopped, let queued = queuedDetailRequest else { return }
+        guard !stopped, let queued = queuedDetailRequest else {
+            waiters.forEach { $0.resume() }
+            return
+        }
         queuedDetailRequest = nil
         let (operation, queuedMine) = startDetailRequest(queued.key, keepingNotice: queued.keepingNotice)
-        queued.waiters.forEach { $0.resume() }
         Task { @MainActor in
             await operation.value
-            completeDetailRequest(queued.key, mine: queuedMine)
+            completeDetailRequest(queued.key, mine: queuedMine, waiters: queued.waiters)
         }
+        waiters.forEach { $0.resume() }
     }
 }

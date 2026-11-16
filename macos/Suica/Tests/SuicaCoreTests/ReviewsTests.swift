@@ -30,6 +30,11 @@ private func detail(_ key: String, _ overrides: [String: Any] = [:]) throws -> M
         MergeRequestDetail.self, from: JSONSerialization.data(withJSONObject: object))
 }
 
+private actor CompletionProbe {
+    private(set) var isFinished = false
+    func markFinished() { isFinished = true }
+}
+
 actor FakeReviewsClient: ReviewsClient {
     var lists: [Result<ReviewListDocument, AgentError>]
     var detailResults: [String: Result<MergeRequestDetail, AgentError>] = [:]
@@ -243,6 +248,42 @@ actor FakeReviewsClient: ReviewsClient {
     #expect(await client.maxActiveDetailCalls <= 2)
     #expect(await client.detailCalls == ["A", "B", "E"])
     #expect(model.selectedKey == "E")
+    #expect(model.loadingKeys.isEmpty)
+}
+
+@MainActor @Test func queuedSelectionAwaitsItsDetailRead() async throws {
+    let client = FakeReviewsClient(lists: [.success(list("A", "B", "C"))])
+    let gateA = Gate()
+    let gateB = Gate()
+    let gateC = Gate()
+    await client.setDetail("A", .success(try detail("A")), gate: gateA)
+    await client.setDetail("B", .success(try detail("B")), gate: gateB)
+    await client.setDetail("C", .success(try detail("C")), gate: gateC)
+    let model = ReviewsModel(client: client)
+    let selectA = Task { await model.loadDetail("A") }
+    while await client.activeDetailCalls < 1 { await Task.yield() }
+    let selectB = Task { await model.select("B") }
+    while await client.activeDetailCalls < 2 { await Task.yield() }
+    let finished = CompletionProbe()
+    let selectC = Task {
+        await model.select("C")
+        await finished.markFinished()
+    }
+    while model.queuedDetailKeyForTesting != "C" { await Task.yield() }
+
+    await gateA.open()
+    while !(await client.detailCalls.contains("C")) { await Task.yield() }
+    #expect(!(await finished.isFinished))
+    #expect(model.loadingKeys.contains("C"))
+
+    await gateC.open()
+    await selectC.value
+    await gateB.open()
+    await selectA.value
+    await selectB.value
+
+    #expect(await finished.isFinished)
+    #expect(model.selectedDetail?.key == "C")
     #expect(model.loadingKeys.isEmpty)
 }
 
