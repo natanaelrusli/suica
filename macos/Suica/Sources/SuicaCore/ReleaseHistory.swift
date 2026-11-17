@@ -13,6 +13,11 @@ public struct ReleaseNote: Identifiable, Sendable {
 
     public static let recent: [ReleaseNote] = [
         ReleaseNote(
+            version: "0.1.13", date: "17 Nov 2026", title: "Empty files no longer block reviews",
+            changes: [
+                "An MR that adds or deletes an empty file, such as an `__init__.py`, can now be reviewed instead of failing as an unsupported empty diff.",
+            ]),
+        ReleaseNote(
             version: "0.1.12", date: "16 Nov 2026", title: "Faster, steadier MR reviews",
             changes: [
                 "MR pages open from cached details, and repeated reads of the same MR are shared instead of fetched again.",
