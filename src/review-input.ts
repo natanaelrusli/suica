@@ -60,7 +60,27 @@ export async function loadReviewInput(
   if (version === undefined)
     throw new RunFailure("immutable diff version for fetched head is missing");
   const raw = versionSchema.parse(await rest(`${mrPath}/versions/${version.id}`));
-  const files: ReviewFile[] = raw.diffs.map((file) => ({
+  // GitLab sends `diff: ""` for both an empty new/deleted file and a binary one; the blob size tells them apart.
+  const isEmptyBlob = async (file: (typeof raw.diffs)[number]): Promise<boolean> => {
+    if (file.diff !== "" || (!file.new_file && !file.deleted_file)) return false;
+    const [path, ref] = file.deleted_file
+      ? [file.old_path, version.base_commit_sha]
+      : [file.new_path, version.head_commit_sha];
+    try {
+      const meta = z
+        .object({ size: z.number() })
+        .parse(
+          await rest(
+            `projects/${encodeURIComponent(key.projectPath)}/repository/files/${encodeURIComponent(path)}?ref=${ref}`,
+          ),
+        );
+      return meta.size === 0;
+    } catch {
+      return false;
+    }
+  };
+  const emptyBlobs = await Promise.all(raw.diffs.map(isEmptyBlob));
+  const files: ReviewFile[] = raw.diffs.map((file, i) => ({
     oldPath: file.old_path,
     newPath: file.new_path,
     newFile: file.new_file ?? false,
@@ -72,7 +92,7 @@ export async function loadReviewInput(
         ? "truncated"
         : file.diff === undefined
           ? "unavailable"
-          : file.diff.length === 0
+          : file.diff.length === 0 && !emptyBlobs[i]
             ? "unsupported-empty-or-binary"
             : "text",
   }));

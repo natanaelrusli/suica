@@ -116,6 +116,24 @@ describe("loadReviewInput", () => {
     expect(input.detail.files[0]).not.toHaveProperty("coverage");
     expect(() => assertReviewCoverage(input)).toThrow(/binary-only changes/);
   });
+  it("accepts an empty new file but not an empty-diff binary", async () => {
+    const empty = {
+      old_path: "p/__init__.py",
+      new_path: "p/__init__.py",
+      diff: "",
+      new_file: true,
+    };
+    const fake = runner([[version(1)], response([empty]), { size: 0 }]);
+    const input = await loadReviewInput(fake.rest, { ...detail, headSha: head });
+    expect(input.files[0]?.coverage).toBe("text");
+    expect(fake.calls[2]).toContain(`repository/files/p%2F__init__.py?ref=${head}`);
+    expect(() => assertReviewCoverage(input)).not.toThrow();
+    const bin = await loadReviewInput(
+      runner([[version(1)], response([{ ...empty, new_path: "a.png" }]), { size: 9 }]).rest,
+      { ...detail, headSha: head },
+    );
+    expect(bin.files[0]?.coverage).toBe("unsupported-empty-or-binary");
+  });
   it("accepts the per-file diff budget and rejects one character over", async () => {
     const makeDiff = (length: number) => ({ ...diff, diff: "x".repeat(length) });
     const accepted = await loadReviewInput(
