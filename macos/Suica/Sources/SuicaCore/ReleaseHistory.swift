@@ -13,6 +13,14 @@ public struct ReleaseNote: Identifiable, Sendable {
 
     public static let recent: [ReleaseNote] = [
         ReleaseNote(
+            version: "0.1.14", date: "19 Nov 2026", title: "Claude skills and a more useful sidebar",
+            changes: [
+                "Browse and preview Claude skills. Import, edit, disable, restore, or move personal skills to the Trash.",
+                "See agent health, ongoing reviews, the installed version, CPU usage, RAM used, and fan speed in the sidebar.",
+                "The sidebar and Overview check for review activity every three seconds while the window is open.",
+                "Reveal older release notes in Updates, down to Suica 0.1.1.",
+            ]),
+        ReleaseNote(
             version: "0.1.13", date: "17 Nov 2026", title: "Empty files no longer block reviews",
             changes: [
                 "An MR that adds or deletes an empty file, such as an `__init__.py`, can now be reviewed instead of failing as an unsupported empty diff.",
