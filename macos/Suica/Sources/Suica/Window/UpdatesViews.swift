@@ -36,10 +36,13 @@ struct UpdatesFooterItem: View {
 
 /// The Updates page keeps the running version separate from the next action.
 struct UpdatesView: View {
+    private static let releasesPerPage = 5
+
     let model: UpdatesModel
     @State private var checked = false
     @State private var checking = false
     @State private var wide = false
+    @State private var visibleReleaseCount = UpdatesView.releasesPerPage
     @Environment(\.metrics) private var metrics
 
     /// Absent under `swift run`, where there is no bundle version to show.
@@ -141,9 +144,18 @@ struct UpdatesView: View {
                 alignment: .leading,
                 spacing: metrics.gap
             ) {
-                ForEach(Array(ReleaseNote.recent.prefix(5))) { release in
+                ForEach(ReleaseNote.recent.prefix(visibleReleaseCount)) { release in
                     releaseCard(release)
                 }
+            }
+
+            if visibleReleaseCount < ReleaseNote.recent.count {
+                Button {
+                    visibleReleaseCount += Self.releasesPerPage
+                } label: {
+                    Label(Copy.updatesShowOlderVersions, systemImage: "chevron.down")
+                }
+                .buttonStyle(.bordered)
             }
         }
     }

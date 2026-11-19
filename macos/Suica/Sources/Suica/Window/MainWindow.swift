@@ -317,6 +317,7 @@ struct MainWindow: View {
             .motion(Motion.page, value: current)
         }
         .navigationTitle(title)
+        .task { await window.runStatusRefreshLoop(every: .seconds(3)) }
     }
 
     /// The row the sidebar marks: Configuration for its own pages, which have no row.
@@ -359,16 +360,136 @@ struct MainWindow: View {
             if picked?.statisticsPage != nil { statisticsOpen = true }
         }
         .safeAreaInset(edge: .top) {
-            // Fixed width, so the header slides away with the sidebar instead of squeezing.
-            HStack(spacing: 8) {
-                AppIconView(size: 28)
-                Text(Copy.appName).font(.title3.weight(.semibold)).fixedSize()
-                Spacer(minLength: 0)
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    AppIconView(size: 28)
+                    Text(Copy.appName).font(.title3.weight(.semibold)).fixedSize()
+                }
+                sidebarStatus
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
         }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            sidebarReviewFooter
+        }
         .navigationSplitViewColumnWidth(min: 180, ideal: 210, max: 280)
+    }
+
+    private var sidebarReviewFooter: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Divider()
+            VStack(alignment: .leading, spacing: 6) {
+                Text(Copy.agentReviewHeading)
+                    .font(.caption.weight(.semibold))
+                    .accessibilityAddTraits(.isHeader)
+                if let status = window.status, let review = status.agentReview {
+                    sidebarReviewActivity(review, agentRunning: status.agent.running)
+                } else {
+                    Text(window.status == nil && window.errorText == nil ? Copy.loading : Copy.reviewActivityUnavailable)
+                        .foregroundStyle(.secondary)
+                }
+                SidebarSystemMetrics { navigator.selection = .section(.system) }
+                    .padding(.top, 2)
+                if let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String {
+                    Text("\(Copy.currentVersion) \(version)")
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 2)
+                }
+            }
+            .font(.caption)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 9)
+        }
+    }
+
+    private func sidebarReviewActivity(_ review: StatusAgentReview, agentRunning: Bool) -> some View {
+        let running = agentRunning ? review.allRunning : []
+        let summary = Copy.activeReviewSummary(running: running.count, queued: review.queued.count)
+        let openOverview = Copy.openSection(WindowSection.overview.title)
+        return Button { navigator.selection = .section(.overview) } label: {
+            HStack(alignment: .top, spacing: 6) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(summary ?? Copy.noActiveReviews)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                    ForEach(running.prefix(2), id: \.id) { item in
+                        let title = DisplayText.clean(item.mrTitle ?? item.mrKey, max: 120)
+                        Label(title.isEmpty ? item.mrKey : title, systemImage: "bolt.circle")
+                    }
+                    if running.isEmpty, let next = review.queued.first {
+                        let title = DisplayText.clean(next.mrTitle ?? next.mrKey, max: 120)
+                        Label(Copy.nextQueuedReview(title.isEmpty ? next.mrKey : title), systemImage: "hourglass")
+                    }
+                }
+                .lineLimit(1)
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .background(.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
+            .contentShape(RoundedRectangle(cornerRadius: 8))
+        }
+        .buttonStyle(.plain)
+        .help(openOverview)
+        .accessibilityHint(Text(openOverview))
+    }
+
+    @ViewBuilder private var sidebarStatus: some View {
+        if let status = window.status {
+            if status.configError != nil {
+                sidebarStatusLink(Copy.agentNeedsAttention, tint: .orange)
+            } else {
+                let health = AgentHealth(status: status, paused: window.menu.state?.paused)
+                sidebarStatusLink(Copy.health(health), detail: sidebarStatusDetail(status), tint: health.tint)
+            }
+        } else if window.errorText != nil {
+            sidebarStatusLink(Copy.agentStatusUnavailable, tint: .orange)
+        } else {
+            sidebarStatusLink(Copy.checkingAgent, tint: .secondary)
+        }
+    }
+
+    private func sidebarStatusDetail(_ status: StatusDocument) -> String {
+        guard let poll = status.lastPoll else { return Copy.noPollYet }
+        let date = Date(timeIntervalSince1970: TimeInterval(poll.at) / 1000)
+        return Copy.lastPollAgo(date.formatted(.relative(presentation: .numeric, unitsStyle: .abbreviated)))
+    }
+
+    private func sidebarStatusLink(_ title: String, detail: String? = nil, tint: Color) -> some View {
+        let openOverview = Copy.openSection(WindowSection.overview.title)
+        return Button { navigator.selection = .section(.overview) } label: {
+            HStack(spacing: 6) {
+                Circle().fill(tint).frame(width: 6, height: 6)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(.caption.weight(.semibold))
+                        .lineLimit(2)
+                    if let detail {
+                        Text(detail).font(.caption).foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 7)
+            .background(.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
+            .contentShape(RoundedRectangle(cornerRadius: 8))
+        }
+        .buttonStyle(.plain)
+        .help(openOverview)
+        .accessibilityHint(Text(openOverview))
     }
 
     private func sidebarRow(_ node: SidebarNode) -> some View {
@@ -441,6 +562,7 @@ struct MainWindow: View {
         case .lessons: LessonsView(model: lessons, navigator: navigator)
         case .plans: PlansView(model: plans, documents: documents, navigator: navigator)
         case .documents: DocumentsView(model: documents)
+        case .claudeSkills: ClaudeSkillsView()
         case .ideas: IdeasView(model: ideas, office: office, plans: plans, navigator: navigator)
         case .updates:
             if let updates { UpdatesView(model: updates) } else { ContentUnavailableView(Copy.updatesHeading, systemImage: WindowSection.updates.symbol) }

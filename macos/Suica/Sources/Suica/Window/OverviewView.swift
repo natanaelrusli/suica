@@ -96,10 +96,7 @@ struct OverviewView: View {
 
     /// The agent's health in one line, with the quick actions at its end.
     private func statusBar(_ status: StatusDocument) -> some View {
-        let paused = menu.state == nil ? (status.paused ?? false) : menu.isPaused
-        let health = AgentHealth(
-            running: status.agent.running, loaded: status.agent.loaded, paused: paused,
-            lastPollOK: status.lastPoll.map { $0.status == "ok" })
+        let health = AgentHealth(status: status, paused: menu.state?.paused)
         return ViewThatFits(in: .horizontal) {
             HStack(spacing: 12) {
                 healthSummary(health, status)
@@ -114,24 +111,16 @@ struct OverviewView: View {
         .padding(.horizontal, metrics.padding)
         .padding(.vertical, metrics.padding - 4)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Self.tint(health).opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Self.tint(health).opacity(0.25)))
-    }
-
-    private static func tint(_ health: AgentHealth) -> Color {
-        switch health {
-        case .ok: .green
-        case .paused, .stopped, .missing: .orange
-        case .pollFailed: .red
-        }
+        .background(health.tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(health.tint.opacity(0.25)))
     }
 
     private func healthSummary(_ health: AgentHealth, _ status: StatusDocument) -> some View {
         HStack(spacing: 10) {
             Circle()
-                .fill(Self.tint(health))
+                .fill(health.tint)
                 .frame(width: 9, height: 9)
-                .shadow(color: Self.tint(health).opacity(0.6), radius: 3)
+                .shadow(color: health.tint.opacity(0.6), radius: 3)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 1) {
                 Text(Copy.health(health)).font(.headline)

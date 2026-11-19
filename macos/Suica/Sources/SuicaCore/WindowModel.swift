@@ -37,6 +37,7 @@ public final class WindowModel {
     @ObservationIgnored public let menu: MenuModel
     @ObservationIgnored private let client: any DashboardClient
     @ObservationIgnored private var latestRefresh = 0
+    @ObservationIgnored private var latestStatusRequest = 0
     @ObservationIgnored private var latestShow = 0
 
     public init(client: any DashboardClient, menu: MenuModel) {
@@ -55,8 +56,7 @@ public final class WindowModel {
         var failure: String?
 
         do {
-            let fresh = try await client.status()
-            if mine == latestRefresh { status = fresh }
+            try await readStatus()
         } catch {
             failure = MenuModel.message(for: error)
         }
@@ -96,11 +96,25 @@ public final class WindowModel {
         }
     }
 
-    /// Reads the status alone, for the menu bar panel's last poll; a failure keeps the last good one.
+    /// Reads status without waiting for stats or usage. A failure keeps the last good status.
     public func refreshStatus() async {
-        // A full refresh that started meanwhile has the newer status.
-        let mine = latestRefresh
-        if let fresh = try? await client.status(), mine == latestRefresh { status = fresh }
+        try? await readStatus()
+    }
+
+    private func readStatus() async throws(AgentError) {
+        latestStatusRequest += 1
+        let request = latestStatusRequest
+        let fresh = try await client.status()
+        // The status loop and a full refresh can overlap. Only the newest request may publish.
+        if !Task.isCancelled, request == latestStatusRequest, status != fresh { status = fresh }
+    }
+
+    public func runStatusRefreshLoop(every interval: Duration) async {
+        // The full refresh starts when the window opens. Wait one interval before the next status read.
+        while !Task.isCancelled {
+            do { try await Task.sleep(for: interval) } catch { return }
+            await refreshStatus()
+        }
     }
 
     public func runRefreshLoop(every interval: Duration) async {

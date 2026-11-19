@@ -21,6 +21,7 @@ enum WindowSection: String, CaseIterable, Identifiable {
     case updates
     /// The Markdown files under the Plan folders, read in the app; ⇧⌘D, under Insights after Plans.
     case documents
+    case claudeSkills
 
     var id: String { rawValue }
 
@@ -42,6 +43,7 @@ enum WindowSection: String, CaseIterable, Identifiable {
         case .ideas: "Idea Box"
         case .updates: Copy.updatesHeading
         case .documents: Copy.documents
+        case .claudeSkills: Copy.claudeSkills
         }
     }
 
@@ -64,6 +66,7 @@ enum WindowSection: String, CaseIterable, Identifiable {
         case .ideas: "lightbulb"
         case .updates: "arrow.down.circle"
         case .documents: "doc.richtext"
+        case .claudeSkills: "puzzlepiece.extension"
         }
     }
 
@@ -86,6 +89,7 @@ enum WindowSection: String, CaseIterable, Identifiable {
         case .ideas: .orange
         case .updates: .green
         case .documents: .yellow
+        case .claudeSkills: .purple
         }
     }
 
@@ -97,6 +101,7 @@ enum WindowSection: String, CaseIterable, Identifiable {
         if self == .ideas { return KeyboardShortcut("i", modifiers: [.command, .shift]) }
         if self == .updates { return KeyboardShortcut("u", modifiers: [.command, .shift]) }
         if self == .documents { return KeyboardShortcut("d", modifiers: [.command, .shift]) }
+        if self == .claudeSkills { return KeyboardShortcut("k", modifiers: [.command, .shift]) }
         let index = Self.allCases.firstIndex(of: self) ?? 0
         return KeyboardShortcut(KeyEquivalent(Character(String((index + 1) % 10))))
     }
@@ -272,7 +277,7 @@ struct SidebarNode: Identifiable {
         ),
         (
             Copy.settingsGroup,
-            [SidebarNode(.configuration), SidebarNode(.updates)]
+            [SidebarNode(.configuration), SidebarNode(.claudeSkills), SidebarNode(.updates)]
         ),
     ]
 }

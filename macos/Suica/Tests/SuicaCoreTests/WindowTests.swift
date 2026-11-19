@@ -284,6 +284,32 @@ func makeBrokenConfigStatus() -> StatusDocument {
     #expect(await client.statusCalls == calls)
 }
 
+@MainActor @Test func statusRefreshPublishesReviewActivityWhileAnOlderDashboardRefreshIsPending() async {
+    let idle = makeStatus()
+    var active = idle
+    active.agentReview = StatusAgentReview(
+        auto: true, post: nil, postAs: nil, model: nil,
+        running: RunningReview(id: 1, mrKey: "team/project!42", mrTitle: nil, cli: nil, model: nil, startedAt: nil),
+        runningReviews: nil, queued: [])
+    let client = FakeDashboardClient(statuses: [.success(idle), .success(active)])
+    let gate = Gate()
+    await client.holdFirstStatus(gate)
+    let model = WindowModel(client: client, menu: MenuModel(client: FakeClient(states: [.success(makeState())])))
+    let fullRefresh = Task { await model.refresh() }
+    while await client.statusCalls < 1 { await Task.yield() }
+
+    await model.refreshStatus()
+    #expect(model.status?.agentReview?.allRunning.map(\.mrKey) == ["team/project!42"])
+    #expect(await client.statsCalls == 0)
+    #expect(await client.usageCalls == 0)
+
+    await gate.open()
+    await fullRefresh.value
+    #expect(model.status == active)
+    #expect(model.stats == makeStats())
+    #expect(model.usage == makeUsage())
+}
+
 @MainActor @Test func restartIsIgnoredWhileOneIsRunning() async {
     let gate = Gate()
     let client = FakeDashboardClient()

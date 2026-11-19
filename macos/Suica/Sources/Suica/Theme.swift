@@ -2,6 +2,23 @@ import AppKit
 import SuicaCore
 import SwiftUI
 
+extension AgentHealth {
+    init(status: StatusDocument, paused: Bool?) {
+        self.init(
+            running: status.agent.running, loaded: status.agent.loaded,
+            paused: paused ?? status.paused ?? false,
+            lastPollOK: status.lastPoll.map { $0.status == "ok" })
+    }
+
+    var tint: Color {
+        switch self {
+        case .ok: .green
+        case .paused, .stopped, .missing: .orange
+        case .pollFailed: .red
+        }
+    }
+}
+
 extension Color {
     /// An sRGB colour from 0xRRGGBB.
     init(hex: Int) {
