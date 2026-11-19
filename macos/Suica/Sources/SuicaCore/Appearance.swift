@@ -335,6 +335,15 @@ public final class AppearanceSettings {
         }
     }
     public var backdrop: Backdrop { didSet { store(backdrop.rawValue, Key.backdrop) } }
+    public var glassEnabled: Bool { didSet { defaults.set(glassEnabled, forKey: Key.glassEnabled) } }
+    /// Percentage of solid tint added to the glass surfaces.
+    public var glassOpacity: Int {
+        didSet {
+            let clamped = min(max(glassOpacity, 0), 100)
+            if clamped != glassOpacity { glassOpacity = clamped }
+            defaults.set(glassOpacity, forKey: Key.glassOpacity)
+        }
+    }
     public var iconStyle: IconStyle { didSet { store(iconStyle.rawValue, Key.iconStyle) } }
     public var appIcon: AppIconStyle { didSet { store(appIcon.rawValue, Key.appIcon) } }
     /// Confetti when you send, approve or reach inbox zero.
@@ -368,6 +377,8 @@ public final class AppearanceSettings {
         static let icon = "appearance.menuBarIcon"
         static let emoji = "appearance.menuBarEmoji"
         static let backdrop = "appearance.backdrop"
+        static let glassEnabled = "appearance.glassEnabled"
+        static let glassOpacity = "appearance.glassOpacity"
         static let iconStyle = "appearance.iconStyle"
         static let appIcon = "appearance.appIcon"
         static let celebrations = "appearance.celebrations"
@@ -382,7 +393,7 @@ public final class AppearanceSettings {
         static let all = [
             theme, mode, density, motion, badge, counters, start, customAccent, icon, emoji, backdrop, celebrations,
             sound, officeStyle, officeEnvironment, officeTimeOfDay, officeBubbles, officeStreetLife, officeSlowTurn,
-            officeBoss, iconStyle, appIcon,
+            officeBoss, iconStyle, appIcon, glassEnabled, glassOpacity,
         ]
     }
 
@@ -400,6 +411,8 @@ public final class AppearanceSettings {
         static let icon = MenuBarIcon.penguin
         static let emoji = "🍉"
         static let backdrop = Backdrop.wash
+        static let glassEnabled = true
+        static let glassOpacity = 0
         static let iconStyle = IconStyle.colorful
         static let appIcon = AppIconStyle.classic
         static let celebrations = true
@@ -433,6 +446,9 @@ public final class AppearanceSettings {
         menuBarIcon = read(Key.icon, Default.icon)
         menuBarEmoji = Self.oneEmoji(defaults.string(forKey: Key.emoji) ?? Default.emoji)
         backdrop = read(Key.backdrop, Default.backdrop)
+        glassEnabled = defaults.object(forKey: Key.glassEnabled) as? Bool ?? Default.glassEnabled
+        let storedOpacity = defaults.object(forKey: Key.glassOpacity) as? Int ?? Default.glassOpacity
+        glassOpacity = min(max(storedOpacity, 0), 100)
         iconStyle = read(Key.iconStyle, Default.iconStyle)
         appIcon = read(Key.appIcon, Default.appIcon)
         celebrations = defaults.object(forKey: Key.celebrations) as? Bool ?? Default.celebrations
@@ -459,6 +475,7 @@ public final class AppearanceSettings {
             && menuBarBadge == Default.badge && showsPopoverCounters == Default.counters
             && startPage == Default.start && customAccent == Default.customAccent && menuBarIcon == Default.icon
             && menuBarEmoji == Default.emoji && backdrop == Default.backdrop && iconStyle == Default.iconStyle
+            && glassEnabled == Default.glassEnabled && glassOpacity == Default.glassOpacity
             && appIcon == Default.appIcon && celebrations == Default.celebrations
             && sound == Default.sound && officeStyle == Default.officeStyle
             && officeEnvironment == Default.officeEnvironment && officeTimeOfDay == Default.officeTimeOfDay
@@ -479,6 +496,8 @@ public final class AppearanceSettings {
         menuBarIcon = Default.icon
         menuBarEmoji = Default.emoji
         backdrop = Default.backdrop
+        glassEnabled = Default.glassEnabled
+        glassOpacity = Default.glassOpacity
         iconStyle = Default.iconStyle
         appIcon = Default.appIcon
         celebrations = Default.celebrations

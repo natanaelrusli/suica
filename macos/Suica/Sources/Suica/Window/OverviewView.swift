@@ -31,7 +31,6 @@ struct OverviewView: View {
                     if let error = status.configError {
                         NoticeBox(text: DisplayText.clean(error, max: 400), tint: .red)
                     }
-                    statusBar(status)
                     tiles(status)
                     widgets(status)
                     system(status)
@@ -90,109 +89,6 @@ struct OverviewView: View {
     private func openMR(_ key: String) {
         Task { await reviews.select(key) }
         show(reviews.isYours(key) ? .myMergeRequests : .reviews)
-    }
-
-    // MARK: Status bar and tiles
-
-    /// The agent's health in one line, with the quick actions at its end.
-    private func statusBar(_ status: StatusDocument) -> some View {
-        let health = AgentHealth(status: status, paused: menu.state?.paused)
-        return ViewThatFits(in: .horizontal) {
-            HStack(spacing: 12) {
-                healthSummary(health, status)
-                Spacer(minLength: 8)
-                quickActionRow
-            }
-            VStack(alignment: .leading, spacing: 8) {
-                healthSummary(health, status)
-                quickActionRow
-            }
-        }
-        .padding(.horizontal, metrics.padding)
-        .padding(.vertical, metrics.padding - 4)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(health.tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(health.tint.opacity(0.25)))
-    }
-
-    private func healthSummary(_ health: AgentHealth, _ status: StatusDocument) -> some View {
-        HStack(spacing: 10) {
-            Circle()
-                .fill(health.tint)
-                .frame(width: 9, height: 9)
-                .shadow(color: health.tint.opacity(0.6), radius: 3)
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(Copy.health(health)).font(.headline)
-                Text(healthDetail(status))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .help(status.lastPoll?.failure.map { DisplayText.clean($0, max: 300) } ?? "")
-            }
-        }
-        .fixedSize()
-        .accessibilityElement(children: .combine)
-    }
-
-    /// "Last poll 2 minutes ago · every 60 s · pid 123", leaving out what is not known.
-    private func healthDetail(_ status: StatusDocument) -> String {
-        let lastPoll = status.lastPoll.map {
-            Copy.lastPollAgo(Date(timeIntervalSince1970: TimeInterval($0.at) / 1000).formatted(.relative(presentation: .named)))
-        }
-        let parts = [
-            lastPoll ?? Copy.noPollYet, status.polling.map { Copy.pollEvery($0.activeSeconds) },
-            status.agent.pid.map(Copy.pid), status.teamsEnabled == false ? Copy.teamsOff : nil,
-        ]
-        return parts.compactMap { $0 }.joined(separator: " · ")
-    }
-
-    private var quickActionRow: some View {
-        HStack(spacing: 6) {
-            Button {
-                Task {
-                    await menu.togglePause()
-                    await window.refresh()
-                }
-            } label: {
-                Label(menu.isPaused ? Copy.resume : Copy.pause, systemImage: menu.isPaused ? "play.fill" : "pause.fill")
-            }
-            .help(menu.isPaused ? Copy.resume : Copy.pause)
-            .disabled(menu.state == nil)
-            Button {
-                Task { if await window.restartAgent() { editor.restartHandled() } }
-            } label: {
-                Label(Copy.restartAgent, systemImage: "arrow.counterclockwise")
-            }
-            .help(Copy.restartAgent)
-            .disabled(window.restarting)
-            if window.restarting { ProgressView().controlSize(.small) }
-            Button {
-                Task {
-                    await window.refresh()
-                    await menu.refresh()
-                    await reviews.refresh()
-                }
-            } label: {
-                Label(Copy.refresh, systemImage: "arrow.clockwise")
-            }
-            .help(Copy.refresh)
-            Button {
-                show(.logs)
-            } label: {
-                Label(Copy.openLogs, systemImage: "doc.text")
-            }
-            .help(Copy.openLogs)
-            Button {
-                show(.configuration)
-            } label: {
-                Label(Copy.editConfig, systemImage: "gearshape")
-            }
-            .help(Copy.editConfig)
-        }
-        .labelStyle(.iconOnly)
-        .buttonStyle(.bordered)
-        .controlSize(.regular)
     }
 
     /// What waits for you, four figures in a row (two by two in a narrow window); each opens its page.

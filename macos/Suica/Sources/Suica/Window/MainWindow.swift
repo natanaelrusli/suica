@@ -77,7 +77,7 @@ struct Card<Content: View>: View {
         }
         .padding(metrics.padding)
         .frame(maxWidth: .infinity, maxHeight: fillsHeight ? .infinity : nil, alignment: .topLeading)
-        .background(.background.secondary, in: RoundedRectangle(cornerRadius: 12))
+        .glassPanel(in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.separator.opacity(0.5)))
     }
 }
@@ -133,12 +133,12 @@ struct StatTile<Accessory: View>: View {
                 accessory
             }
             if let caption {
-                Text(caption).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
+                Text(caption).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
             }
         }
         .padding(metrics.padding - 2)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.background.secondary, in: RoundedRectangle(cornerRadius: 12))
+        .glassPanel(in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.separator.opacity(0.5)))
         .contentShape(RoundedRectangle(cornerRadius: 12))
         .accessibilityElement(children: .combine)
@@ -208,6 +208,7 @@ struct MainWindow: View {
     /// Bumped for a row each time it is picked, so only its icon bounces.
     @State private var picks: [SidebarItem: Int] = [:]
     @Environment(\.motionLevel) private var motion
+    @Environment(\.glassTintOpacity) private var glassTintOpacity
 
     private var current: SidebarItem { navigator.selection ?? .section(WindowSection(settings.startPage)) }
 
@@ -227,6 +228,10 @@ struct MainWindow: View {
                 pages.transition(.opacity)
             }
         }
+        .containerBackground(
+            glassTintOpacity == nil ? AnyShapeStyle(.background) : AnyShapeStyle(.thinMaterial),
+            for: .window
+        )
         .motion(Motion.page, value: onboarding.needsSetup)
         // Every page failed while there was no config file and keeps that error until it loads again:
         // load them all once setup is over, by Done or by a config file that turned up.
@@ -309,15 +314,46 @@ struct MainWindow: View {
                     }
                 }
             }
-            .background(alignment: .top) {
-                BackdropView(backdrop: settings.backdrop, strength: settings.backdrop == .wash ? 0.1 : 0.2)
-                    .frame(height: 220)
-                    .ignoresSafeArea()
-            }
             .motion(Motion.page, value: current)
         }
+        .background {
+            BackdropView(backdrop: settings.backdrop, strength: settings.backdrop == .wash ? 0.14 : 0.24)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .ignoresSafeArea(.container)
+        }
+        .background {
+            if let glassTintOpacity {
+                Color(nsColor: .windowBackgroundColor)
+                    .opacity(glassTintOpacity)
+                    .ignoresSafeArea(.container)
+                    .allowsHitTesting(false)
+            }
+        }
+        .background {
+            if current.section == .office && glassTintOpacity != nil {
+                titleBarGradient
+            }
+        }
+        .overlay {
+            if current.section != .office && glassTintOpacity != nil {
+                titleBarGradient
+            }
+        }
         .navigationTitle(title)
+        .toolbarBackgroundVisibility(glassTintOpacity == nil ? .visible : .hidden, for: .windowToolbar)
         .task { await window.runStatusRefreshLoop(every: .seconds(3)) }
+    }
+
+    private var titleBarGradient: some View {
+        GeometryReader { proxy in
+            VStack(spacing: 0) {
+                TitleBarGradient()
+                    .frame(height: proxy.safeAreaInsets.top + (current.section == .office ? 70 : 8))
+                Spacer(minLength: 0)
+            }
+            .ignoresSafeArea(.container, edges: .top)
+        }
+        .allowsHitTesting(false)
     }
 
     /// The row the sidebar marks: Configuration for its own pages, which have no row.
@@ -328,6 +364,25 @@ struct MainWindow: View {
     }
 
     private var sidebar: some View {
+        VStack(spacing: 0) {
+            sidebarHeader
+                .fixedSize(horizontal: false, vertical: true)
+            sidebarNavigation
+                .clipped()
+            sidebarReviewFooter
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .background {
+            if glassTintOpacity == nil {
+                Rectangle()
+                    .fill(.background)
+                    .ignoresSafeArea(.container, edges: [.top, .bottom])
+            }
+        }
+        .navigationSplitViewColumnWidth(min: 180, ideal: 210, max: 280)
+    }
+
+    private var sidebarNavigation: some View {
         List(selection: sidebarSelection) {
             ForEach(SidebarNode.groups, id: \.title) { group in
                 Section(group.title) {
@@ -354,26 +409,25 @@ struct MainWindow: View {
                 }
             }
         }
+        .scrollContentBackground(.hidden)
         .onChange(of: navigator.selection, initial: true) { _, picked in
             if let picked { picks[picked, default: 0] += 1 }
             // A Statistics page opened from elsewhere shows where it sits.
             if picked?.statisticsPage != nil { statisticsOpen = true }
         }
-        .safeAreaInset(edge: .top) {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 8) {
-                    AppIconView(size: 28)
-                    Text(Copy.appName).font(.title3.weight(.semibold)).fixedSize()
-                }
-                sidebarStatus
+    }
+
+    private var sidebarHeader: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                AppIconView(size: 28)
+                Text(Copy.appName).font(.title3.weight(.semibold)).fixedSize()
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
+            sidebarStatus
         }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            sidebarReviewFooter
-        }
-        .navigationSplitViewColumnWidth(min: 180, ideal: 210, max: 280)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
     }
 
     private var sidebarReviewFooter: some View {

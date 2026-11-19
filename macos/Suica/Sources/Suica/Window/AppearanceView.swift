@@ -6,8 +6,13 @@ import SwiftUI
 struct AppearanceView: View {
     @Bindable var settings: AppearanceSettings
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    @Environment(\.accessibilityReduceTransparency) private var systemReduceTransparency
     @Environment(\.motionLevel) private var motion
     @Environment(CelebrationCounter.self) private var celebrations: CelebrationCounter?
+
+    private var glassOpacityLabel: String {
+        (Double(settings.glassOpacity) / 100).formatted(.percent)
+    }
 
     var body: some View {
         Form {
@@ -37,6 +42,32 @@ struct AppearanceView: View {
                 Text(Copy.densityHint).font(.caption).foregroundStyle(.secondary)
             } header: {
                 heading(Copy.lookHeading, "circle.lefthalf.filled")
+            }
+
+            Section {
+                Toggle(Copy.glassToggle, isOn: $settings.glassEnabled)
+                LabeledContent(Copy.glassOpacity) {
+                    Slider(
+                        value: Binding(
+                            get: { Double(settings.glassOpacity) },
+                            set: { settings.glassOpacity = Int($0) }
+                        ),
+                        in: 0...100, step: 1
+                    ) {
+                        Text(Copy.glassOpacity)
+                    }
+                    .labelsHidden()
+                    .accessibilityValue(glassOpacityLabel)
+                    Text(glassOpacityLabel)
+                        .monospacedDigit()
+                        .accessibilityHidden(true)
+                }
+                .disabled(!settings.glassEnabled || systemReduceTransparency)
+                Text(systemReduceTransparency ? Copy.glassReduceTransparency : Copy.glassOpacityHint)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } header: {
+                heading(Copy.glassHeading, "square.on.square")
             }
 
             Section {

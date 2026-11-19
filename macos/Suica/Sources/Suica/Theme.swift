@@ -91,6 +91,7 @@ struct Metrics: Equatable {
 extension EnvironmentValues {
     @Entry var metrics: Metrics = .comfortable
     @Entry var iconStyle: IconStyle = .colorful
+    @Entry var glassTintOpacity: Double? = 0
 }
 
 /// Applies the Appearance choices to a scene's content: accent colour, light or dark, density, icon
@@ -98,6 +99,12 @@ extension EnvironmentValues {
 struct AppearanceRoot: ViewModifier {
     let settings: AppearanceSettings
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    @Environment(\.accessibilityReduceTransparency) private var systemReduceTransparency
+
+    private var glassTintOpacity: Double? {
+        guard settings.glassEnabled, !systemReduceTransparency, settings.glassOpacity < 100 else { return nil }
+        return Double(settings.glassOpacity) / 100
+    }
 
     func body(content: Content) -> some View {
         content
@@ -106,6 +113,7 @@ struct AppearanceRoot: ViewModifier {
             .environment(\.metrics, Metrics.of(settings.density))
             .environment(\.motionLevel, settings.motion.effective(systemReduceMotion: systemReduceMotion))
             .environment(\.iconStyle, settings.iconStyle)
+            .environment(\.glassTintOpacity, glassTintOpacity)
             // Both scenes carry this modifier; setting the same icon twice is harmless.
             .onChange(of: settings.appIcon, initial: true) { _, icon in NSApp.applicationIconImage = icon.dockImage }
     }
@@ -204,14 +212,55 @@ struct RefreshButton: View {
 }
 
 extension View {
-    /// Liquid Glass on macOS 26 and the regular material before it, for what floats over a page
-    /// (the Office's overlays, a banner preview). The cards that make up a page stay opaque.
-    @ViewBuilder func glass<S: Shape>(in shape: S) -> some View {
-        if #available(macOS 26, *) {
-            glassEffect(.regular, in: shape)
+    func glass<S: Shape>(in shape: S) -> some View {
+        modifier(GlassSurface(shape: shape, floating: true))
+    }
+
+    func glassPanel<S: Shape>(in shape: S) -> some View {
+        modifier(GlassSurface(shape: shape, floating: false))
+    }
+}
+
+private struct GlassSurface<S: Shape>: ViewModifier {
+    let shape: S
+    let floating: Bool
+    @Environment(\.glassTintOpacity) private var opacity
+
+    func body(content: Content) -> some View {
+        if let opacity {
+            let tinted = content.background(.background.opacity(opacity), in: shape)
+            if floating, #available(macOS 26, *) {
+                tinted.glassEffect(.regular, in: shape)
+            } else {
+                tinted.background(floating ? Material.regular : Material.thin, in: shape)
+            }
         } else {
-            background(.regularMaterial, in: shape)
+            content.background(.background.secondary, in: shape)
         }
+    }
+}
+
+/// Separates the window title and controls from the content under the toolbar.
+struct TitleBarGradient: View {
+    @Environment(\.glassTintOpacity) private var opacity
+
+    var body: some View {
+        if let opacity {
+            gradient(opacity)
+        }
+    }
+
+    private func gradient(_ opacity: Double) -> some View {
+        LinearGradient(
+            stops: [
+                .init(color: Color(nsColor: .windowBackgroundColor).opacity(0.85 + 0.15 * opacity), location: 0),
+                .init(color: Color(nsColor: .windowBackgroundColor).opacity(0.4 + 0.6 * opacity), location: 0.5),
+                .init(color: .clear, location: 1),
+            ],
+            startPoint: .top, endPoint: .bottom
+        )
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }
 

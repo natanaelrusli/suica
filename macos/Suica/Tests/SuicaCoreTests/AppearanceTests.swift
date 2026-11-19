@@ -17,6 +17,7 @@ import Testing
         #expect(settings.startPage == .overview)
         #expect(settings.menuBarIcon == .penguin && settings.menuBarEmoji == "🍉")
         #expect(settings.backdrop == .wash && settings.celebrations && settings.sound == .off)
+        #expect(settings.glassEnabled && settings.glassOpacity == 0)
         #expect(settings.officeStyle == .modern && settings.officeEnvironment == .city)
         #expect(settings.isDefault)
     }
@@ -34,6 +35,8 @@ import Testing
         first.startPage = .messages
         first.officeStyle = .brick
         first.officeEnvironment = .snow
+        first.glassEnabled = false
+        first.glassOpacity = 65
 
         let second = AppearanceSettings(defaults: defaults)
         #expect(second.theme == .watermelon)
@@ -44,6 +47,7 @@ import Testing
         #expect(!second.showsPopoverCounters)
         #expect(second.startPage == .messages)
         #expect(second.officeStyle == .brick && second.officeEnvironment == .snow)
+        #expect(!second.glassEnabled && second.glassOpacity == 65)
         #expect(!second.isDefault)
     }
 }
@@ -68,7 +72,12 @@ import Testing
         settings.showsPopoverCounters = false
         settings.startPage = .reviews
         settings.officeEnvironment = .park
+        settings.glassEnabled = false
+        settings.glassOpacity = 120
+        #expect(settings.glassOpacity == 100)
         settings.reset()
+        #expect(defaults.object(forKey: "appearance.glassEnabled") == nil)
+        #expect(defaults.object(forKey: "appearance.glassOpacity") == nil)
         #expect(settings.isDefault)
         #expect(defaults.string(forKey: "appearance.theme") == nil)
         #expect(defaults.string(forKey: "appearance.officeEnvironment") == nil)

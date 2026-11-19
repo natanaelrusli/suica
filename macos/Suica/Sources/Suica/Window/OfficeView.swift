@@ -34,7 +34,7 @@ struct OfficeView: View {
                         model: model, controller: controller, style: settings.officeStyle,
                         environment: settings.officeEnvironment, night: night, options: sceneOptions,
                         boss: bossOrder)
-                    vignette.frame(height: titleBar + 70)
+                    TitleBarGradient().frame(height: titleBar + 70)
                 }
                 .clipped()
                 if model.loaded && model.sessions.isEmpty { emptyState }
@@ -101,7 +101,6 @@ struct OfficeView: View {
             .help("\(Copy.refresh) (⌘R)")
             .keyboardShortcut("r")
         }
-        .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
         .background(WindowVisibility { windowVisible = $0 })
         // Polls only while the page is on screen: the scene and the detection stop with it.
         .task(id: windowVisible) {
@@ -194,21 +193,6 @@ struct OfficeView: View {
             .padding(.vertical, 5)
             .glass(in: Capsule())
             .opacity(model.sessions.isEmpty ? 0 : 1)
-    }
-
-    /// Fades the top of the scene into the window's background, so the title and the toolbar
-    /// buttons read over a bright sky or a busy room.
-    private var vignette: some View {
-        LinearGradient(
-            stops: [
-                .init(color: Color(nsColor: .windowBackgroundColor).opacity(0.85), location: 0),
-                .init(color: Color(nsColor: .windowBackgroundColor).opacity(0.4), location: 0.5),
-                .init(color: .clear, location: 1),
-            ],
-            startPoint: .top, endPoint: .bottom
-        )
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
     }
 
     private var emptyState: some View {
