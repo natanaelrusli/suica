@@ -72,5 +72,28 @@ public struct ReleaseNote: Identifiable, Sendable {
                 "Approve a held group once to send its combined message.",
                 "Held groups are rebuilt when a message leaves the group.",
             ]),
+        ReleaseNote(
+            version: "0.1.4", date: "29 Oct 2026", title: "A local Idea Box",
+            changes: [
+                "Capture ideas in Suica’s Idea Box.",
+            ]),
+        ReleaseNote(
+            version: "0.1.3", date: "29 Oct 2026", title: "See which lessons reach agents",
+            changes: [
+                "Suica records which lessons are delivered through hooks and the MCP server.",
+                "See lesson usage in the app or find counts by project with `suica lessons usage`.",
+            ]),
+        ReleaseNote(
+            version: "0.1.2", date: "28 Oct 2026", title: "Explore and export lessons",
+            changes: [
+                "Explore how lessons connect in the lessons graph.",
+                "Export lessons as a ZIP archive.",
+            ]),
+        ReleaseNote(
+            version: "0.1.1", date: "28 Oct 2026", title: "In-app updates",
+            changes: [
+                "Check for and install Suica releases from the Updates page.",
+                "Suica verifies the release signature and download checksum before installation.",
+            ]),
     ]
 }

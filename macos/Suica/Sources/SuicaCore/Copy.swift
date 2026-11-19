@@ -2,6 +2,32 @@ import Foundation
 
 /// Every string the app shows. English only; Teams messages are not part of the app.
 public enum Copy {
+    public static let claudeSkills = "Skills"
+    public static let searchClaudeSkills = "Search Claude skills"
+    public static let selectClaudeSkill = "Select a Claude skill"
+    public static let personalClaudeSkills = "Personal"
+    public static let disabledClaudeSkills = "Disabled"
+    public static let pluginClaudeSkills = "Plugins"
+    public static func claudeSkillPlugin(_ name: String) -> String { "Plugin · \(name)" }
+    public static let noClaudeSkills = "No Claude skills found. Import a skill folder to get started."
+    public static let noMatchingClaudeSkills = "No matching skills"
+    public static let importClaudeSkill = "Import Skill…"
+    public static let importClaudeSkillPrompt = "Import"
+    public static let importClaudeSkillHelp = "Choose a folder containing SKILL.md. Suica copies the folder into your personal Claude skills."
+    public static let editClaudeSkill = "Open in Editor"
+    public static let skillActions = "Actions"
+    public static let enableClaudeSkill = "Enable"
+    public static let disableClaudeSkill = "Disable"
+    public static let trashClaudeSkill = "Move Skill to Trash…"
+    public static let moveSkillToTrash = "Move to Trash"
+    public static func confirmTrashClaudeSkill(_ name: String) -> String { "Move the personal skill “\(name)” to the Trash?" }
+    public static let skillInvalidFolder = "Choose a skill folder with a valid name and a SKILL.md file."
+    public static let skillNameInUse = "A skill folder with that name already exists."
+    public static let skillMissing = "The skill’s SKILL.md could not be found."
+    public static let skillReadOnly = "Manage plugin skills through their Claude Code plugin."
+    public static let skillPreviewUnavailable = "The preview supports UTF-8 skill files up to 1 MB."
+    public static let skillEditorUnavailable = "Could not open SKILL.md in the default editor."
+
     public static let appName = "Suica"
     public static let running = "Polling"
     public static let paused = "Paused"
@@ -510,6 +536,9 @@ public enum Copy {
     public static let agentReviewHeading = "Agent Review"
     public static let reviewingNow = "Reviewing now"
     public static let notReviewing = "Not reviewing anything right now."
+    public static let noActiveReviews = "No active reviews"
+    public static let reviewActivityUnavailable = "Review activity unavailable"
+    public static func nextQueuedReview(_ title: String) -> String { "Next: \(title)" }
     public static let activityHeading = "What the agent is doing"
     public static let activityStarting = "Starting…"
     public static func reviewing(_ title: String) -> String { "Reviewing \(title)" }
@@ -1114,6 +1143,13 @@ public enum Copy {
     public static let systemPage = "System"
     public static let cpu = "CPU"
     public static let memory = "Memory"
+    public static let ram = "RAM"
+    public static let fanSpeed = "Fan"
+    public static let fanless = "Fanless"
+    public static let readingUnavailable = "Unavailable"
+    public static func fanRPM(_ speeds: [Int]) -> String {
+        speeds.map { $0.formatted() }.joined(separator: " / ") + " RPM"
+    }
     public static let disk = "Disk"
     public static let network = "Network"
     public static let battery = "Battery"
@@ -1215,6 +1251,14 @@ public enum Copy {
     public static let pollsOk = "Polls ok"
     public static func tokensFor(_ span: String) -> String { "Tokens, \(span)" }
     public static func lastPollAgo(_ relative: String) -> String { "Last poll \(relative)" }
+    public static let checkingAgent = "Checking agent…"
+    public static let agentStatusUnavailable = "Status unavailable"
+    public static let agentNeedsAttention = "Agent needs attention"
+    public static func activeReviewSummary(running: Int, queued: Int) -> String? {
+        let counts = [running > 0 ? "\(running) running" : nil, queued > 0 ? "\(queued) queued" : nil]
+        let summary = counts.compactMap { $0 }.joined(separator: " · ")
+        return summary.isEmpty ? nil : summary
+    }
     public static func pollEvery(_ seconds: Int) -> String { "every \(seconds) s" }
     public static func health(_ health: AgentHealth) -> String {
         switch health {
@@ -1872,7 +1916,8 @@ extension Copy {
     public static let upToDate = "Suica is up to date"
     public static let updatesHeading = "Updates"
     public static let updatesChangelog = "What’s new"
-    public static let updatesChangelogDetail = "Changes in the last five releases, included with this version of Suica."
+    public static let updatesChangelogDetail = "Release notes included with this version of Suica."
+    public static let updatesShowOlderVersions = "Show older versions"
     public static let updatesInstalled = "Installed"
     public static let updatesReleaseNotes = "View release"
     public static let updatesSubtitle = "Keep Suica ready for your next review."

@@ -32,6 +32,13 @@ public struct MemoryUsage: Equatable, Sendable {
     }
 }
 
+public struct SystemVitals: Sendable {
+    public let cpu: CPUTicks?
+    public let memory: MemoryUsage?
+    /// Nil when fan readings are unavailable and empty when the Mac reports zero fans.
+    public let fanRPM: [Int]?
+}
+
 /// The start-up volume, counting free space as Finder does ("available for important usage").
 public struct DiskUsage: Equatable, Sendable {
     public var total: UInt64
@@ -250,6 +257,11 @@ public enum SystemMath {
 /// Reads this Mac's figures from the kernel, IOKit and `ps`. Each part that fails is left out.
 public enum SystemReader {
     private static let host = mach_host_self()
+
+    /// A lightweight sample for the sidebar.
+    @concurrent public static func readVitals() async -> SystemVitals {
+        SystemVitals(cpu: cpuTicks(), memory: memory(), fanRPM: SMCFanReader.read())
+    }
 
     /// One full sample. `ps` runs off the calling actor.
     @concurrent public static func read() async -> SystemReadout {
