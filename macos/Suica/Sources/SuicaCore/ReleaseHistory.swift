@@ -13,6 +13,13 @@ public struct ReleaseNote: Identifiable, Sendable {
 
     public static let recent: [ReleaseNote] = [
         ReleaseNote(
+            version: "0.1.15", date: "19 Nov 2026", title: "Adjustable glass and a clearer sidebar",
+            changes: [
+                "Turn glass on or off and adjust its opacity in Appearance. Suica respects macOS Reduce Transparency.",
+                "The title bar gradient spans the sidebar and main pane, and sidebar rows scroll between the pinned header and footer.",
+                "Overview opens with its summary tiles. Agent health is shown in the sidebar.",
+            ]),
+        ReleaseNote(
             version: "0.1.14", date: "19 Nov 2026", title: "Claude skills and a more useful sidebar",
             changes: [
                 "Browse and preview Claude skills. Import, edit, disable, restore, or move personal skills to the Trash.",
