@@ -364,10 +364,37 @@ public struct DiffFile: Codable, Equatable, Identifiable, Sendable {
     public let newFile: Bool
     public let renamedFile: Bool
     public let deletedFile: Bool
+    /// True for generated files (protobuf output, lockfiles, build output …): the Agent Review ignores them.
+    public let generated: Bool
     /// Nil when the diff was too large to include.
     public let diff: String?
 
     public var id: String { "\(oldPath)→\(newPath)" }
+
+    public init(
+        oldPath: String, newPath: String, newFile: Bool, renamedFile: Bool, deletedFile: Bool,
+        generated: Bool = false, diff: String?
+    ) {
+        self.oldPath = oldPath
+        self.newPath = newPath
+        self.newFile = newFile
+        self.renamedFile = renamedFile
+        self.deletedFile = deletedFile
+        self.generated = generated
+        self.diff = diff
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        oldPath = try c.decode(String.self, forKey: .oldPath)
+        newPath = try c.decode(String.self, forKey: .newPath)
+        newFile = try c.decode(Bool.self, forKey: .newFile)
+        renamedFile = try c.decode(Bool.self, forKey: .renamedFile)
+        deletedFile = try c.decode(Bool.self, forKey: .deletedFile)
+        // An older CLI sends no flag.
+        generated = try c.decodeIfPresent(Bool.self, forKey: .generated) ?? false
+        diff = try c.decodeIfPresent(String.self, forKey: .diff)
+    }
 }
 
 /// `suica mr <key> --json`.

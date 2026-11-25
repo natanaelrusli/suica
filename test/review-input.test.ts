@@ -209,6 +209,7 @@ describe("assertReviewCoverage", () => {
           newFile: false,
           renamedFile: false,
           deletedFile: false,
+          generated: false,
           diff: "@@ -0,0 +1 @@\n+x",
         },
       ],
@@ -225,6 +226,7 @@ describe("assertReviewCoverage", () => {
         newFile: false,
         renamedFile: false,
         deletedFile: false,
+        generated: false,
         diff: "@@ -0,0 +1 @@\n+x",
         coverage: "text",
       },
@@ -232,6 +234,22 @@ describe("assertReviewCoverage", () => {
   } satisfies ReviewInput;
   it("accepts complete textual diff input", () =>
     expect(() => assertReviewCoverage(input)).not.toThrow());
+  it("does not require coverage of a generated file", () =>
+    expect(() =>
+      assertReviewCoverage({
+        ...input,
+        files: [
+          ...input.files,
+          {
+            ...input.files[0]!,
+            newPath: "x.pb",
+            generated: true,
+            diff: null,
+            coverage: "truncated",
+          },
+        ],
+      }),
+    ).not.toThrow());
   it("rejects truncated file coverage", () =>
     expect(() =>
       assertReviewCoverage({ ...input, detail: { ...input.detail, filesTruncated: true } }),

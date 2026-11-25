@@ -316,6 +316,7 @@ describe("fetchSinceDiff", () => {
         newFile: false,
         renamedFile: true,
         deletedFile: false,
+        generated: false,
         diff: "@@ -1 +1 @@\n-a\n+b\n",
       },
     ]);

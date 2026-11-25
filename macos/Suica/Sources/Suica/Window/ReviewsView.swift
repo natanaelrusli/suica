@@ -551,7 +551,7 @@ private struct MergeRequestDetailView: View {
                     CommentsTab(detail: detail) {
                         if yours { CommentComposer(key: detail.key, fixes: fixes, onPosted: onReload) }
                     }
-                case .agent: AgentReviewTab(key: detail.key, model: model)
+                case .agent: AgentReviewTab(key: detail.key, files: detail.files, model: model)
                 case .fix: FixTab(detail: detail, fixes: fixes)
                 }
             }
@@ -1064,6 +1064,7 @@ private struct ChangesTab: View {
                 if file.newFile { Badge(text: Copy.newFile, tint: .green) }
                 if file.deletedFile { Badge(text: Copy.deletedFile, tint: .red) }
                 if file.renamedFile { Badge(text: Copy.renamedFile, tint: .blue) }
+                if file.generated { Badge(text: Copy.ignoredFile, tint: .gray) }
                 Spacer()
             }
             .padding(.horizontal, 12)
@@ -1250,6 +1251,7 @@ private struct ActivityLine: View {
 
 private struct AgentReviewTab: View {
     let key: String
+    let files: [DiffFile]
     let model: ReviewsModel
     @State private var confirmingPost = false
 
@@ -1307,6 +1309,7 @@ private struct AgentReviewTab: View {
                 } else {
                     Text(Copy.noAgentReview).foregroundStyle(.secondary)
                 }
+                ReviewedFilesCard(files: files)
             }
             .readableWidth()
             .padding(20)
@@ -1319,6 +1322,47 @@ private struct AgentReviewTab: View {
             Button(Copy.cancel, role: .cancel) {}
         } message: {
             Text(Copy.postConfirmMessage)
+        }
+    }
+}
+
+/// Which files of the MR the Agent review reads and which it leaves out.
+private struct ReviewedFilesCard: View {
+    let files: [DiffFile]
+    @State private var reviewedShown = false
+    @State private var ignoredShown = false
+
+    var body: some View {
+        let ignored = files.filter(\.generated)
+        let reviewed = files.filter { !$0.generated }
+        VStack(alignment: .leading, spacing: 8) {
+            group(Copy.reviewedFilesHeading, reviewed, isExpanded: $reviewedShown)
+            if !ignored.isEmpty {
+                group(Copy.ignoredFilesHeading, ignored, isExpanded: $ignoredShown)
+                Text(Copy.ignoredFilesNote).font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.background.secondary, in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.separator.opacity(0.5)))
+    }
+
+    private func group(_ title: String, _ list: [DiffFile], isExpanded: Binding<Bool>) -> some View {
+        DisclosureGroup(isExpanded: isExpanded) {
+            VStack(alignment: .leading, spacing: 3) {
+                ForEach(list) { file in
+                    Text(DisplayText.clean(file.newPath, max: 300))
+                        .font(.caption.monospaced())
+                        .lineLimit(1)
+                        .truncationMode(.head)
+                        .textSelection(.enabled)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 4)
+        } label: {
+            Text("\(title) \(Copy.fileCount(list.count))").font(.callout.weight(.semibold))
         }
     }
 }
