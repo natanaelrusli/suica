@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { RereviewWaitingJson } from "./agent-rereview.ts";
 import { UNREVIEWED } from "./domain.ts";
 import type { MergeRequest, Person, Pipeline, Reviewer, Snapshot } from "./domain.ts";
+import { isGeneratedFile } from "./generated-files.ts";
 import { FetchFailure } from "./gitlab.ts";
 import type { GraphqlRunner, PostRunner, RestRunner } from "./gitlab.ts";
 import { approves } from "./approval-judge.ts";
@@ -372,6 +373,8 @@ export interface DiffFileJson {
   readonly newFile: boolean;
   readonly renamedFile: boolean;
   readonly deletedFile: boolean;
+  /** True for generated files (protobuf output, lockfiles, build output …): the Agent Review ignores them. */
+  readonly generated: boolean;
   /** Unified diff hunks; null when GitLab or this command left it out because it is too large. */
   readonly diff: string | null;
 }
@@ -695,6 +698,7 @@ export function parseDiffs(raw: unknown): { files: DiffFileJson[]; truncated: bo
       newFile: file.new_file,
       renamedFile: file.renamed_file,
       deletedFile: file.deleted_file,
+      generated: isGeneratedFile(file.new_path, file.diff),
       diff: fits && file.diff !== "" ? file.diff : null,
     };
   });
