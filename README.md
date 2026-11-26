@@ -55,6 +55,18 @@ or by hand: `scripts/install-macos-app.sh` after the three CLI steps.
 
 New to Suica? You can skip the config and agent steps: install the CLI (`scripts/install-cli.sh` or `make install-cli`) and the app, then open the window (**Set up Suica…** in the menu bar popover). With no config file the window shows **Set up Suica** in place of its sidebar and pages, and the popover shows only a button to it, since every other command needs the file; no errors are shown meanwhile. Set up Suica asks for your GitLab host and checks that `glab` is signed in to it (with the command to fix it when it is not), lets you pick the coding agent CLI (each marked installed or not) and switch Teams messages on, then writes `~/.config/suica/config.yaml` and starts the background agent; **Done** reloads every page. Closing the window part way writes nothing, and it opens where you left it. The app checks for the file when it starts, when the window opens and when the popover opens, so a config file written by hand also ends setup. Design: [first-run setup spec](docs/superpowers/specs/2026-10-22-onboarding-design.md). The app bakes in the absolute path of the `suica` command it finds (set `SUICA_CLI` for another one), so run `make install-app` again if the CLI moves. Add Suica under System Settings → General → Login Items to start it at login (see Menu bar app).
 
+### Remote CLI (run suica on a VPS from another machine)
+
+`scripts/suica-remote` runs the `suica` command on another machine over SSH with a key, so `suica-remote status --json` behaves like `suica status --json` on that machine. It needs only `bash` and `ssh` where you run it; the VPS needs the CLI installed (Option 1) and your public key in `~/.ssh/authorized_keys`.
+
+```bash
+make install-remote                  # installs ~/.local/bin/suica-remote and a config template
+$EDITOR ~/.config/suica-remote/env   # SUICA_REMOTE_HOST=user@host, optionally SUICA_REMOTE_KEY, SUICA_REMOTE_PORT, SUICA_REMOTE_BIN
+suica-remote --version
+```
+
+The SSH call uses `BatchMode=yes`, so a rejected key fails instead of prompting. Arguments are quoted for the remote shell, and a terminal is requested only when both stdin and stdout are terminals, so `--json` output pipes cleanly. A Linux VPS cannot run `suica agent install` (it is a macOS LaunchAgent) or show notifications; the commands that only read GitLab work. `make uninstall-remote` removes it.
+
 ### Update and remove
 
 ```bash

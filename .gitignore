@@ -2,3 +2,4 @@ node_modules/
 coverage/
 *.log
 macos/Suica/.build/
+glab_access_token.txt
