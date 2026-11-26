@@ -4,6 +4,7 @@
 PREFIX          ?= $(or $(SUICA_PREFIX),$(HOME)/.local)
 GITLAB_HOSTNAME ?= repo.madhani.one
 CONFIG          ?= $(or $(SUICA_CONFIG),$(HOME)/.config/suica/config.yaml)
+REMOTE_CONFIG   ?= $(or $(SUICA_REMOTE_CONFIG),$(HOME)/.config/suica-remote/env)
 LOGS            := $(HOME)/Library/Logs/suica
 BIN             := $(PREFIX)/bin/suica
 SWIFT_PACKAGE   := macos/Suica
@@ -49,6 +50,18 @@ agent-uninstall: ## Stop the background agent and remove its LaunchAgent
 
 install-app: ## Build and install Suica.app (needs the CLI)
 	scripts/install-macos-app.sh
+
+install-remote: ## Install suica-remote, which runs suica on a VPS over SSH (for a machine that only connects)
+	mkdir -p '$(PREFIX)/bin' '$(dir $(REMOTE_CONFIG))'
+	install -m 755 scripts/suica-remote '$(PREFIX)/bin/suica-remote'
+	@if [ ! -e '$(REMOTE_CONFIG)' ]; then \
+		printf 'SUICA_REMOTE_HOST=\n# SUICA_REMOTE_KEY=$$HOME/.ssh/id_ed25519\n' > '$(REMOTE_CONFIG)'; \
+		echo 'wrote $(REMOTE_CONFIG): set SUICA_REMOTE_HOST=user@host'; \
+	fi
+	@echo 'installed $(PREFIX)/bin/suica-remote'
+
+uninstall-remote: ## Remove suica-remote (its config stays)
+	rm -f '$(PREFIX)/bin/suica-remote'
 
 update: install-cli ## Reinstall the CLI from this checkout (restarts the agent when installed)
 

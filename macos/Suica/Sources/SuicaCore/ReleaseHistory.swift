@@ -13,6 +13,11 @@ public struct ReleaseNote: Identifiable, Sendable {
 
     public static let recent: [ReleaseNote] = [
         ReleaseNote(
+            version: "0.1.16", date: "26 Nov 2026", title: "Run suica on a VPS from another machine",
+            changes: [
+                "New `suica-remote` command runs the suica CLI on a VPS over SSH with a key. Install it with `make install-remote`.",
+            ]),
+        ReleaseNote(
             version: "0.1.15", date: "19 Nov 2026", title: "Adjustable glass and a clearer sidebar",
             changes: [
                 "Turn glass on or off and adjust its opacity in Appearance. Suica respects macOS Reduce Transparency.",

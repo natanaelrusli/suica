@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Run the suica CLI on the VPS from this machine, over SSH with a key.
+#   suica-remote status --json
+#   suica-remote once
+# Install with `make install-remote` on the machine you work on (not the one that runs the agent).
+# Config (env vars, or the file ~/.config/suica-remote/env with KEY=value lines):
+#   SUICA_REMOTE_HOST  required, e.g. ubuntu@vps.example.com
+#   SUICA_REMOTE_KEY   optional, path to the private key (default: ssh's own choice)
+#   SUICA_REMOTE_PORT  optional, ssh port
+#   SUICA_REMOTE_BIN   command on the VPS (default: ~/.local/bin/suica)
+set -euo pipefail
+
+CONF="${SUICA_REMOTE_CONFIG:-$HOME/.config/suica-remote/env}"
+if [ -r "$CONF" ]; then
+  # shellcheck disable=SC1090
+  set -a; . "$CONF"; set +a
+fi
+
+if [ -z "${SUICA_REMOTE_HOST:-}" ]; then
+  echo "suica-remote: set SUICA_REMOTE_HOST (user@host) in the environment or $CONF" >&2
+  exit 2
+fi
+
+if [ "${1:-}" = "--remote-help" ]; then
+  sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
+  exit 0
+fi
+
+opts=(-o BatchMode=yes -o ServerAliveInterval=30)
+[ -n "${SUICA_REMOTE_KEY:-}" ] && opts+=(-i "$SUICA_REMOTE_KEY" -o IdentitiesOnly=yes)
+[ -n "${SUICA_REMOTE_PORT:-}" ] && opts+=(-p "$SUICA_REMOTE_PORT")
+# Allocate a terminal only when we have one, so --json output pipes cleanly.
+[ -t 0 ] && [ -t 1 ] && opts+=(-t)
+
+bin="${SUICA_REMOTE_BIN:-~/.local/bin/suica}"
+# %q quotes every argument for the remote shell; ~ is left unquoted so it expands there.
+remote="$bin"
+for a in "$@"; do remote+=" $(printf '%q' "$a")"; done
+
+exec ${SUICA_REMOTE_SSH:-ssh} "${opts[@]}" "$SUICA_REMOTE_HOST" "$remote"
