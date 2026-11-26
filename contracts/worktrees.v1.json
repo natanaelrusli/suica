@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "status": "ok",
+  "commonDir": "/Users/example/project/.git",
+  "defaultTarget": "origin/main",
+  "targetRef": "refs/remotes/origin/main",
+  "entries": [
+    {
+      "path": "/Users/example/project/.worktrees/finished",
+      "head": "0123456789abcdef0123456789abcdef01234567",
+      "branch": "feature/finished",
+      "target": "origin/main",
+      "targetCommit": "abcdef0123456789abcdef0123456789abcdef01",
+      "status": "merged",
+      "reason": null,
+      "ignoredOutput": ["node_modules"]
+    },
+    {
+      "path": "/Users/example/project/.worktrees/deleted",
+      "head": "1111111111111111111111111111111111111111",
+      "branch": "feature/deleted",
+      "target": "origin/main",
+      "targetCommit": "abcdef0123456789abcdef0123456789abcdef01",
+      "status": "prunable",
+      "reason": "Folder is missing; prune to drop the stale Git entry.",
+      "ignoredOutput": []
+    }
+  ],
+  "error": null
+}

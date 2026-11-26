@@ -45,6 +45,23 @@ public final class WindowModel {
         self.menu = menu
     }
 
+    public func listDevelopmentPorts() async throws(AgentError) -> PortScanDocument { try await client.listPorts() }
+    public func stopDevelopmentPort(_ listener: PortListenerDocument, force: Bool = false) async throws(AgentError) -> PortStopDocument {
+        try await client.stopPort(listener, force: force)
+    }
+    public func pruneDevelopmentWorktrees(repo: String) async throws(AgentError) -> WorktreePruneDocument {
+        try await client.pruneWorktrees(repo: repo)
+    }
+    public func listDevelopmentWorktrees(repo: String, target: String?) async throws(AgentError) -> WorktreeScanDocument {
+        try await client.listWorktrees(repo: repo, target: target)
+    }
+    public func fetchDevelopmentWorktreeTarget(repo: String, target: String) async throws(AgentError) -> WorktreeFetchDocument {
+        try await client.fetchWorktreeTarget(repo: repo, target: target)
+    }
+    public func removeDevelopmentWorktree(repo: String, entry: WorktreeEntryDocument, refreshedAt: String?) async throws(AgentError) -> WorktreeRemovalDocument {
+        try await client.removeWorktree(repo: repo, entry: entry, refreshedAt: refreshedAt)
+    }
+
     /// The Owner closed the banner; the next action sets a new one.
     public func dismissBanner() { banner = nil }
 

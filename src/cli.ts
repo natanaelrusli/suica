@@ -91,6 +91,14 @@ import { buildBrainstormPrompt } from "./ideas/brainstorm.ts";
 import { geminiResumeId, sendToSession } from "./office/send.ts";
 import { adaptersFor, collectOffice } from "./office/collect.ts";
 import { realProbe } from "./office/probe.ts";
+import {
+  fetchWorktreeTarget,
+  inspectWorktrees,
+  pruneWorktrees,
+  removeWorktree,
+  scanPorts,
+  stopPortProcess,
+} from "./development-cleanup.ts";
 import { buildAgentUsage } from "./agent-usage/document.ts";
 import { loadRate } from "./agent-usage/rate.ts";
 import { scanAgentUsage } from "./agent-usage/scan.ts";
@@ -100,7 +108,7 @@ import { applyUpdate, checkForUpdate } from "./update.ts";
 import { VERSION } from "./version.ts";
 
 const USAGE =
-  "usage: suica <version|once|status|state|stats|usage|usage agents --json|office --json|office chat <agent> <sessionId> --json|office send <agent> <sessionId> --json (message on stdin)|ideas list|show|create|update|archive|restore|note|link-plan|link-session|prompt --json|pause|resume|pending [--all]|send <id> [--json]|skip <id> [--json]|retry <id> [--json]|clear <id|yours|others|all> [--json]|selftest|message <key> --json (request on stdin)|reviews --json|mr <key> --json|mr approve <key> <sha> --json|mr comment <key> --json (body on stdin)|mr close <key> --json|mr merge <key> <sha> [--squash] [--remove-source-branch] [--when-pipeline-succeeds] --json (message on stdin)|review options [--cli <id>] --json|review queue <key> [--skill <name>] [--model <name>] [--auto] --json|review post <id> [--inline|--comment] --json|review discard <id> --json|review cancel <id> --json|fix list --json|fix queue <key> [--pipeline] --json|fix watch <key> --json|fix unwatch <key> --json|fix confirm <id> --json (edits on stdin)|fix retry <id> --json (note on stdin)|fix discard <id> --json|fix cancel <id> --json|fix replies <id> --json|config show --json|config set --json|templates show --json|templates set --json|gitlab check <host> --json|lessons mcp|lessons install [--yes] [--json]|lessons uninstall [--json]|lessons status --json|lessons export [--zip <file>] [--json]|lessons list --json|lessons usage --json|lessons show <id> --json|lessons archive <id> --json|lessons merge <keep> <gone> --json|update check --json|update apply --json|agent install [--json]|agent uninstall|agent restart --json|cleanup --json>\n";
+  "usage: suica <version|once|status|state|stats|usage|usage agents --json|office --json|office chat <agent> <sessionId> --json|office send <agent> <sessionId> --json (message on stdin)|ideas list|show|create|update|archive|restore|note|link-plan|link-session|prompt --json|pause|resume|pending [--all]|send <id> [--json]|skip <id> [--json]|retry <id> [--json]|clear <id|yours|others|all> [--json]|selftest|message <key> --json (request on stdin)|reviews --json|mr <key> --json|mr approve <key> <sha> --json|mr comment <key> --json (body on stdin)|mr close <key> --json|mr merge <key> <sha> [--squash] [--remove-source-branch] [--when-pipeline-succeeds] --json (message on stdin)|review options [--cli <id>] --json|review queue <key> [--skill <name>] [--model <name>] [--auto] --json|review post <id> [--inline|--comment] --json|review discard <id> --json|review cancel <id> --json|fix list --json|fix queue <key> [--pipeline] --json|fix watch <key> --json|fix unwatch <key> --json|fix confirm <id> --json (edits on stdin)|fix retry <id> --json (note on stdin)|fix discard <id> --json|fix cancel <id> --json|fix replies <id> --json|config show --json|config set --json|templates show --json|templates set --json|gitlab check <host> --json|lessons mcp|lessons install [--yes] [--json]|lessons uninstall [--json]|lessons status --json|lessons export [--zip <file>] [--json]|lessons list --json|lessons usage --json|lessons show <id> --json|lessons archive <id> --json|lessons merge <keep> <gone> --json|update check --json|update apply --json|agent install [--json]|agent uninstall|agent restart --json|cleanup --json|ports list --json|ports stop <pid> <start-time> <ports-csv> [--force] --json|worktrees list <repo> [target] --json|worktrees fetch <repo> <target> --json|worktrees remove <repo> <path> <target> <target-commit> <branch> <head> <refreshed-at> --json|worktrees prune <repo> --json>\n";
 const TEAMS_DISABLED = "teams is disabled: set teams.enabled to true in the config\n";
 const SHOWN_WITH_ALL = 50;
 
@@ -1499,6 +1507,68 @@ async function main(argv: readonly string[]): Promise<number> {
     if (argv[1] === "check" || argv[1] === "apply") return updateCommand(argv[1] === "apply");
   }
   if (command === "cleanup" && argv.length === 2 && argv[1] === "--json") return cleanupCommand();
+  if (command === "ports" && argv[1] === "list" && argv.length === 3 && argv[2] === "--json") {
+    const result = scanPorts();
+    process.stdout.write(`${JSON.stringify(result)}\n`);
+    return result.status === "failed" ? 1 : 0;
+  }
+  if (
+    command === "ports" &&
+    argv[1] === "stop" &&
+    (argv.length === 6 || (argv.length === 7 && argv[5] === "--force")) &&
+    argv.at(-1) === "--json"
+  ) {
+    const pid = Number(argv[2]);
+    const startedAt = argv[3] ?? "";
+    const ports = (argv[4] ?? "").split(",").filter(Boolean);
+    const result = await stopPortProcess({ pid, startedAt, ports, force: argv.length === 7 });
+    process.stdout.write(`${JSON.stringify(result)}\n`);
+    return result.status === "stopped" ? 0 : 1;
+  }
+  if (
+    command === "worktrees" &&
+    argv[1] === "list" &&
+    argv.includes("--json") &&
+    argv[2] !== undefined
+  ) {
+    const params = argv.slice(2).filter((arg) => arg !== "--json");
+    const result = inspectWorktrees(params[0] ?? "", params[1]);
+    process.stdout.write(`${JSON.stringify(result)}\n`);
+    return result.status === "ok" ? 0 : 1;
+  }
+  if (
+    command === "worktrees" &&
+    argv[1] === "remove" &&
+    argv.length === 10 &&
+    argv[9] === "--json"
+  ) {
+    const [repo, path, target, targetCommit, previewBranch, previewHead, refreshedAt] = argv.slice(
+      2,
+      9,
+    );
+    if (!repo || !path || !target || !targetCommit || !previewBranch || !previewHead) return 2;
+    const result = removeWorktree({
+      repo,
+      path,
+      target,
+      targetCommit,
+      previewBranch,
+      previewHead,
+      ...(refreshedAt === undefined ? {} : { refreshedAt }),
+    });
+    process.stdout.write(`${JSON.stringify(result)}\n`);
+    return result.status === "removed" ? 0 : 1;
+  }
+  if (command === "worktrees" && argv[1] === "prune" && argv.length === 4 && argv[3] === "--json") {
+    const result = pruneWorktrees(argv[2] ?? "");
+    process.stdout.write(`${JSON.stringify(result)}\n`);
+    return result.status === "pruned" ? 0 : 1;
+  }
+  if (command === "worktrees" && argv[1] === "fetch" && argv.length === 5 && argv[4] === "--json") {
+    const result = fetchWorktreeTarget(argv[2] ?? "", argv[3] ?? "");
+    process.stdout.write(`${JSON.stringify(result)}\n`);
+    return result.status === "fetched" ? 0 : 1;
+  }
   if (command === "agent") {
     if (argv[1] === "restart" && argv.includes("--json")) return restartAgent();
     if (argv[1] === "install") return installAgentCommand(argv.includes("--json"));

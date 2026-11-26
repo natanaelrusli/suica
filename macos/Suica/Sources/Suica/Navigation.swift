@@ -22,6 +22,8 @@ enum WindowSection: String, CaseIterable, Identifiable {
     /// The Markdown files under the Plan folders, read in the app; ⇧⌘D, under Insights after Plans.
     case documents
     case claudeSkills
+    /// Development listeners and linked Git checkouts, available from Work.
+    case developmentCleanup
 
     var id: String { rawValue }
 
@@ -44,6 +46,7 @@ enum WindowSection: String, CaseIterable, Identifiable {
         case .updates: Copy.updatesHeading
         case .documents: Copy.documents
         case .claudeSkills: Copy.claudeSkills
+        case .developmentCleanup: "Ports & Worktrees"
         }
     }
 
@@ -67,6 +70,7 @@ enum WindowSection: String, CaseIterable, Identifiable {
         case .updates: "arrow.down.circle"
         case .documents: "doc.richtext"
         case .claudeSkills: "puzzlepiece.extension"
+        case .developmentCleanup: "point.3.connected.trianglepath.dotted"
         }
     }
 
@@ -90,6 +94,7 @@ enum WindowSection: String, CaseIterable, Identifiable {
         case .updates: .green
         case .documents: .yellow
         case .claudeSkills: .purple
+        case .developmentCleanup: .orange
         }
     }
 
@@ -102,6 +107,7 @@ enum WindowSection: String, CaseIterable, Identifiable {
         if self == .updates { return KeyboardShortcut("u", modifiers: [.command, .shift]) }
         if self == .documents { return KeyboardShortcut("d", modifiers: [.command, .shift]) }
         if self == .claudeSkills { return KeyboardShortcut("k", modifiers: [.command, .shift]) }
+        if self == .developmentCleanup { return KeyboardShortcut("w", modifiers: [.command, .shift]) }
         let index = Self.allCases.firstIndex(of: self) ?? 0
         return KeyboardShortcut(KeyEquivalent(Character(String((index + 1) % 10))))
     }
@@ -261,7 +267,7 @@ struct SidebarNode: Identifiable {
             Copy.workGroup,
             [
                 SidebarNode(.overview), SidebarNode(.reviews), SidebarNode(.myMergeRequests), SidebarNode(.messages),
-                SidebarNode(.office), SidebarNode(.ideas),
+                SidebarNode(.office), SidebarNode(.ideas), SidebarNode(.developmentCleanup),
             ]
         ),
         (

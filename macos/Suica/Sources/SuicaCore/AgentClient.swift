@@ -446,6 +446,46 @@ extension CLIAgentClient: DashboardClient {
         // Compacting waits for the agent's writes, so it gets the restart's room.
         try await document(CleanupResult.self, ["cleanup", "--json"], timeout: Self.restartTimeout)
     }
+
+    public func listPorts() async throws(AgentError) -> PortScanDocument {
+        try await document(PortScanDocument.self, ["ports", "list", "--json"])
+    }
+
+    public func stopPort(_ listener: PortListenerDocument, force: Bool) async throws(AgentError) -> PortStopDocument {
+        let args = ["ports", "stop", String(listener.pid), listener.startedAt ?? "", listener.ports.joined(separator: ",")] + (force ? ["--force"] : []) + ["--json"]
+        let result = try await runner.run(invocation(args, timeout: Self.restartTimeout))
+        guard let line = lastLine(of: result.stdout) else { throw AgentError.failed(exitCode: result.exitCode) }
+        return try decodeDocument(PortStopDocument.self, from: line)
+    }
+
+    public func listWorktrees(repo: String, target: String?) async throws(AgentError) -> WorktreeScanDocument {
+        var args = ["worktrees", "list", repo]
+        if let target { args.append(target) }
+        args.append("--json")
+        let result = try await runner.run(invocation(args, timeout: Self.restartTimeout))
+        guard let line = lastLine(of: result.stdout) else { throw AgentError.failed(exitCode: result.exitCode) }
+        return try decodeDocument(WorktreeScanDocument.self, from: line)
+    }
+
+    public func pruneWorktrees(repo: String) async throws(AgentError) -> WorktreePruneDocument {
+        let result = try await runner.run(invocation(["worktrees", "prune", repo, "--json"], timeout: Self.restartTimeout))
+        guard let line = lastLine(of: result.stdout) else { throw AgentError.failed(exitCode: result.exitCode) }
+        return try decodeDocument(WorktreePruneDocument.self, from: line)
+    }
+
+    public func fetchWorktreeTarget(repo: String, target: String) async throws(AgentError) -> WorktreeFetchDocument {
+        let result = try await runner.run(invocation(["worktrees", "fetch", repo, target, "--json"], timeout: Self.restartTimeout))
+        guard let line = lastLine(of: result.stdout) else { throw AgentError.failed(exitCode: result.exitCode) }
+        return try decodeDocument(WorktreeFetchDocument.self, from: line)
+    }
+
+    public func removeWorktree(repo: String, entry: WorktreeEntryDocument, refreshedAt: String?) async throws(AgentError) -> WorktreeRemovalDocument {
+        guard let targetCommit = entry.targetCommit else { throw AgentError.badOutput }
+        let args = ["worktrees", "remove", repo, entry.path, entry.target, targetCommit, entry.branch ?? "", entry.head, refreshedAt ?? "", "--json"]
+        let result = try await runner.run(invocation(args, timeout: Self.restartTimeout))
+        guard let line = lastLine(of: result.stdout) else { throw AgentError.failed(exitCode: result.exitCode) }
+        return try decodeDocument(WorktreeRemovalDocument.self, from: line)
+    }
 }
 
 // MARK: - Setup client

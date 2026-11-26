@@ -202,9 +202,60 @@ enum SuicaEntry {
     static func main() {
         if CommandLine.arguments.contains("--review-ui-fixture") {
             ReviewFixtureApp.main()
+        } else if CommandLine.arguments.contains("--development-cleanup-ui-fixture") {
+            DevelopmentCleanupFixtureApp.main()
         } else {
             SuicaApp.main()
         }
+    }
+}
+
+/// Read-only UI fixture that copies the installed repository preference into an isolated defaults suite.
+private struct DevelopmentCleanupFixtureApp: App {
+    @State private var window: WindowModel
+    private let fixtureDefaults: UserDefaults
+
+    init() {
+        let client = UnconfiguredClient()
+        let menu = MenuModel(client: client)
+        _window = State(initialValue: WindowModel(client: client, menu: menu))
+        let defaults = UserDefaults(suiteName: "com.madhani.suica.cleanup-review-fixture")!
+        if let saved = UserDefaults.standard.string(forKey: "developmentCleanup.repositories") {
+            defaults.set(saved, forKey: "developmentCleanup.repositories")
+        }
+        fixtureDefaults = defaults
+    }
+
+    var body: some Scene {
+        Window("Repository List Fixture", id: "development-cleanup-fixture") {
+            DevelopmentCleanupView(window: window)
+                .defaultAppStorage(fixtureDefaults)
+                .frame(minWidth: 760, minHeight: 600)
+                .onAppear {
+                    NSApp.setActivationPolicy(.regular)
+                    NSApp.activate()
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 10) {
+                        guard let window = NSApp.windows.first(where: { $0.title == "Repository List Fixture" }) ?? NSApp.keyWindow else { return }
+                        let capture: (String) -> Void = { name in
+                            guard let content = window.contentView else { return }
+                            let bounds = content.bounds
+                            guard let bitmap = content.bitmapImageRepForCachingDisplay(in: bounds) else { return }
+                            content.cacheDisplay(in: bounds, to: bitmap)
+                            if let image = bitmap.representation(using: .png, properties: [:]) {
+                                try? image.write(to: URL(fileURLWithPath: "/tmp/suica-development-cleanup-\(name).png"))
+                            }
+                        }
+                        capture("wide")
+                        var frame = window.frame
+                        frame.size = NSSize(width: 820, height: 900)
+                        window.setFrame(frame, display: true)
+                        window.contentView?.layoutSubtreeIfNeeded()
+                        window.displayIfNeeded()
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { capture("narrow") }
+                    }
+                }
+        }
+        .defaultSize(width: 1600, height: 1000)
     }
 }
 

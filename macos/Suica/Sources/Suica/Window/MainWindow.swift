@@ -617,6 +617,7 @@ struct MainWindow: View {
         case .plans: PlansView(model: plans, documents: documents, navigator: navigator)
         case .documents: DocumentsView(model: documents)
         case .claudeSkills: ClaudeSkillsView()
+        case .developmentCleanup: DevelopmentCleanupView(window: window)
         case .ideas: IdeasView(model: ideas, office: office, plans: plans, navigator: navigator)
         case .updates:
             if let updates { UpdatesView(model: updates) } else { ContentUnavailableView(Copy.updatesHeading, systemImage: WindowSection.updates.symbol) }

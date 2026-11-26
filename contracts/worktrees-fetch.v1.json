@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "status": "fetched",
+  "target": "origin/main",
+  "targetCommit": "abcdef0123456789abcdef0123456789abcdef01",
+  "refreshedAt": "2026-11-23T10:00:00.000Z",
+  "error": null
+}

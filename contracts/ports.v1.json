@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "status": "ok",
+  "error": null,
+  "listeners": [
+    {
+      "pid": 1234,
+      "owner": "501",
+      "program": "node",
+      "protected": false,
+      "cwd": "/Users/example/project",
+      "startedAt": "Mon Nov 23 10:00:00 2026",
+      "command": "node /Users/example/project/node_modules/.bin/vite",
+      "endpoints": ["*:3000", "[::]:5173"],
+      "ports": ["3000", "5173"]
+    }
+  ]
+}

@@ -468,6 +468,52 @@ public protocol DashboardClient: Sendable {
     func restartAgent() async throws(AgentError) -> ActionResult
     /// Deletes caches and leftovers and compacts the database (`suica cleanup --json`).
     func cleanUp() async throws(AgentError) -> CleanupResult
+    func listPorts() async throws(AgentError) -> PortScanDocument
+    func stopPort(_ listener: PortListenerDocument, force: Bool) async throws(AgentError) -> PortStopDocument
+    func pruneWorktrees(repo: String) async throws(AgentError) -> WorktreePruneDocument
+    func listWorktrees(repo: String, target: String?) async throws(AgentError) -> WorktreeScanDocument
+    func fetchWorktreeTarget(repo: String, target: String) async throws(AgentError) -> WorktreeFetchDocument
+    func removeWorktree(repo: String, entry: WorktreeEntryDocument, refreshedAt: String?) async throws(AgentError) -> WorktreeRemovalDocument
+}
+
+public extension DashboardClient {
+    func listPorts() async throws(AgentError) -> PortScanDocument { throw AgentError.launchFailed }
+    func stopPort(_ listener: PortListenerDocument, force: Bool) async throws(AgentError) -> PortStopDocument { throw AgentError.launchFailed }
+    func pruneWorktrees(repo: String) async throws(AgentError) -> WorktreePruneDocument { throw AgentError.launchFailed }
+    func listWorktrees(repo: String, target: String?) async throws(AgentError) -> WorktreeScanDocument { throw AgentError.launchFailed }
+    func fetchWorktreeTarget(repo: String, target: String) async throws(AgentError) -> WorktreeFetchDocument { throw AgentError.launchFailed }
+    func removeWorktree(repo: String, entry: WorktreeEntryDocument, refreshedAt: String?) async throws(AgentError) -> WorktreeRemovalDocument { throw AgentError.launchFailed }
+}
+
+public struct PortListenerDocument: Codable, Equatable, Identifiable, Sendable {
+    public var id: String { "\(pid):\(startedAt ?? "unknown")" }
+    public let pid: Int; public let owner: String; public let program: String; public let protected: Bool; public let cwd: String?
+    public let startedAt: String?; public let command: String?; public let endpoints: [String]; public let ports: [String]
+}
+public struct PortScanDocument: Codable, Equatable, Sendable {
+    public let version: Int; public let status: String; public let error: String?; public let listeners: [PortListenerDocument]
+}
+public struct PortStopDocument: Codable, Equatable, Sendable { public let version: Int; public let status: String; public let message: String }
+public struct WorktreeEntryDocument: Codable, Equatable, Identifiable, Sendable {
+    public var id: String { "\(path):\(head)" }
+    public let path: String; public let head: String; public let branch: String?; public let target: String
+    public let targetCommit: String?; public let status: String; public let reason: String?; public let ignoredOutput: [String]
+}
+public struct WorktreeScanDocument: Codable, Equatable, Sendable {
+    public let version: Int; public let status: String; public let commonDir: String?; public let defaultTarget: String?
+    /// The ref the target resolved to: `refs/heads/…` (local) or `refs/remotes/…` (needs a fetch before removal).
+    public let targetRef: String?
+    public let entries: [WorktreeEntryDocument]; public let error: String?
+}
+public struct WorktreeRemovalDocument: Codable, Equatable, Sendable {
+    public let version: Int; public let status: String; public let path: String; public let branch: String?; public let reason: String?
+}
+public struct WorktreePruneDocument: Codable, Equatable, Sendable {
+    public let version: Int; public let status: String; public let pruned: [String]; public let error: String?
+}
+public struct WorktreeFetchDocument: Codable, Equatable, Sendable {
+    public let version: Int; public let status: String; public let target: String; public let targetCommit: String?
+    public let refreshedAt: String; public let error: String?
 }
 
 /// What `suica cleanup --json` prints; see contracts/cleanup.v1.json.
