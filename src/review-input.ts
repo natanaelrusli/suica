@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isGeneratedFile } from "./generated-files.ts";
 import { parseMrKey } from "./reviews.ts";
 import type { MrDetailJson } from "./reviews.ts";
 import type { RestRunner } from "./gitlab.ts";
@@ -86,6 +87,7 @@ export async function loadReviewInput(
     newFile: file.new_file ?? false,
     renamedFile: file.renamed_file ?? file.old_path !== file.new_path,
     deletedFile: file.deleted_file ?? false,
+    generated: isGeneratedFile(file.new_path, file.diff),
     diff: file.diff ?? null,
     coverage:
       file.too_large || file.collapsed
@@ -105,6 +107,7 @@ export async function loadReviewInput(
         newFile: file.newFile,
         renamedFile: file.renamedFile,
         deletedFile: file.deletedFile,
+        generated: file.generated,
         diff: file.diff,
       })),
       filesTruncated:
@@ -127,6 +130,8 @@ export function assertReviewCoverage(input: ReviewInput): void {
     throw new RunFailure("diff version coverage is incomplete");
   let total = 0;
   for (const file of files) {
+    // Generated files are not reviewed: a huge or binary one must not fail the coverage check.
+    if (file.generated) continue;
     if (file.coverage === "unsupported-empty-or-binary")
       throw new RunFailure(
         `empty diff unsupported for ${file.newPath}; GitLab's version diff response cannot distinguish binary-only changes from missing textual diff`,

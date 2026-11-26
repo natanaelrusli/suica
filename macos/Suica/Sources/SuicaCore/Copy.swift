@@ -761,6 +761,11 @@ public enum Copy {
     public static let unresolved = "Unresolved"
     public static let draft = "Draft"
     public static let openInGitLab = "Open in GitLab"
+    public static let ignoredFile = "Ignored"
+    public static let reviewedFilesHeading = "Reviewed files"
+    public static let ignoredFilesHeading = "Ignored files"
+    public static let ignoredFilesNote = "Generated files (protobuf output, lockfiles, build output, snapshots, mocks, golden contracts) are left out of the Agent review."
+    public static func fileCount(_ n: Int) -> String { "(\(n))" }
     public static let diffTooLarge = "This diff is too large to show here. Open it in GitLab."
     public static let filesTruncated = "Only the first 100 files are shown. Open the MR in GitLab for the rest."
     public static let discussionsTruncated = "Only the first 100 discussions are shown."

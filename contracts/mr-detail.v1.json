@@ -98,6 +98,7 @@
       "newFile": false,
       "renamedFile": false,
       "deletedFile": false,
+      "generated": false,
       "diff": "@@ -1,2 +1,4 @@\n a\n-b\n+c\n+d\n+e\n"
     },
     {
@@ -106,6 +107,7 @@
       "newFile": false,
       "renamedFile": false,
       "deletedFile": false,
+      "generated": false,
       "diff": null
     }
   ],

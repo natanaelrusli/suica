@@ -13,9 +13,16 @@ public struct ReleaseNote: Identifiable, Sendable {
 
     public static let recent: [ReleaseNote] = [
         ReleaseNote(
-            version: "0.1.16", date: "26 Nov 2026", title: "Run suica on a VPS from another machine",
+            version: "0.1.17", date: "26 Nov 2026", title: "Run suica on a VPS from another machine",
             changes: [
                 "New `suica-remote` command runs the suica CLI on a VPS over SSH with a key. Install it with `make install-remote`.",
+            ]),
+        ReleaseNote(
+            version: "0.1.16", date: "25 Nov 2026", title: "Reviews skip generated files",
+            changes: [
+                "The Agent review ignores generated files: protobuf output, lockfiles, build output, snapshots, mocks and golden contracts.",
+                "Ignored files no longer count toward the size cap, so large MRs made mostly of generated files get reviewed.",
+                "The Agent review tab lists which files were reviewed and which were ignored; ignored files carry a badge in Changes.",
             ]),
         ReleaseNote(
             version: "0.1.15", date: "19 Nov 2026", title: "Adjustable glass and a clearer sidebar",
