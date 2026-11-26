@@ -3,3 +3,4 @@ package-lock.json
 *.plist.template
 coverage
 .claude/worktrees
+.serena
